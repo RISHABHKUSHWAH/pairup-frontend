@@ -414,7 +414,7 @@ export default function ContractDetailPage() {
             {/* Chat button */}
             <div style={{ marginLeft: 'auto' }}>
               <Link
-                to={`/chat?with=${otherPersonId}&name=${encodeURIComponent(otherPersonName)}`}
+                to={`/chat?with=${otherPersonId}&name=${encodeURIComponent(otherPersonName)}&contract=${contract.id}`}
                 className="btn btn-ghost"
                 style={{ fontSize: '13px' }}
               >

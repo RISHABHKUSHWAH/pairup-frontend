@@ -5,7 +5,7 @@ import Footer from '../../components/Footer';
 import Modal from '../../components/Modal';
 import { api, initials } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import { CalendarIcon, UserIcon, MessageIcon, AlertTriangleIcon, CodeIcon, DocumentIcon, PlusIcon, ArrowLeftIcon } from '../../components/Icons';
+import { CalendarIcon, UserIcon, UsersIcon, MessageIcon, AlertTriangleIcon, CodeIcon, DocumentIcon, PlusIcon, ArrowLeftIcon } from '../../components/Icons';
 import { useToast } from '../../context';
 
 export default function ChatPage() {
@@ -18,6 +18,8 @@ export default function ChatPage() {
   const otherId = (rawWith && rawWith !== 'undefined' && rawWith !== 'null' && rawWith !== 'NaN') ? rawWith : null;
   const rawName = searchParams.get('name');
   const searchName = (rawName && rawName !== 'undefined' && rawName !== 'null') ? rawName : null;
+  const rawContract = searchParams.get('contract');
+  const searchContractId = (rawContract && rawContract !== 'undefined' && rawContract !== 'null' && rawContract !== 'NaN') ? rawContract : null;
 
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -109,9 +111,9 @@ export default function ChatPage() {
     }
   }, [otherId, conversations, loadingConv]);
 
-  // Find active conversation matching current otherId
+  // Find active conversation matching current otherId and contractId
   const activeConvo = conversations.find(
-    (c) => String(c.user_id || c.other_id) === String(otherId)
+    (c) => String(c.user_id || c.other_id) === String(otherId) && String(c.contract_id || null) === String(searchContractId || null)
   );
 
   // If otherId is set but name is missing and not in conversation list, try fetching profile
@@ -182,7 +184,7 @@ export default function ChatPage() {
 
     async function fetchChatData(isInitial = false) {
       try {
-        const msgs = await api.getMessages(Number(otherId));
+        const msgs = await api.getMessages(Number(otherId), searchContractId);
         if (!isMounted) return;
 
         setMessages((prev) => {
@@ -242,8 +244,8 @@ export default function ChatPage() {
     setError('');
 
     try {
-      await api.sendMessage(targetId, textToSend);
-      const msgs = await api.getMessages(targetId);
+      await api.sendMessage(targetId, textToSend, searchContractId);
+      const msgs = await api.getMessages(targetId, searchContractId);
       setMessages(msgs);
       isAtBottomRef.current = true;
       setTimeout(() => scrollToBottom('smooth'), 50);
@@ -490,13 +492,19 @@ export default function ChatPage() {
               ) : (
                 filteredConversations.map((c) => {
                   const partnerId = c.user_id || c.other_id;
+                  const displayName = c.contract_title || c.name || c.other_name || 'User';
                   const partnerName = c.name || c.other_name || 'User';
-                  const isSelected = String(otherId) === String(partnerId);
+                  
+                  const isSelected = String(otherId) === String(partnerId) && String(c.contract_id || null) === String(searchContractId || null);
 
                   return (
                     <div
-                      key={partnerId}
-                      onClick={() => setSearchParams({ with: String(partnerId), name: partnerName })}
+                      key={`${partnerId}_${c.contract_id || 'general'}`}
+                      onClick={() => {
+                        const newParams = { with: String(partnerId), name: partnerName };
+                        if (c.contract_id) newParams.contract = String(c.contract_id);
+                        setSearchParams(newParams);
+                      }}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -510,28 +518,19 @@ export default function ChatPage() {
                         transition: 'background 0.15s ease',
                       }}
                     >
-                      <div className="avatar" style={{ width: '36px', height: '36px', fontSize: '13px', flexShrink: 0 }}>
-                        {initials(partnerName)}
+                      <div className="avatar" style={{ width: '36px', height: '36px', fontSize: '13px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {c.contract_id ? <UsersIcon size={18} /> : initials(displayName)}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-                          <span style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--ink)' }}>{partnerName}</span>
-                          <span className="mono" style={{ fontSize: '10px', color: 'var(--ink-faint)' }}>
+                          <span style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
+                          <span className="mono" style={{ fontSize: '10px', color: 'var(--ink-faint)', flexShrink: 0 }}>
                             {c.last_time || ''}
                           </span>
                         </div>
-                        <div
-                          className="sub"
-                          style={{
-                            margin: 0,
-                            fontSize: '11.5px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            color: isSelected ? 'var(--ink)' : 'var(--ink-muted)',
-                          }}
-                        >
-                          {c.last_message || 'Direct conversation'}
+                        <div style={{ fontSize: '12px', color: 'var(--ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {c.last_message_mine ? <span style={{ opacity: 0.6 }}>You: </span> : ''}
+                          {c.last_message || ''}
                         </div>
                       </div>
                     </div>
@@ -544,7 +543,7 @@ export default function ChatPage() {
           {/* Right Column: Chat Window */}
           <div
             style={{
-              background: 'var(--surface)',
+              background: 'var(--bg)',
               border: '1px solid var(--grid-strong)',
               borderRadius: '12px',
               display: 'flex',
@@ -564,11 +563,18 @@ export default function ChatPage() {
                     gap: '12px',
                   }}
                 >
-                  <div className="avatar" style={{ width: '38px', height: '38px', fontSize: '14px', flexShrink: 0 }}>
-                    {initials(otherName)}
+                  <div className="avatar" style={{ width: '38px', height: '38px', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {searchContractId ? <UsersIcon size={20} /> : initials(otherName)}
                   </div>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '15px' }}>{otherName}</div>
+                    <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {otherName}
+                      {searchContractId && (
+                        <span style={{ fontSize: '10px', background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                          Contract #{searchContractId}
+                        </span>
+                      )}
+                    </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--add)' }}>
                       <span className="status online">
                         <span className="led"></span>
@@ -591,16 +597,18 @@ export default function ChatPage() {
                         <CalendarIcon size={13} /> Schedule Session
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ fontSize: '11.5px', padding: '5px 12px' }}
-                      onClick={() => setContractModalOpen(true)}
-                    >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                        <DocumentIcon size={13} /> Propose Contract
-                      </span>
-                    </button>
+                    {!searchContractId && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '11.5px', padding: '5px 12px' }}
+                        onClick={() => setContractModalOpen(true)}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <DocumentIcon size={13} /> Propose Contract
+                        </span>
+                      </button>
+                    )}
                     {(otherRole === 'mentor' || user?.role === 'learner') && (
                       <Link
                         to={`/mentor/${otherId}`}
@@ -625,7 +633,7 @@ export default function ChatPage() {
                 </div>
 
                 {/* Active Contract Banner */}
-                {activeContract && (
+                {!searchContractId && activeContract && (
                   <div
                     style={{
                       background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(168, 85, 247, 0.08) 100%)',
