@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 110 520 160" width="100%" height="100%">
+  <defs>
+    <!-- Node 1: Solid Primary Deep Blue -->
+    <linearGradient id="favPrimaryBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+
+    <!-- Node 2: Cyan / Sky Blue Stroke -->
+    <linearGradient id="favSkyBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+
+    <!-- Central Packet Glow -->
+    <filter id="favPacketGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2" stdDeviation="5" flood-color="#0284C7" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <g id="icon-mark" transform="translate(0, -10)">
+    <!-- Connection Bridge (Blue Tinted Dashed Line) -->
+    <line x1="270" y1="200" x2="530" y2="200" 
+          stroke="#BFDBFE" 
+          stroke-width="7" 
+          stroke-linecap="round" 
+          stroke-dasharray="10 14" />
+
+    <!-- Active Data Transmission Node (Cyan/Sky Blue) -->
+    <circle cx="400" cy="200" r="14" fill="#0EA5E9" filter="url(#favPacketGlow)" />
+    <circle cx="400" cy="200" r="5" fill="#FFFFFF" opacity="0.95" />
+
+    <!-- Left Node: Solid Primary Blue Squircle (Host / Mentor) -->
+    <g>
+      <rect x="150" y="130" width="140" height="140" rx="42" fill="url(#favPrimaryBlueGrad)" />
+      <!-- Central Focus Core -->
+      <circle cx="220" cy="200" r="20" fill="#FFFFFF" />
+    </g>
+
+    <!-- Right Node: Outlined Sky Blue Squircle (Guest / Mentee) -->
+    <g>
+      <rect x="510" y="130" width="140" height="140" rx="42" fill="#FFFFFF" stroke="url(#favSkyBlueGrad)" stroke-width="12" />
+      <!-- Central Focus Core -->
+      <circle cx="580" cy="200" r="20" fill="url(#favSkyBlueGrad)" />
+    </g>
+  </g>
+</svg>
