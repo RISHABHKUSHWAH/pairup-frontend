@@ -17,6 +17,13 @@ export const adminApi = {
       body: role ? { role } : {},
     }),
 
+  adminToggleSuspendUser: (userId, suspend) =>
+    apiFetch(`/api/admin/users/${userId}/toggle-suspend`, {
+      method: 'POST',
+      auth: true,
+      body: suspend !== undefined ? { suspend } : {},
+    }),
+
   getAdminPayments: () =>
     apiFetch('/api/admin/payments', { auth: true }),
 

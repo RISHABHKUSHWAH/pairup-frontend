@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
+import BookSessionModal from '../../components/BookSessionModal';
 import { api, initials, stars } from '../../api/client';
 import {
   SearchIcon,
@@ -142,19 +143,32 @@ export default function LearnerSessionsPage() {
     setRescheduleModalBooking(null);
   };
 
-  const handleCancel = (e) => {
+  const handleCancel = async (e) => {
     e.preventDefault();
-    toast.success(`Session cancelled. If paid, your escrow payment will be refunded to your wallet.`);
-    setCancelModalBooking(null);
-    loadBookings();
+    if (!cancelModalBooking) return;
+    setSubmittingAction(true);
+    try {
+      const res = await api.cancelBooking(cancelModalBooking.id, cancelReason.trim());
+      toast.success(res?.message || 'Session cancelled. If paid, your escrow payment will be refunded.');
+      setCancelModalBooking(null);
+      setCancelReason('');
+      loadBookings();
+    } catch (err) {
+      toast.error('Could not cancel session: ' + err.message);
+    } finally {
+      setSubmittingAction(false);
+    }
   };
 
   const handleBookAgain = async (e) => {
     e.preventDefault();
     try {
+      const calculatedPrice = Math.max(1, Math.round(Number(bookAgainMentor.price || bookAgainMentor.hourly_rate || 50)));
       await api.createBooking({
-        mentor_id: bookAgainMentor.mentor_id,
-        topic: bookAgainTopic.trim(),
+        mentor_id: Number(bookAgainMentor.mentor_id || bookAgainMentor.user_id),
+        topic: bookAgainTopic.trim() || 'Follow-up Session',
+        duration_minutes: 60,
+        price: calculatedPrice,
         scheduled_at: bookAgainDate,
       });
       toast.success('Session requested! Check Upcoming Sessions.');
@@ -252,8 +266,10 @@ export default function LearnerSessionsPage() {
                     <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px' }}>
                       Topic: <strong>{b.topic || 'Pairing Session'}</strong>
                     </div>
-                    <div className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '4px' }}>
-                      Date: {b.scheduled_at ? new Date(b.scheduled_at).toLocaleString() : new Date(b.created_at).toLocaleDateString()}
+                    <div className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span>Date: {b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : new Date(b.created_at).toLocaleDateString()}</span>
+                      <span>·</span>
+                      <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Duration: {b.duration_minutes || 60} mins</span>
                     </div>
                   </div>
                 </div>
@@ -274,6 +290,9 @@ export default function LearnerSessionsPage() {
                   </span>
                   <div className="mono" style={{ fontWeight: 700, fontSize: '14px', marginTop: '6px' }}>
                     ₹{b.price}
+                  </div>
+                  <div className="sub" style={{ fontSize: '11px', margin: 0 }}>
+                    {b.duration_minutes || 60} mins
                   </div>
                 </div>
               </div>
@@ -314,6 +333,14 @@ export default function LearnerSessionsPage() {
                       onClick={() => setDisputeModalBooking(b)}
                     >
                       Report Issue / Dispute
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12px', color: 'var(--danger, #ef4444)' }}
+                      onClick={() => setCancelModalBooking(b)}
+                    >
+                      Cancel Session
                     </button>
                   </>
                 )}
@@ -392,9 +419,13 @@ export default function LearnerSessionsPage() {
                       className="btn btn-ghost"
                       style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                       onClick={() => {
-                        setBookAgainMentor(b);
+                        setBookAgainMentor({
+                          id: b.mentor_id,
+                          user_id: b.mentor_id,
+                          name: b.mentor_name,
+                          hourly_rate: b.price ? Math.round((b.price * 60) / (b.duration_minutes || 60)) : 50,
+                        });
                         setBookAgainTopic(`Follow up on: ${b.topic || 'pairing'}`);
-                        setBookAgainDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
                       }}
                     >
                       <RefreshIcon size={13} /> Book Again
@@ -614,8 +645,13 @@ export default function LearnerSessionsPage() {
               >
                 Keep Session
               </button>
-              <button type="submit" className="btn btn-danger" style={{ flex: 1 }}>
-                Confirm Cancellation
+              <button
+                type="submit"
+                className="btn btn-danger"
+                disabled={submittingAction}
+                style={{ flex: 1 }}
+              >
+                {submittingAction ? 'Cancelling...' : 'Confirm Cancellation'}
               </button>
             </div>
           </form>
@@ -623,47 +659,16 @@ export default function LearnerSessionsPage() {
       </Modal>
 
       {/* Book Again Modal */}
-      <Modal
+      <BookSessionModal
         isOpen={!!bookAgainMentor}
         onClose={() => setBookAgainMentor(null)}
-        title={`Book Again with ${bookAgainMentor?.mentor_name || ''}`}
-      >
-        {bookAgainMentor && (
-          <form onSubmit={handleBookAgain}>
-            <div className="field">
-              <label>Topic / Goal</label>
-              <input
-                type="text"
-                value={bookAgainTopic}
-                onChange={(e) => setBookAgainTopic(e.target.value)}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Preferred Date &amp; Time</label>
-              <input
-                type="datetime-local"
-                value={bookAgainDate}
-                onChange={(e) => setBookAgainDate(e.target.value)}
-                required
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setBookAgainMentor(null)}
-                style={{ flex: 1 }}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
-                Request Session
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
+        mentor={bookAgainMentor}
+        initialTopic={bookAgainTopic}
+        onSuccess={() => {
+          setBookAgainMentor(null);
+          loadBookings();
+        }}
+      />
 
       {/* Dispute Modal */}
       <Modal

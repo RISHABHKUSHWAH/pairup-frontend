@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
+import BookSessionModal from '../../components/BookSessionModal';
 import { api, initials, stars, learnerFavorites } from '../../api/client';
 import { SearchIcon, HeartIcon, XIcon, MessageIcon, CalendarIcon } from '../../components/Icons';
 import { useToast } from '../../context';
@@ -31,36 +32,8 @@ export default function LearnerFavoritesPage() {
 
   const openBooking = (mentor) => {
     setBookingMentor(mentor);
-    setBookingTopic('');
-    setBookingDuration(60);
-    setBookingDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
-    setBookingError('');
   };
 
-  const handleConfirmBooking = async (e) => {
-    e.preventDefault();
-    if (!bookingTopic.trim()) {
-      setBookingError('Please enter a session topic.');
-      return;
-    }
-
-    setBookingLoading(true);
-    setBookingError('');
-    try {
-      await api.createBooking({
-        mentor_id: bookingMentor.user_id || bookingMentor.id,
-        topic: `${bookingTopic.trim()} (${bookingDuration}m)`,
-        scheduled_at: bookingDate,
-      });
-
-      toast.success('Session requested! Check My Sessions to track confirmation.');
-      setBookingMentor(null);
-    } catch (err) {
-      setBookingError(err.message);
-    } finally {
-      setBookingLoading(false);
-    }
-  };
 
   return (
     <PortalLayout
@@ -193,87 +166,11 @@ export default function LearnerFavoritesPage() {
       )}
 
       {/* Booking Modal */}
-      <Modal
+      <BookSessionModal
         isOpen={!!bookingMentor}
         onClose={() => setBookingMentor(null)}
-        title={`Book Session with ${bookingMentor?.name || ''}`}
-      >
-        {bookingMentor && (
-          <form onSubmit={handleConfirmBooking}>
-            {bookingError && <div className="error-box">{bookingError}</div>}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: 'var(--bg)', borderRadius: '8px', marginBottom: '16px' }}>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '13px' }}>{bookingMentor.name}</div>
-                <div className="sub" style={{ margin: 0, fontSize: '12px' }}>₹{Number(bookingMentor.hourly_rate || 0).toLocaleString('en-IN')}/hr</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div className="rate" style={{ fontSize: '15px' }}>
-                  ₹{Math.round((Number(bookingMentor.hourly_rate || 0) * bookingDuration) / 60).toLocaleString('en-IN')}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>Estimated total</div>
-              </div>
-            </div>
-
-            <div className="field">
-              <label>Duration</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {[30, 45, 60, 90].map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    className={`btn ${bookingDuration === d ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ flex: 1, padding: '8px', fontSize: '13px' }}
-                    onClick={() => setBookingDuration(d)}
-                  >
-                    {d} mins
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="field">
-              <label>Preferred Date &amp; Time</label>
-              <input
-                type="datetime-local"
-                value={bookingDate}
-                onChange={(e) => setBookingDate(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="field">
-              <label>Session Topic &amp; Problem</label>
-              <textarea
-                value={bookingTopic}
-                onChange={(e) => setBookingTopic(e.target.value)}
-                placeholder="What would you like help with during this session?"
-                rows={3}
-                required
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setBookingMentor(null)}
-                style={{ flex: 1 }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={bookingLoading}
-                style={{ flex: 1 }}
-              >
-                {bookingLoading ? 'Requesting...' : 'Request Session'}
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
+        mentor={bookingMentor}
+      />
     </PortalLayout>
   );
 }

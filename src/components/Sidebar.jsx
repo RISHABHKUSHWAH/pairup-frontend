@@ -184,6 +184,7 @@ export default function Sidebar({
     { to: '/admin/problems', label: 'Problem requests', icon: <DocumentIcon size={20} /> },
     { to: '/admin/contracts', label: 'Contracts', icon: <DocumentIcon size={20} /> },
     { to: '/admin/sessions', label: 'Sessions', icon: <ClockIcon size={20} /> },
+    { to: '/chat', label: 'Messages', icon: <MessageIcon size={20} />, dataTour: 'nav-messages' },
     { to: '/admin/payments', label: 'Payments', icon: <CreditCardIcon size={20} /> },
     { to: '/admin/payouts', label: 'Payouts', icon: <WalletIcon size={20} /> },
     { to: '/admin/commissions', label: 'Commissions', icon: <PercentIcon size={20} /> },
@@ -193,8 +194,6 @@ export default function Sidebar({
     { to: '/admin/verification', label: 'Verification', icon: <ShieldIcon size={20} /> },
     { to: '/admin/reviews', label: 'Reviews', icon: <StarIcon size={20} /> },
     { to: '/admin/reports', label: 'Reports & Analytics', icon: <BarChartIcon size={20} /> },
-    { to: '/admin/content', label: 'Content CMS', icon: <FileEditIcon size={20} /> },
-    { to: '/admin/audit-logs', label: 'Audit Logs', icon: <ListIcon size={20} /> },
   ];
 
   if (user?.role === 'superadmin') {
@@ -339,6 +338,27 @@ export default function Sidebar({
               <SettingsIcon size={16} />
               <span>Settings</span>
             </NavLink>
+
+            {portalType === 'admin' && (
+              <>
+                <NavLink
+                  to="/admin/content"
+                  className={({ isActive }) => `admin-user-menu-item ${isActive ? 'active' : ''}`}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <FileEditIcon size={16} />
+                  <span>Content CMS</span>
+                </NavLink>
+                <NavLink
+                  to="/admin/audit-logs"
+                  className={({ isActive }) => `admin-user-menu-item ${isActive ? 'active' : ''}`}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <ListIcon size={16} />
+                  <span>Audit Logs</span>
+                </NavLink>
+              </>
+            )}
 
             {portalType === 'learner' && (
               <>

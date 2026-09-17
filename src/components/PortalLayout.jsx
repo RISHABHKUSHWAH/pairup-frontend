@@ -10,6 +10,8 @@ export default function PortalLayout({
   actions,
   showBack,
   backUrl,
+  fullHeight = false,
+  bodyStyle = {},
   children,
 }) {
   const { theme, toggleTheme } = useTheme();
@@ -129,14 +131,14 @@ export default function PortalLayout({
   }, [portalType]);
 
   return (
-    <div className="admin-shell">
+    <div className={`admin-shell ${fullHeight ? 'admin-shell--full-height' : ''}`}>
       <Sidebar
         portalType={portalType}
         unreadCount={unreadCount}
         collapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
       />
-      <main className="admin-content">
+      <main className={`admin-content ${fullHeight ? 'admin-content--full-height' : ''}`}>
         <div className="admin-topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
             {shouldShowBack && (
@@ -198,7 +200,7 @@ export default function PortalLayout({
             </button>
           </div>
         </div>
-        <div className="admin-body">
+        <div className={`admin-body ${fullHeight ? 'admin-body--full-height' : ''}`} style={bodyStyle}>
           {children}
         </div>
       </main>

@@ -30,12 +30,10 @@ export default function PlatformTour() {
     currentStepIndex,
     totalSteps,
     tourRole,
-    startTour,
     nextStep,
     prevStep,
     goToStep,
     endTour,
-    switchRole,
   } = useTour();
 
   const [targetRect, setTargetRect] = useState(null);
@@ -140,19 +138,7 @@ export default function PlatformTour() {
   if (typeof document === 'undefined') return null;
 
   if (!isTourActive) {
-    return createPortal(
-      <button
-        type="button"
-        className="tour-floating-trigger"
-        onClick={() => startTour()}
-        title="Start interactive platform tour of all features"
-        aria-label="Start interactive platform tour"
-      >
-        <span className="tour-floating-dot" />
-        <span>✨ Platform Tour</span>
-      </button>,
-      document.body
-    );
+    return null;
   }
 
   const isLastStep = currentStepIndex === totalSteps - 1;
@@ -327,26 +313,6 @@ export default function PlatformTour() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {/* Quick switcher to preview other role tour */}
-            <div className="tour-role-switch-pill">
-              <button
-                type="button"
-                className={`tour-switch-btn ${tourRole === 'learner' ? 'active' : ''}`}
-                onClick={() => switchRole('learner')}
-                title="Switch to Learner Tour"
-              >
-                Learner
-              </button>
-              <button
-                type="button"
-                className={`tour-switch-btn ${tourRole === 'mentor' ? 'active' : ''}`}
-                onClick={() => switchRole('mentor')}
-                title="Switch to Mentor Tour"
-              >
-                Mentor
-              </button>
-            </div>
-
             <button
               type="button"
               className="tour-close-btn"

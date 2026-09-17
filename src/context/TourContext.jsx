@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useAuth } from './AuthContext';
 
 const TourContext = createContext(null);
 
@@ -250,12 +251,22 @@ export const MENTOR_TOUR_STEPS = [
 ];
 
 export function TourProvider({ children }) {
+  const { user } = useAuth();
   const location = useLocation();
   const [isTourActive, setIsTourActive] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [tourRole, setTourRole] = useState(() => {
-    return location.pathname.startsWith('/mentor') ? 'mentor' : 'learner';
-  });
+
+  const getEffectiveRole = useCallback(
+    (preferredRole) => {
+      if (preferredRole === 'mentor' || preferredRole === 'learner') return preferredRole;
+      if (user?.role === 'mentor') return 'mentor';
+      if (user?.role === 'learner') return 'learner';
+      return location.pathname.startsWith('/mentor') ? 'mentor' : 'learner';
+    },
+    [user?.role, location.pathname]
+  );
+
+  const [tourRole, setTourRole] = useState(() => getEffectiveRole());
 
   // Track if user has seen tour
   const [tourSeen, setTourSeen] = useState(() => {
@@ -266,27 +277,25 @@ export function TourProvider({ children }) {
     }
   });
 
-  // Automatically adapt default role based on current URL
+  // Automatically adapt default role based on authenticated user or URL
   useEffect(() => {
     if (!isTourActive) {
-      if (location.pathname.startsWith('/mentor')) {
-        setTourRole('mentor');
-      } else if (location.pathname.startsWith('/learner') || location.pathname === '/') {
-        setTourRole('learner');
-      }
+      setTourRole(getEffectiveRole());
     }
-  }, [location.pathname, isTourActive]);
+  }, [getEffectiveRole, isTourActive]);
 
   const steps = tourRole === 'mentor' ? MENTOR_TOUR_STEPS : LEARNER_TOUR_STEPS;
   const currentStep = steps[currentStepIndex] || steps[0];
 
-  const startTour = useCallback((preferredRole) => {
-    if (preferredRole) {
-      setTourRole(preferredRole);
-    }
-    setCurrentStepIndex(0);
-    setIsTourActive(true);
-  }, []);
+  const startTour = useCallback(
+    (preferredRole) => {
+      const roleToUse = getEffectiveRole(preferredRole);
+      setTourRole(roleToUse);
+      setCurrentStepIndex(0);
+      setIsTourActive(true);
+    },
+    [getEffectiveRole]
+  );
 
   const endTour = useCallback((markAsSeen = true) => {
     setIsTourActive(false);

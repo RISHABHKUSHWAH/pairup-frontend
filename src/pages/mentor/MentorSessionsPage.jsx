@@ -31,6 +31,7 @@ export default function MentorSessionsPage() {
 
   const [cancelBooking, setCancelBooking] = useState(null);
   const [cancelReason, setCancelReason] = useState('');
+  const [submittingCancel, setSubmittingCancel] = useState(false);
 
   const [notesBooking, setNotesBooking] = useState(null);
   const [sessionNotes, setSessionNotes] = useState({});
@@ -102,16 +103,21 @@ export default function MentorSessionsPage() {
     setRescheduleReason('');
   };
 
-  const handleConfirmCancel = (e) => {
+  const handleConfirmCancel = async (e) => {
     e.preventDefault();
-    setBookings((prev) =>
-      prev.map((b) =>
-        b.id === cancelBooking.id ? { ...b, status: 'cancelled', cancel_reason: cancelReason } : b
-      )
-    );
-    toast.info('Session cancelled and learner notified.');
-    setCancelBooking(null);
-    setCancelReason('');
+    if (!cancelBooking) return;
+    setSubmittingCancel(true);
+    try {
+      const res = await api.cancelBooking(cancelBooking.id, cancelReason.trim());
+      toast.success(res?.message || 'Session cancelled and learner notified.');
+      setCancelBooking(null);
+      setCancelReason('');
+      loadBookings();
+    } catch (err) {
+      toast.error('Could not cancel session: ' + err.message);
+    } finally {
+      setSubmittingCancel(false);
+    }
   };
 
   const openNotesModal = (booking) => {
@@ -298,8 +304,8 @@ export default function MentorSessionsPage() {
                 >
                   <div>
                     <strong>Scheduled:</strong>{' '}
-                    {b.scheduled_time
-                      ? new Date(b.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                    {(b.scheduled_at || b.scheduled_time)
+                      ? new Date(b.scheduled_at || b.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
                       : 'Pending learner time selection'}
                   </div>
                   <div>
@@ -421,6 +427,16 @@ export default function MentorSessionsPage() {
                         >
                           <CheckIcon size={13} /> Mark Completed
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '12.5px', padding: '5px 12px', color: 'var(--danger, #ef4444)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                          onClick={() => {
+                            setCancelBooking(b);
+                          }}
+                        >
+                          <XIcon size={13} /> Cancel
+                        </button>
                       </>
                     )}
 
@@ -527,9 +543,10 @@ export default function MentorSessionsPage() {
               <button
                 type="submit"
                 className="btn btn-secondary"
+                disabled={submittingCancel}
                 style={{ flex: 1, color: 'var(--danger, #ef4444)' }}
               >
-                Confirm Cancellation
+                {submittingCancel ? 'Cancelling...' : 'Confirm Cancellation'}
               </button>
             </div>
           </form>

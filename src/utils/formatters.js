@@ -163,3 +163,51 @@ export function resolveNotificationLink(item, role = 'learner') {
     return '/learner/dashboard';
   }
 }
+
+/**
+ * Formats a date into "Monday, Jun 09, 2025" or "Today, Monday, Sep 15, 2026"
+ */
+export function formatChatDayDate(dateVal) {
+  if (!dateVal) return '';
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return '';
+
+  const now = new Date();
+  const isToday =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    d.getDate() === yesterday.getDate() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getFullYear() === yesterday.getFullYear();
+
+  const formattedDate = d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+  });
+
+  if (isToday) return `Today - ${formattedDate}`;
+  if (isYesterday) return `Yesterday - ${formattedDate}`;
+  return formattedDate;
+}
+
+/**
+ * Checks whether two datetime values fall on the same calendar day.
+ */
+export function isSameDay(date1, date2) {
+  if (!date1 || !date2) return false;
+  const d1 = new Date(date1);
+  const d2 = new Date(date2);
+  if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return false;
+  return (
+    d1.getDate() === d2.getDate() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getFullYear() === d2.getFullYear()
+  );
+}

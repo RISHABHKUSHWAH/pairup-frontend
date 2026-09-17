@@ -446,6 +446,14 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/admin/messages"
+        element={
+          <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+            <ChatPage />
+          </ProtectedRoute>
+        }
+      />
 
       <Route
         path="/admin/payments"

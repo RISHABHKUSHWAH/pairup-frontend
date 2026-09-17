@@ -36,7 +36,9 @@ export default function ContractDetailPage() {
 
   const [approveModalOpen, setApproveModalOpen] = useState(false);
   const [rating, setRating] = useState(5);
+  const [hoverRating, setHoverRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
+  const [reviewError, setReviewError] = useState('');
 
   const [disputeModalOpen, setDisputeModalOpen] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
@@ -114,18 +116,31 @@ export default function ContractDetailPage() {
   // Handle Learner Approve & Release
   const handleApproveContract = async (e) => {
     e?.preventDefault();
+    setReviewError('');
+
+    if (!rating || rating < 1 || rating > 5) {
+      setReviewError('Please select a star rating between 1 and 5 stars for your mentor.');
+      return;
+    }
+
+    if (!reviewComment.trim()) {
+      setReviewError('Please provide written feedback before approving the contract and releasing payment.');
+      return;
+    }
+
     setActionLoading(true);
     setError('');
     try {
       const res = await api.approveContract(id, {
         rating,
-        comment: reviewComment,
+        comment: reviewComment.trim(),
       });
       setApproveModalOpen(false);
       toast.success(res.message);
       await loadContract();
     } catch (err) {
       toast.error(err.message);
+      setReviewError(err.message);
       setError(err.message);
     } finally {
       setActionLoading(false);
@@ -784,7 +799,14 @@ export default function ContractDetailPage() {
                     <button className="btn btn-danger" onClick={() => setDisputeModalOpen(true)} disabled={actionLoading}>
                       Raise Dispute
                     </button>
-                    <button className="btn btn-success" onClick={() => setApproveModalOpen(true)} disabled={actionLoading}>
+                    <button
+                      className="btn btn-success"
+                      onClick={() => {
+                        setReviewError('');
+                        setApproveModalOpen(true);
+                      }}
+                      disabled={actionLoading}
+                    >
                       Approve & Release Payment
                     </button>
                   </div>
@@ -805,11 +827,53 @@ export default function ContractDetailPage() {
 
               {/* If Completed */}
               {contract.status === 'completed' && (
-                <div style={{ width: '100%', textAlign: 'center', padding: '8px 0', color: 'var(--add)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                  <CheckCircleIcon size={20} />
-                  <span style={{ fontWeight: 700 }}>
-                    Contract Completed Successfully · Payment of {formatCurrency(contract.total_price)} Released!
-                  </span>
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px', padding: '6px 0' }}>
+                  <div style={{ textAlign: 'center', color: 'var(--add)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                    <CheckCircleIcon size={20} />
+                    <span style={{ fontWeight: 700 }}>
+                      Contract Completed Successfully · Payment of {formatCurrency(contract.total_price)} Released!
+                    </span>
+                  </div>
+
+                  {contract.review && (
+                    <div
+                      style={{
+                        background: 'var(--bg)',
+                        border: '1px solid var(--grid-strong)',
+                        borderRadius: '10px',
+                        padding: '16px 20px',
+                        marginTop: '4px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: 700, fontSize: '13.5px', color: 'var(--ink)' }}>
+                            Learner Rating & Feedback:
+                          </span>
+                          <div style={{ display: 'flex', gap: '2px', color: 'var(--gold)' }}>
+                            {[1, 2, 3, 4, 5].map((s) => (
+                              <span key={s} style={{ fontSize: '16px', lineHeight: 1 }}>
+                                {s <= contract.review.rating ? '★' : '☆'}
+                              </span>
+                            ))}
+                          </div>
+                          <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--gold)' }}>
+                            {contract.review.rating}/5
+                          </span>
+                        </div>
+                        {contract.review.created_at && (
+                          <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                            Submitted {formatDateTime(contract.review.created_at)}
+                          </span>
+                        )}
+                      </div>
+                      {contract.review.comment && (
+                        <p style={{ margin: 0, fontSize: '13.5px', color: 'var(--ink)', fontStyle: 'italic', lineHeight: 1.55 }}>
+                          "{contract.review.comment}"
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -866,47 +930,143 @@ export default function ContractDetailPage() {
       </Modal>
 
       {/* Approve & Review Modal */}
-      <Modal isOpen={approveModalOpen} onClose={() => setApproveModalOpen(false)} title="Approve Contract & Release Payment">
+      <Modal
+        isOpen={approveModalOpen}
+        onClose={() => setApproveModalOpen(false)}
+        title="Rate Mentor & Release Payment"
+      >
         <form onSubmit={handleApproveContract} style={{ padding: '6px 0' }}>
-          <p style={{ fontSize: '14px', color: 'var(--ink-muted)', marginBottom: '18px' }}>
-            By approving this contract, you confirm that {contract.mentor_name} successfully conducted the agreed curriculum. Platform escrow will release {formatCurrency(contract.total_price)} to the mentor.
-          </p>
-
-          <div className="field">
-            <label>Rate your experience with {contract.mentor_name}</label>
-            <div style={{ display: 'flex', gap: '8px', margin: '8px 0' }}>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  type="button"
-                  onClick={() => setRating(star)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '24px',
-                    color: star <= rating ? 'var(--gold)' : 'var(--grid-strong)',
-                  }}
-                >
-                  ★
-                </button>
-              ))}
+          {/* Informational Escrow Notice */}
+          <div
+            style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              marginBottom: '18px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '12px',
+            }}
+          >
+            <ShieldIcon size={22} color="var(--add)" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div style={{ fontSize: '13px', lineHeight: 1.5, color: 'var(--ink)' }}>
+              <strong>Before releasing payment:</strong> Please provide your honest rating and feedback for <strong>{contract.mentor_name}</strong>. Upon submission, platform escrow will disburse <strong>{formatCurrency(contract.total_price)}</strong> directly to the mentor.
             </div>
           </div>
 
-          <div className="field">
-            <label>Leave a review (optional)</label>
+          {reviewError && (
+            <div className="error-box" style={{ marginBottom: '16px', fontSize: '13px' }}>
+              {reviewError}
+            </div>
+          )}
+
+          {/* Rating Section */}
+          <div className="field" style={{ marginBottom: '18px' }}>
+            <label style={{ fontWeight: 700, fontSize: '13.5px', marginBottom: '6px' }}>
+              Rate your experience with {contract.mentor_name} <span style={{ color: 'var(--red, #ef4444)' }}>*</span>
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '6px 0', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {[1, 2, 3, 4, 5].map((star) => {
+                  const isHighlighted = (hoverRating || rating) >= star;
+                  return (
+                    <button
+                      key={star}
+                      type="button"
+                      onMouseEnter={() => setHoverRating(star)}
+                      onMouseLeave={() => setHoverRating(0)}
+                      onClick={() => {
+                        setRating(star);
+                        setReviewError('');
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: '30px',
+                        lineHeight: 1,
+                        padding: '2px',
+                        transition: 'transform 0.1s ease, color 0.15s ease',
+                        transform: isHighlighted ? 'scale(1.15)' : 'scale(1)',
+                        color: isHighlighted ? 'var(--gold)' : 'var(--grid-strong)',
+                      }}
+                      title={`${star} star${star > 1 ? 's' : ''}`}
+                    >
+                      ★
+                    </button>
+                  );
+                })}
+              </div>
+              <span
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: (hoverRating || rating) > 0 ? 'var(--gold)' : 'var(--ink-muted)',
+                }}
+              >
+                {
+                  {
+                    1: '1 - Unsatisfactory',
+                    2: '2 - Fair / Needed Improvement',
+                    3: '3 - Good / Met Expectations',
+                    4: '4 - Very Good / Highly Satisfied',
+                    5: '5 - Exceptional / Excellent Mentorship',
+                  }[hoverRating || rating] || 'Select your rating'
+                }
+              </span>
+            </div>
+          </div>
+
+          {/* Written Feedback Section */}
+          <div className="field" style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label style={{ fontWeight: 700, fontSize: '13.5px', margin: 0 }}>
+                Written Feedback & Review <span style={{ color: 'var(--red, #ef4444)' }}>*</span>
+              </label>
+              <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                {reviewComment.trim().length} chars
+              </span>
+            </div>
             <textarea
               value={reviewComment}
-              onChange={(e) => setReviewComment(e.target.value)}
-              placeholder="e.g. Alex was fantastic! Guided me step by step through FastAPI and Postgres..."
-              rows={3}
+              onChange={(e) => {
+                setReviewComment(e.target.value);
+                if (reviewError) setReviewError('');
+              }}
+              placeholder={`Share your experience with ${contract.mentor_name}: curriculum coverage, technical skills taught, communication quality, and advice for future learners...`}
+              rows={4}
+              required
+              style={{
+                width: '100%',
+                borderRadius: '8px',
+                border: '1px solid var(--grid-strong)',
+                padding: '10px 12px',
+                fontSize: '13.5px',
+                lineHeight: 1.5,
+              }}
             />
           </div>
 
-          <button type="submit" className="btn btn-success btn-block" disabled={actionLoading}>
-            {actionLoading ? 'Releasing Funds...' : `Approve & Release ${formatCurrency(contract.total_price)}`}
-          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setApproveModalOpen(false)}
+              disabled={actionLoading}
+              style={{ flex: 1 }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-success"
+              disabled={actionLoading}
+              style={{ flex: 2, justifyContent: 'center' }}
+            >
+              {actionLoading ? 'Releasing Funds...' : `Submit Review & Release ${formatCurrency(contract.total_price)}`}
+            </button>
+          </div>
         </form>
       </Modal>
 

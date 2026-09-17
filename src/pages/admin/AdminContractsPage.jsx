@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import { api, initials, formatCurrency, formatDateTime } from '../../api/client';
@@ -13,16 +13,32 @@ import {
   SearchIcon,
   RefreshIcon,
   UserIcon,
+  EyeIcon,
+  CheckIcon,
 } from '../../components/Icons';
 import { useToast } from '../../context';
 
 export default function AdminContractsPage() {
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlStatus = searchParams.get('status') || 'all';
+  const urlSearch = searchParams.get('search') || searchParams.get('q') || '';
+
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState(urlStatus);
+  const [searchQuery, setSearchQuery] = useState(urlSearch);
+  const [sortBy, setSortBy] = useState('newest');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  useEffect(() => {
+    const s = searchParams.get('status');
+    const q = searchParams.get('search') || searchParams.get('q');
+    if (s !== null) setStatusFilter(s);
+    if (q !== null) setSearchQuery(q);
+  }, [searchParams]);
 
   // Dispute resolution modal state
   const [disputeModalContract, setDisputeModalContract] = useState(null);
@@ -96,9 +112,9 @@ export default function AdminContractsPage() {
     .filter((c) => c.status === 'active')
     .reduce((sum, c) => sum + (c.total_price || 0), 0);
 
-  // Filtering
+  // Filtering & Sorting
   const filteredContracts = useMemo(() => {
-    return contracts.filter((c) => {
+    let list = contracts.filter((c) => {
       if (statusFilter !== 'all' && c.status !== statusFilter) return false;
 
       if (searchQuery.trim()) {
@@ -107,41 +123,282 @@ export default function AdminContractsPage() {
         const matchTech = (c.technology || '').toLowerCase().includes(q);
         const matchMentor = (c.mentor_name || '').toLowerCase().includes(q);
         const matchLearner = (c.learner_name || '').toLowerCase().includes(q);
-        if (!matchTitle && !matchTech && !matchMentor && !matchLearner) return false;
+        const matchId = String(c.id).includes(q);
+        const matchMentorId = String(c.mentor_id || '') === q;
+        const matchLearnerId = String(c.learner_id || '') === q;
+        if (!matchTitle && !matchTech && !matchMentor && !matchLearner && !matchId && !matchMentorId && !matchLearnerId) return false;
       }
 
       return true;
     });
-  }, [contracts, statusFilter, searchQuery]);
 
-  const getStatusBadge = (status) => {
+    list.sort((a, b) => {
+      if (sortBy === 'newest') return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      if (sortBy === 'oldest') return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+      if (sortBy === 'amount_high') return (b.total_price || 0) - (a.total_price || 0);
+      if (sortBy === 'amount_low') return (a.total_price || 0) - (b.total_price || 0);
+      if (sortBy === 'progress') {
+        const pctA = ((a.completed_sessions || 0) / (a.total_sessions || 1));
+        const pctB = ((b.completed_sessions || 0) / (b.total_sessions || 1));
+        return pctB - pctA;
+      }
+      return 0;
+    });
+
+    return list;
+  }, [contracts, statusFilter, searchQuery, sortBy]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredContracts.length / itemsPerPage) || 1;
+  const paginatedContracts = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredContracts.slice(start, start + itemsPerPage);
+  }, [filteredContracts, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, searchQuery, sortBy]);
+
+  const renderContractStatusBadge = (status) => {
     switch (status) {
       case 'active':
-        return <span className="status-badge badge-paid">Active · Escrow Held</span>;
-      case 'proposed':
-        return <span className="status-badge badge-pending">Proposed</span>;
-      case 'completed_by_mentor':
-        return <span className="status-badge badge-accepted">Awaiting Review</span>;
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              background: 'rgba(14, 165, 233, 0.12)',
+              color: '#0284c7',
+              border: '1px solid rgba(14, 165, 233, 0.28)',
+            }}
+          >
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0284c7' }} />
+            Active · In Progress
+          </span>
+        );
       case 'completed':
-        return <span className="status-badge badge-completed">Completed · Funds Released</span>;
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              background: 'rgba(16, 185, 129, 0.12)',
+              color: '#059669',
+              border: '1px solid rgba(16, 185, 129, 0.28)',
+            }}
+          >
+            <CheckIcon size={12} />
+            Completed · Released
+          </span>
+        );
       case 'disputed':
-        return <span className="status-badge badge-disputed">Disputed</span>;
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              background: 'rgba(239, 68, 68, 0.12)',
+              color: '#dc2626',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+            }}
+          >
+            <AlertTriangleIcon size={12} />
+            Under Dispute
+          </span>
+        );
+      case 'completed_by_mentor':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              background: 'rgba(245, 158, 11, 0.12)',
+              color: '#d97706',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+            }}
+          >
+            <ClockIcon size={12} />
+            Awaiting Review
+          </span>
+        );
+      case 'proposed':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              background: 'rgba(100, 116, 139, 0.12)',
+              color: '#475569',
+              border: '1px solid rgba(100, 116, 139, 0.25)',
+            }}
+          >
+            Proposed
+          </span>
+        );
       case 'declined':
-        return <span className="status-badge badge-cancelled">Declined</span>;
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              background: 'rgba(239, 68, 68, 0.08)',
+              color: '#991b1b',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+            }}
+          >
+            Declined
+          </span>
+        );
       default:
         return <span className="status-badge badge-cancelled">{status}</span>;
     }
   };
 
+  const renderEscrowBadge = (escrowStatus) => {
+    switch (escrowStatus) {
+      case 'held':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px',
+              fontWeight: 700,
+              padding: '3px 8px',
+              borderRadius: '6px',
+              background: 'rgba(245, 158, 11, 0.14)',
+              color: '#b45309',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+            }}
+          >
+            <ShieldIcon size={11} />
+            Held in Escrow
+          </span>
+        );
+      case 'released':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px',
+              fontWeight: 700,
+              padding: '3px 8px',
+              borderRadius: '6px',
+              background: 'rgba(16, 185, 129, 0.14)',
+              color: '#047857',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+            }}
+          >
+            <CheckIcon size={11} />
+            Released
+          </span>
+        );
+      case 'refunded':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px',
+              fontWeight: 700,
+              padding: '3px 8px',
+              borderRadius: '6px',
+              background: 'rgba(168, 85, 247, 0.14)',
+              color: '#7e22ce',
+              border: '1px solid rgba(168, 85, 247, 0.3)',
+            }}
+          >
+            Refunded
+          </span>
+        );
+      default:
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              fontSize: '11px',
+              fontWeight: 600,
+              padding: '3px 8px',
+              borderRadius: '6px',
+              background: 'var(--grid)',
+              color: 'var(--ink-muted)',
+            }}
+          >
+            {escrowStatus || 'Unfunded'}
+          </span>
+        );
+    }
+  };
+
   return (
     <PortalLayout title="Mentorship Contracts" portalType="admin">
-      <div style={{ paddingBottom: '40px' }}>
-        {/* Page Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '24px' }}>
+      <div style={{ paddingBottom: '50px' }}>
+        {/* Page Top Header */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+            gap: '16px',
+            marginBottom: '22px',
+          }}
+        >
           <div>
-            <h1 style={{ fontSize: '24px', margin: 0 }}>Mentorship Contracts Management</h1>
-            <p className="sub" style={{ margin: '4px 0 0' }}>
-              Monitor multi-session curricula, oversee platform escrow balances, and resolve contract disputes.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h1 style={{ fontSize: '24px', fontWeight: 800, margin: 0, color: 'var(--ink)' }}>
+                Mentorship Contracts Management
+              </h1>
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  background: 'var(--accent-soft)',
+                  color: 'var(--accent)',
+                }}
+              >
+                Admin Oversight
+              </span>
+            </div>
+            <p className="sub" style={{ margin: '6px 0 0', fontSize: '13.5px', color: 'var(--ink-muted)' }}>
+              Monitor multi-session curricula, oversee platform escrow balances, and arbitrate contract disputes.
             </p>
           </div>
 
@@ -149,305 +406,834 @@ export default function AdminContractsPage() {
             type="button"
             className="btn btn-secondary"
             onClick={loadContracts}
-            style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            style={{
+              fontSize: '13px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 14px',
+              borderRadius: '8px',
+            }}
           >
-            <RefreshIcon size={14} /> Refresh List
+            <RefreshIcon size={14} className={loading ? 'spin' : ''} />
+            <span>Refresh Data</span>
           </button>
         </div>
 
-        {error && <div className="error-box" style={{ marginBottom: '16px' }}>{error}</div>}
+        {error && <div className="error-box" style={{ marginBottom: '18px' }}>{error}</div>}
 
-        {/* KPI Stats Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-          <div className="stat-card">
-            <div className="stat-num">{totalContracts}</div>
-            <div className="stat-label">Total Contracts</div>
+        {/* 5 KPI Cards Row */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+            gap: '14px',
+            marginBottom: '22px',
+          }}
+        >
+          {/* Total Contracts */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                Total Contracts
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  color: '#6366f1',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <DocumentIcon size={18} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', lineHeight: 1 }}>
+              {totalContracts}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              All agreements created
+            </div>
           </div>
-          <div className="stat-card" style={{ borderColor: 'var(--accent)' }}>
-            <div className="stat-num" style={{ color: 'var(--accent)' }}>{activeContracts}</div>
-            <div className="stat-label">Active (In Progress)</div>
+
+          {/* Active Curricula */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #0284c7',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                Active (In Progress)
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(14, 165, 233, 0.12)',
+                  color: '#0284c7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ClockIcon size={18} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: '#0284c7', lineHeight: 1 }}>
+              {activeContracts}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              Live ongoing sessions
+            </div>
           </div>
-          <div className="stat-card" style={{ borderColor: 'var(--gold)' }}>
-            <div className="stat-num" style={{ color: 'var(--gold)' }}>{formatCurrency(totalEscrowHeld)}</div>
-            <div className="stat-label">Locked in Escrow</div>
+
+          {/* Locked in Escrow */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #d97706',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                Locked in Escrow
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(245, 158, 11, 0.14)',
+                  color: '#d97706',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ShieldIcon size={18} />
+              </div>
+            </div>
+            <div className="mono" style={{ fontSize: '26px', fontWeight: 800, color: '#d97706', lineHeight: 1 }}>
+              {formatCurrency(totalEscrowHeld)}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              Protected platform funds
+            </div>
           </div>
-          <div className="stat-card" style={{ borderColor: 'var(--add)' }}>
-            <div className="stat-num" style={{ color: 'var(--add)' }}>{completedContracts}</div>
-            <div className="stat-label">Completed &amp; Released</div>
+
+          {/* Completed & Released */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #059669',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                Completed &amp; Released
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  color: '#059669',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <CheckCircleIcon size={18} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: '#059669', lineHeight: 1 }}>
+              {completedContracts}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              Successfully concluded
+            </div>
           </div>
-          <div className="stat-card" style={{ borderColor: disputedContracts > 0 ? 'var(--del)' : 'var(--grid)' }}>
-            <div className="stat-num" style={{ color: disputedContracts > 0 ? 'var(--del)' : 'inherit' }}>
+
+          {/* Under Dispute */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: disputedContracts > 0 ? '3px solid #dc2626' : '1px solid var(--grid-strong)',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: disputedContracts > 0 ? '#dc2626' : 'var(--ink-muted)' }}>
+                Under Dispute
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: disputedContracts > 0 ? 'rgba(239, 68, 68, 0.14)' : 'var(--grid)',
+                  color: disputedContracts > 0 ? '#dc2626' : 'var(--ink-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <AlertTriangleIcon size={18} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: disputedContracts > 0 ? '#dc2626' : 'var(--ink)', lineHeight: 1 }}>
               {disputedContracts}
             </div>
-            <div className="stat-label">Under Dispute</div>
+            <div style={{ fontSize: '11.5px', color: disputedContracts > 0 ? '#dc2626' : 'var(--ink-muted)', marginTop: '8px', fontWeight: disputedContracts > 0 ? 600 : 400 }}>
+              {disputedContracts > 0 ? 'Action required immediately' : 'Zero active disputes'}
+            </div>
           </div>
         </div>
 
-        {/* Filters and Search Bar */}
+        {/* Filter, Tabs, Search & Sort Bar */}
         <div
           style={{
             background: 'var(--surface)',
             border: '1px solid var(--grid-strong)',
-            borderRadius: '12px',
-            padding: '16px',
-            marginBottom: '20px',
+            borderRadius: '14px',
+            padding: '14px 16px',
+            marginBottom: '18px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
             display: 'flex',
-            flexWrap: 'wrap',
+            flexDirection: 'column',
             gap: '12px',
-            alignItems: 'center',
-            justifyContent: 'space-between',
           }}
         >
-          {/* Status Tabs */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {/* Top Row: Filter Pills */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
             {[
-              { id: 'all', label: `All (${totalContracts})` },
-              { id: 'active', label: `Active (${activeContracts})` },
-              { id: 'proposed', label: 'Proposed' },
-              { id: 'completed_by_mentor', label: 'Awaiting Review' },
-              { id: 'completed', label: `Completed (${completedContracts})` },
-              { id: 'disputed', label: `Disputed (${disputedContracts})` },
-              { id: 'declined', label: 'Declined' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={`chip ${statusFilter === tab.id ? 'active' : ''}`}
-                onClick={() => setStatusFilter(tab.id)}
-                style={{ fontSize: '12px' }}
-              >
-                {tab.label}
-              </button>
-            ))}
+              { id: 'all', label: 'All', count: totalContracts },
+              { id: 'active', label: 'Active', count: activeContracts },
+              { id: 'proposed', label: 'Proposed', count: contracts.filter((c) => c.status === 'proposed').length },
+              { id: 'completed_by_mentor', label: 'Awaiting Review', count: contracts.filter((c) => c.status === 'completed_by_mentor').length },
+              { id: 'completed', label: 'Completed', count: completedContracts },
+              { id: 'disputed', label: 'Disputed', count: disputedContracts, isAlert: disputedContracts > 0 },
+              { id: 'declined', label: 'Declined', count: contracts.filter((c) => c.status === 'declined').length },
+            ].map((tab) => {
+              const isActive = statusFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.id)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    borderRadius: '999px',
+                    fontSize: '12.5px',
+                    fontWeight: isActive ? 700 : 500,
+                    border: '1px solid',
+                    borderColor: isActive
+                      ? 'var(--ink)'
+                      : tab.isAlert
+                      ? 'rgba(239, 68, 68, 0.4)'
+                      : 'var(--grid-strong)',
+                    background: isActive
+                      ? 'var(--ink)'
+                      : tab.isAlert
+                      ? 'rgba(239, 68, 68, 0.08)'
+                      : 'var(--bg)',
+                    color: isActive
+                      ? 'var(--surface)'
+                      : tab.isAlert
+                      ? '#dc2626'
+                      : 'var(--ink)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <span>{tab.label}</span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      padding: '1px 6px',
+                      borderRadius: '10px',
+                      background: isActive
+                        ? 'rgba(255,255,255,0.2)'
+                        : tab.isAlert
+                        ? '#dc2626'
+                        : 'var(--grid-strong)',
+                      color: isActive
+                        ? '#fff'
+                        : tab.isAlert
+                        ? '#fff'
+                        : 'var(--ink-muted)',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Search Box */}
-          <div style={{ position: 'relative', minWidth: '260px' }}>
-            <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-muted)' }}>
-              <SearchIcon size={14} />
-            </span>
-            <input
-              type="text"
-              placeholder="Search contracts, mentors, learners..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '8px 12px 8px 32px',
-                borderRadius: '8px',
-                border: '1px solid var(--grid)',
-                fontSize: '13px',
-                background: 'var(--bg)',
-                color: 'var(--ink)',
-              }}
-            />
+          {/* Bottom Row: Search, Sort & Counter */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '10px',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingTop: '6px',
+              borderTop: '1px solid var(--grid)',
+            }}
+          >
+            {/* Search Box */}
+            <div style={{ position: 'relative', flex: '1 1 300px', maxWidth: '420px' }}>
+              <span
+                style={{
+                  position: 'absolute',
+                  left: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--ink-muted)',
+                  pointerEvents: 'none',
+                  display: 'flex',
+                }}
+              >
+                <SearchIcon size={14} />
+              </span>
+              <input
+                type="text"
+                placeholder="Search contracts by title, learner, mentor, or tech..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 32px 7px 34px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--grid-strong)',
+                  fontSize: '13px',
+                  background: 'var(--bg)',
+                  color: 'var(--ink)',
+                  outline: 'none',
+                }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--ink-muted)',
+                    fontSize: '14px',
+                    padding: 0,
+                  }}
+                  title="Clear search"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Sort Dropdown & Quick Counter */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', color: 'var(--ink-muted)' }}>
+                <span>Sort by:</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--grid-strong)',
+                    fontSize: '12.5px',
+                    background: 'var(--surface)',
+                    color: 'var(--ink)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="newest">Newest Created</option>
+                  <option value="oldest">Oldest Created</option>
+                  <option value="amount_high">Highest Amount</option>
+                  <option value="amount_low">Lowest Amount</option>
+                  <option value="progress">Most Progress</option>
+                </select>
+              </div>
+
+              <span style={{ fontSize: '12px', color: 'var(--ink-muted)', paddingLeft: '4px' }}>
+                Showing <strong>{filteredContracts.length}</strong> of {totalContracts}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Contracts Table */}
+        {/* Enhanced Contracts Table */}
         {loading ? (
-          <div className="empty" style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--grid-strong)' }}>
-            <div className="spinner-sm" style={{ margin: '0 auto 12px' }} />
-            <p className="sub">Loading contracts...</p>
+          <div
+            style={{
+              background: 'var(--surface)',
+              borderRadius: '14px',
+              border: '1px solid var(--grid-strong)',
+              padding: '60px 20px',
+              textAlign: 'center',
+            }}
+          >
+            <div className="spinner-sm" style={{ margin: '0 auto 14px' }} />
+            <p className="sub" style={{ fontSize: '14px', margin: 0 }}>
+              Loading platform contracts...
+            </p>
           </div>
         ) : filteredContracts.length === 0 ? (
-          <div className="empty" style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--grid-strong)', padding: '40px' }}>
-            <DocumentIcon size={36} color="var(--ink-muted)" style={{ margin: '0 auto 12px' }} />
-            <div style={{ fontWeight: 600, fontSize: '16px' }}>No contracts found</div>
-            <p className="sub" style={{ fontSize: '13px', margin: '6px 0 0' }}>
-              {statusFilter !== 'all' ? `No contracts with status "${statusFilter}".` : 'No mentorship contracts have been created yet.'}
+          <div
+            style={{
+              background: 'var(--surface)',
+              borderRadius: '14px',
+              border: '1px solid var(--grid-strong)',
+              padding: '50px 20px',
+              textAlign: 'center',
+            }}
+          >
+            <div
+              style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: 'var(--grid)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 14px',
+                color: 'var(--ink-muted)',
+              }}
+            >
+              <DocumentIcon size={26} />
+            </div>
+            <div style={{ fontWeight: 700, fontSize: '16px', color: 'var(--ink)' }}>
+              No contracts found
+            </div>
+            <p className="sub" style={{ fontSize: '13px', maxWidth: '380px', margin: '8px auto 16px' }}>
+              {searchQuery
+                ? `No agreements matching "${searchQuery}". Try adjusting your keywords or clearing filters.`
+                : statusFilter !== 'all'
+                ? `No mentorship contracts with status "${statusFilter}".`
+                : 'No mentorship contracts have been created yet on the platform.'}
             </p>
+            {(searchQuery || statusFilter !== 'all') && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: '12.5px' }}
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('all');
+                }}
+              >
+                Reset All Filters
+              </button>
+            )}
           </div>
         ) : (
           <div
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--grid-strong)',
-              borderRadius: '12px',
+              borderRadius: '14px',
               overflow: 'hidden',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.03)',
             }}
           >
             <div style={{ overflowX: 'auto' }}>
-              <table className="admin-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                 <thead>
-                  <tr style={{ background: 'var(--bg)', borderBottom: '1px solid var(--grid-strong)', textAlign: 'left' }}>
-                    <th style={{ padding: '12px 16px' }}>ID / Title</th>
-                    <th style={{ padding: '12px 16px' }}>Learner</th>
-                    <th style={{ padding: '12px 16px' }}>Mentor</th>
-                    <th style={{ padding: '12px 16px' }}>Milestone Progress</th>
-                    <th style={{ padding: '12px 16px' }}>Total Amount</th>
-                    <th style={{ padding: '12px 16px' }}>Escrow Status</th>
-                    <th style={{ padding: '12px 16px' }}>Contract Status</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
+                  <tr
+                    style={{
+                      background: 'var(--bg)',
+                      borderBottom: '1px solid var(--grid-strong)',
+                      color: 'var(--ink-muted)',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    <th style={{ padding: '14px 18px', width: '25%' }}>Contract Details</th>
+                    <th style={{ padding: '14px 16px', width: '15%' }}>Learner</th>
+                    <th style={{ padding: '14px 16px', width: '15%' }}>Mentor</th>
+                    <th style={{ padding: '14px 16px', width: '15%' }}>Progress</th>
+                    <th style={{ padding: '14px 16px', width: '12%' }}>Escrow &amp; Price</th>
+                    <th style={{ padding: '14px 16px', width: '13%' }}>Contract Status</th>
+                    <th style={{ padding: '14px 18px', textAlign: 'right', width: '15%' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredContracts.map((c) => {
-                    const progressPct = Math.round(((c.completed_sessions || 0) / c.total_sessions) * 100);
+                  {paginatedContracts.map((c) => {
+                    const completed = c.completed_sessions || 0;
+                    const total = c.total_sessions || 1;
+                    const progressPct = Math.min(100, Math.round((completed / total) * 100));
+                    const isDisputed = c.status === 'disputed';
+                    const pricePerSession = Math.round(c.total_price / total);
 
                     return (
                       <tr
                         key={c.id}
                         style={{
                           borderBottom: '1px solid var(--grid)',
-                          transition: 'background 0.2s',
+                          borderLeft: isDisputed ? '4px solid #ef4444' : '4px solid transparent',
+                          background: isDisputed ? 'rgba(239, 68, 68, 0.02)' : 'transparent',
+                          transition: 'background 0.15s ease',
                         }}
                       >
-                        {/* ID & Title */}
-                        <td style={{ padding: '14px 16px', maxWidth: '240px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                        {/* 1. Contract Info */}
+                        <td style={{ padding: '16px 18px', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                            <span
+                              className="mono"
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                padding: '2px 7px',
+                                borderRadius: '6px',
+                                background: isDisputed ? 'rgba(239, 68, 68, 0.12)' : 'var(--accent-soft)',
+                                color: isDisputed ? '#dc2626' : 'var(--accent)',
+                              }}
+                            >
                               #{c.id}
                             </span>
-                            <span style={{ fontWeight: 700, color: 'var(--ink)' }}>
+                            <Link
+                              to={`/contracts/${c.id}`}
+                              target="_blank"
+                              style={{
+                                fontWeight: 700,
+                                fontSize: '13.5px',
+                                color: 'var(--ink)',
+                                textDecoration: 'none',
+                                lineHeight: 1.35,
+                              }}
+                              title="View Contract Workspace Hub"
+                            >
                               {c.title}
-                            </span>
+                            </Link>
                           </div>
+
+                          {/* Tech Stack Pills */}
                           {c.technology && (
-                            <div style={{ marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                              {c.technology.split(',').slice(0, 2).map((tech, i) => (
-                                <span key={i} className="tag" style={{ fontSize: '10.5px', padding: '1px 6px' }}>
-                                  {tech.trim()}
-                                </span>
-                              ))}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', margin: '6px 0 4px' }}>
+                              {c.technology
+                                .split(',')
+                                .filter(Boolean)
+                                .slice(0, 3)
+                                .map((tech, i) => (
+                                  <span
+                                    key={i}
+                                    style={{
+                                      fontSize: '10.5px',
+                                      fontWeight: 600,
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      background: 'var(--grid)',
+                                      color: 'var(--ink-muted)',
+                                    }}
+                                  >
+                                    {tech.trim()}
+                                  </span>
+                                ))}
                             </div>
                           )}
-                          <div className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-faint)', marginTop: '4px' }}>
-                            {formatDateTime(c.created_at)}
+
+                          {/* Timestamp */}
+                          <div
+                            className="mono"
+                            style={{
+                              fontSize: '11px',
+                              color: 'var(--ink-faint)',
+                              marginTop: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <span>📅</span>
+                            <span>{formatDateTime(c.created_at)}</span>
                           </div>
                         </td>
 
-                        {/* Learner */}
-                        <td style={{ padding: '14px 16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div className="avatar" style={{ width: '26px', height: '26px', fontSize: '11px' }}>
+                        {/* 2. Learner Column */}
+                        <td style={{ padding: '16px 16px', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                                color: '#fff',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                                boxShadow: '0 2px 6px rgba(99, 102, 241, 0.25)',
+                              }}
+                            >
                               {initials(c.learner_name)}
                             </div>
-                            <span style={{ fontWeight: 600 }}>{c.learner_name}</span>
+                            <div style={{ overflow: 'hidden' }}>
+                              <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {c.learner_name || 'Learner'}
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: '10.5px',
+                                  color: 'var(--ink-muted)',
+                                  display: 'inline-block',
+                                }}
+                              >
+                                Learner
+                              </span>
+                            </div>
                           </div>
                         </td>
 
-                        {/* Mentor */}
-                        <td style={{ padding: '14px 16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div className="avatar" style={{ width: '26px', height: '26px', fontSize: '11px' }}>
+                        {/* 3. Mentor Column */}
+                        <td style={{ padding: '16px 16px', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                background: 'linear-gradient(135deg, #059669, #0d9488)',
+                                color: '#fff',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                                boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                              }}
+                            >
                               {initials(c.mentor_name)}
                             </div>
-                            <span style={{ fontWeight: 600 }}>{c.mentor_name}</span>
+                            <div style={{ overflow: 'hidden' }}>
+                              <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {c.mentor_name || 'Mentor'}
+                              </div>
+                              <span
+                                style={{
+                                  fontSize: '10.5px',
+                                  color: '#059669',
+                                  fontWeight: 600,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '2px',
+                                }}
+                              >
+                                Verified Mentor
+                              </span>
+                            </div>
                           </div>
                         </td>
 
-                        {/* Progress */}
-                        <td style={{ padding: '14px 16px', minWidth: '150px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', marginBottom: '4px' }}>
-                            <span>{c.completed_sessions || 0} of {c.total_sessions} sessions</span>
-                            <span className="mono">{progressPct}%</span>
+                        {/* 4. Milestone Progress Column */}
+                        <td style={{ padding: '16px 16px', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '12px', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--ink)' }}>
+                              {completed} of {total} sessions
+                            </span>
+                            <span className="mono" style={{ fontSize: '11.5px', fontWeight: 700, color: progressPct === 100 ? '#059669' : 'var(--accent)' }}>
+                              {progressPct}%
+                            </span>
                           </div>
-                          <div style={{ height: '6px', background: 'var(--grid)', borderRadius: '3px', overflow: 'hidden' }}>
+
+                          {/* Progress Track */}
+                          <div
+                            style={{
+                              height: '7px',
+                              background: 'var(--grid)',
+                              borderRadius: '999px',
+                              overflow: 'hidden',
+                              marginBottom: '6px',
+                            }}
+                          >
                             <div
                               style={{
                                 height: '100%',
-                                background: c.status === 'completed' ? 'var(--add)' : 'var(--accent)',
                                 width: `${progressPct}%`,
+                                borderRadius: '999px',
+                                background:
+                                  progressPct === 100
+                                    ? 'linear-gradient(90deg, #10b981, #059669)'
+                                    : 'linear-gradient(90deg, var(--brand), #3b82f6)',
+                                transition: 'width 0.3s ease',
                               }}
                             />
                           </div>
-                          <div style={{ fontSize: '10.5px', color: 'var(--ink-muted)', marginTop: '3px' }}>
-                            {c.session_duration_minutes}m / session
+
+                          <div style={{ fontSize: '11px', color: 'var(--ink-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span>⏱️</span>
+                            <span>{c.session_duration_minutes || 60}m / session</span>
                           </div>
                         </td>
 
-                        {/* Total Price */}
-                        <td style={{ padding: '14px 16px' }}>
-                          <div className="rate-num" style={{ fontSize: '15px' }}>
+                        {/* 5. Escrow & Price Column */}
+                        <td style={{ padding: '16px 16px', verticalAlign: 'middle' }}>
+                          <div className="mono" style={{ fontSize: '16px', fontWeight: 800, color: 'var(--ink)' }}>
                             {formatCurrency(c.total_price)}
                           </div>
-                          <div className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
-                            ~{formatCurrency(Math.round(c.total_price / c.total_sessions))}/sess
+                          <div className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)', margin: '2px 0 6px' }}>
+                            ~{formatCurrency(pricePerSession)}/sess
                           </div>
+                          <div>{renderEscrowBadge(c.escrow_status)}</div>
                         </td>
 
-                        {/* Escrow Status */}
-                        <td style={{ padding: '14px 16px' }}>
-                          <span
-                            style={{
-                              fontSize: '11px',
-                              padding: '3px 8px',
-                              borderRadius: '12px',
-                              fontWeight: 600,
-                              textTransform: 'uppercase',
-                              background:
-                                c.escrow_status === 'released'
-                                  ? 'rgba(16, 185, 129, 0.12)'
-                                  : c.escrow_status === 'held'
-                                  ? 'rgba(245, 158, 11, 0.15)'
-                                  : c.escrow_status === 'refunded'
-                                  ? 'rgba(168, 85, 247, 0.15)'
-                                  : 'var(--bg)',
-                              color:
-                                c.escrow_status === 'released'
-                                  ? '#10b981'
-                                  : c.escrow_status === 'held'
-                                  ? '#f59e0b'
-                                  : c.escrow_status === 'refunded'
-                                  ? '#a855f7'
-                                  : 'var(--ink-muted)',
-                            }}
-                          >
-                            {c.escrow_status || 'Unfunded'}
-                          </span>
-                        </td>
+                        {/* 6. Contract Status Column */}
+                        <td style={{ padding: '16px 16px', verticalAlign: 'middle' }}>
+                          <div>{renderContractStatusBadge(c.status)}</div>
 
-                        {/* Contract Status */}
-                        <td style={{ padding: '14px 16px' }}>
-                          {getStatusBadge(c.status)}
-                          {c.status === 'disputed' && c.dispute_reason && (
-                            <div style={{ fontSize: '11px', color: 'var(--del)', marginTop: '4px', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              ⚠ {c.dispute_reason}
+                          {/* Dispute Callout Alert */}
+                          {isDisputed && c.dispute_reason && (
+                            <div
+                              style={{
+                                marginTop: '8px',
+                                padding: '6px 8px',
+                                borderRadius: '6px',
+                                background: 'rgba(239, 68, 68, 0.08)',
+                                border: '1px solid rgba(239, 68, 68, 0.25)',
+                                fontSize: '11px',
+                                color: '#dc2626',
+                                lineHeight: 1.3,
+                                maxWidth: '200px',
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, marginBottom: '2px' }}>Dispute Filed:</div>
+                              <div style={{ fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.dispute_reason}>
+                                "{c.dispute_reason}"
+                              </div>
                             </div>
                           )}
                         </td>
 
-                        {/* Action buttons */}
-                        <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
-                            {/* Dispute Resolution Button */}
-                            {c.status === 'disputed' && (
+                        {/* 7. Actions Column */}
+                        <td style={{ padding: '16px 18px', verticalAlign: 'middle', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end' }}>
+                            {/* Urgent Dispute Resolve Action */}
+                            {isDisputed && (
                               <button
                                 type="button"
                                 className="btn btn-primary"
-                                style={{ fontSize: '11.5px', padding: '5px 10px', background: 'var(--del)' }}
+                                style={{
+                                  fontSize: '11.5px',
+                                  padding: '5px 10px',
+                                  background: '#dc2626',
+                                  borderColor: '#dc2626',
+                                  color: '#fff',
+                                  fontWeight: 700,
+                                  boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                }}
                                 onClick={() => {
                                   setDisputeModalContract(c);
                                   setResolutionAction('release_to_mentor');
                                   setAdminNotes('');
                                 }}
                               >
-                                Resolve Dispute ⚖️
+                                <ScaleIcon size={12} />
+                                <span>Resolve Dispute</span>
                               </button>
                             )}
 
-                            {/* Inspect Detail */}
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              style={{ fontSize: '11.5px', padding: '5px 10px' }}
-                              onClick={() => handleOpenPreview(c.id)}
-                            >
-                              Quick Inspect 👁️
-                            </button>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              {/* Quick View */}
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                style={{
+                                  fontSize: '11.5px',
+                                  padding: '4px 8px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                }}
+                                onClick={() => handleOpenPreview(c.id)}
+                                title="Quick inspect syllabus & sessions"
+                              >
+                                <EyeIcon size={12} />
+                                <span>Detail</span>
+                              </button>
 
-                            {/* Full Hub Link */}
-                            <Link
-                              to={`/contracts/${c.id}`}
-                              className="btn btn-secondary"
-                              style={{ fontSize: '11.5px', padding: '5px 10px' }}
-                              target="_blank"
-                              title="Open Contract Hub"
-                            >
-                              Hub ↗
-                            </Link>
+                              {/* Direct Link to Hub */}
+                              <Link
+                                to={`/contracts/${c.id}`}
+                                className="btn btn-secondary"
+                                style={{
+                                  fontSize: '11.5px',
+                                  padding: '4px 8px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                }}
+                                target="_blank"
+                                title="Open full contract hub in new tab"
+                              >
+                                <span>Hub ↗</span>
+                              </Link>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -455,6 +1241,56 @@ export default function AdminContractsPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Pagination & Summary Footer */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 18px',
+                background: 'var(--bg)',
+                borderTop: '1px solid var(--grid-strong)',
+                fontSize: '12.5px',
+                color: 'var(--ink-muted)',
+                flexWrap: 'wrap',
+                gap: '10px',
+              }}
+            >
+              <div>
+                Showing <strong>{filteredContracts.length === 0 ? 0 : ((currentPage - 1) * itemsPerPage) + 1}</strong> to{' '}
+                <strong>{Math.min(currentPage * itemsPerPage, filteredContracts.length)}</strong> of{' '}
+                <strong>{filteredContracts.length}</strong> matching contracts
+              </div>
+
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={currentPage <= 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    style={{ fontSize: '11.5px', padding: '3px 10px' }}
+                  >
+                    Previous
+                  </button>
+
+                  <span style={{ fontSize: '12px', padding: '0 6px' }}>
+                    Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
+                  </span>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    style={{ fontSize: '11.5px', padding: '3px 10px' }}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

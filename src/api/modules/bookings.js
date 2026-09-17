@@ -7,8 +7,21 @@ export const bookingApi = {
   getBooking: (id) =>
     apiFetch(`/api/bookings/${id}`, { auth: true }),
 
-  createBooking: (data) =>
-    apiFetch('/api/bookings', { method: 'POST', auth: true, body: data }),
+  createBooking: (data) => {
+    const duration = Number(data.duration_minutes || data.duration || 60);
+    let price = Number(data.price || 0);
+    if (!price || price <= 0) {
+      const hourly = Number(data.hourly_rate || data.rate || 0);
+      price = hourly > 0 ? Math.max(1, Math.round((hourly * duration) / 60)) : 50;
+    }
+    const payload = {
+      ...data,
+      duration_minutes: duration,
+      price,
+      scheduled_at: data.scheduled_at || data.scheduled_time || undefined,
+    };
+    return apiFetch('/api/bookings', { method: 'POST', auth: true, body: payload });
+  },
 
   acceptBooking: (id) =>
     apiFetch(`/api/bookings/${id}/accept`, { method: 'POST', auth: true }),
@@ -21,6 +34,9 @@ export const bookingApi = {
 
   disputeBooking: (id, reason) =>
     apiFetch(`/api/bookings/${id}/dispute`, { method: 'POST', auth: true, body: { reason } }),
+
+  cancelBooking: (id, reason) =>
+    apiFetch(`/api/bookings/${id}/cancel`, { method: 'POST', auth: true, body: { reason } }),
 
   getNotes: (id) =>
     apiFetch(`/api/bookings/${id}/notes`, { auth: true }),

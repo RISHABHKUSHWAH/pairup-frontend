@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
-import { api, initials, stars } from '../../api/client';
-import { EyeIcon } from '../../components/Icons';
-import { useConfirm, useToast } from '../../context';
+import { api, initials, stars, formatCurrency } from '../../api/client';
+import { useConfirm, useToast, useAuth } from '../../context';
 
 export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User Management' }) {
+  const { user: currentUser } = useAuth();
   const { confirm } = useConfirm();
   const { toast } = useToast();
   const [users, setUsers] = useState([]);
+  const [contracts, setContracts] = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState(initialRole);
   const [statusFilter, setStatusFilter] = useState('all');
@@ -31,20 +35,113 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
     setLoading(true);
     setError('');
     try {
-      let data;
-      if (roleFilter === 'mentor') {
-        data = await api.getAdminUsers('mentor');
-      } else if (roleFilter === 'learner') {
-        data = await api.getAdminUsers('learner');
-      } else {
-        data = await api.getAdminAllUsers();
-      }
+      const [data, contractsData, bookingsData, paymentsData] = await Promise.all([
+        roleFilter === 'mentor'
+          ? api.getAdminUsers('mentor')
+          : roleFilter === 'learner'
+          ? api.getAdminUsers('learner')
+          : api.getAdminAllUsers(),
+        api.getContracts().catch(() => []),
+        api.getAdminBookings ? api.getAdminBookings().catch(() => []) : Promise.resolve([]),
+        api.getAdminPayments ? api.getAdminPayments().catch(() => []) : Promise.resolve([]),
+      ]);
       setUsers(data || []);
+      setContracts(Array.isArray(contractsData) ? contractsData : []);
+      setBookings(Array.isArray(bookingsData) ? bookingsData : []);
+      setPayments(Array.isArray(paymentsData) ? paymentsData : []);
     } catch (err) {
       setError(err.message || 'Failed to load users');
     } finally {
       setLoading(false);
     }
+  };
+
+  const getUserFinances = (u) => {
+    const userId = u.user_id || u.id;
+    const userName = (u.name || '').toLowerCase().trim();
+
+    let totalSpent = Number(u.total_spent || 0);
+    let totalEarned = Number(u.total_earned || 0);
+    let pendingEscrow = Number(u.pending_escrow || 0);
+    let payoutCount = Number(u.payout_count || 0);
+
+    // Fallback/compute from payments array if available
+    if (payments && payments.length > 0) {
+      const userPaymentsAsLearner = payments.filter((p) => {
+        const idMatch = p.learner_id === userId;
+        const nameMatch = userName && (p.learner_name || '').toLowerCase().trim() === userName;
+        return (idMatch || nameMatch) && (p.status === 'held' || p.status === 'released');
+      });
+
+      const userPaymentsAsMentor = payments.filter((p) => {
+        const idMatch = p.mentor_id === userId;
+        const nameMatch = userName && (p.mentor_name || '').toLowerCase().trim() === userName;
+        return idMatch || nameMatch;
+      });
+
+      if (totalSpent === 0 && userPaymentsAsLearner.length > 0) {
+        totalSpent = userPaymentsAsLearner.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      }
+
+      if (totalEarned === 0 && userPaymentsAsMentor.length > 0) {
+        totalEarned = userPaymentsAsMentor
+          .filter((p) => p.status === 'released')
+          .reduce((sum, p) => sum + Number(p.net_payout !== undefined ? p.net_payout : (p.amount - (p.platform_fee || 0))), 0);
+        pendingEscrow = userPaymentsAsMentor
+          .filter((p) => p.status === 'held')
+          .reduce((sum, p) => sum + Number(p.net_payout !== undefined ? p.net_payout : (p.amount - (p.platform_fee || 0))), 0);
+        payoutCount = userPaymentsAsMentor.filter((p) => p.status === 'released').length;
+      }
+    }
+
+    return {
+      totalSpent,
+      totalEarned,
+      pendingEscrow,
+      payoutCount,
+    };
+  };
+
+  const getUserWorkload = (u) => {
+    const userId = u.user_id || u.id;
+    const userName = (u.name || '').toLowerCase().trim();
+
+    // Match contracts where user is mentor or learner
+    const userContracts = contracts.filter((c) => {
+      const mentorMatch = c.mentor_id === userId || (userName && (c.mentor_name || '').toLowerCase().trim() === userName);
+      const learnerMatch = c.learner_id === userId || (userName && (c.learner_name || '').toLowerCase().trim() === userName);
+      return mentorMatch || learnerMatch;
+    });
+
+    const activeContracts = userContracts.filter(
+      (c) => c.status === 'active' || c.status === 'completed_by_mentor'
+    );
+    const activeContractsCount = activeContracts.length;
+
+    // Remaining/active sessions in active contracts
+    const contractSessions = activeContracts.reduce((sum, c) => {
+      const total = c.total_sessions || 0;
+      const completed = c.completed_sessions || 0;
+      return sum + Math.max(0, total - completed);
+    }, 0);
+
+    // Also inspect any standalone bookings for this user
+    const userBookings = bookings.filter((b) => {
+      const mentorMatch = b.mentor_id === userId || (userName && (b.mentor_name || '').toLowerCase().trim() === userName);
+      const learnerMatch = b.learner_id === userId || (userName && (b.learner_name || '').toLowerCase().trim() === userName);
+      return mentorMatch || learnerMatch;
+    });
+    const activeBookingsCount = userBookings.filter(
+      (b) => b.status === 'paid' || b.status === 'accepted' || b.status === 'pending' || b.status === 'active'
+    ).length;
+
+    const activeSessionsCount = Math.max(contractSessions, activeBookingsCount);
+
+    return {
+      activeContractsCount,
+      activeSessionsCount,
+      totalContractsCount: userContracts.length,
+    };
   };
 
   const handleSwitchRole = async (userId, targetRole) => {
@@ -70,6 +167,11 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
   };
 
   const handleToggleSuspend = async (userId, currentSuspended) => {
+    if (currentUser && (currentUser.id === userId || currentUser.user_id === userId)) {
+      toast.error('You cannot suspend your own account.');
+      return;
+    }
+
     const nextState = !currentSuspended;
     const confirmed = await confirm({
       title: nextState ? 'Suspend User Account' : 'Reactivate User Account',
@@ -81,19 +183,25 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
     });
     if (!confirmed) return;
 
-    setUsers((prev) =>
-      prev.map((u) => {
-        const uId = u.user_id || u.id;
-        return uId === userId ? { ...u, is_suspended: nextState } : u;
-      })
-    );
+    try {
+      const res = await api.adminToggleSuspendUser(userId, nextState);
 
-    if (selectedUser && (selectedUser.id === userId || selectedUser.user_id === userId)) {
-      setSelectedUser((prev) => (prev ? { ...prev, is_suspended: nextState } : null));
+      setUsers((prev) =>
+        prev.map((u) => {
+          const uId = u.user_id || u.id;
+          return uId === userId ? { ...u, is_suspended: nextState, is_active: !nextState } : u;
+        })
+      );
+
+      if (selectedUser && (selectedUser.id === userId || selectedUser.user_id === userId)) {
+        setSelectedUser((prev) => (prev ? { ...prev, is_suspended: nextState, is_active: !nextState } : null));
+      }
+
+      const msg = res?.message || `User account ${nextState ? 'suspended' : 'reactivated'} successfully.`;
+      toast.success(msg);
+    } catch (err) {
+      toast.error(err.message || 'Could not update user account status.');
     }
-
-    const msg = `User account ${nextState ? 'suspended' : 'reactivated'} successfully.`;
-    toast.success(msg);
   };
 
   const filteredUsers = users.filter((u) => {
@@ -169,12 +277,18 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>User</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Joined Date</th>
-                  <th>Actions</th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '170px' }}>User</th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '180px' }}>Email</th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '90px' }}>Role</th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '90px' }}>Status</th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '150px' }} title="Active contracts and scheduled sessions workload">
+                    Active Contracts / Sessions
+                  </th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '150px' }} title="Lifetime spend (Learners) or payouts earned (Mentors)">
+                    Total Spent / Earned
+                  </th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '120px' }}>Joined Date</th>
+                  <th style={{ whiteSpace: 'nowrap', minWidth: '100px', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -185,28 +299,44 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                   return (
                     <tr key={userId}>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <button
+                          type="button"
+                          className="user-profile-clickable"
+                          onClick={() => {
+                            setSelectedUser(u);
+                            setUserModalTab('profile');
+                          }}
+                          title={`Click to view full profile & activity for ${u.name}`}
+                        >
                           <div
                             style={{
-                              width: '32px',
-                              height: '32px',
+                              width: '34px',
+                              height: '34px',
                               borderRadius: '50%',
-                              background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
+                              background: 'linear-gradient(135deg, var(--brand), #6366f1)',
                               color: '#fff',
                               fontSize: '12px',
-                              fontWeight: 'bold',
+                              fontWeight: 700,
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
+                              flexShrink: 0,
+                              boxShadow: '0 2px 5px rgba(38, 71, 214, 0.15)',
                             }}
                           >
                             {initials(u.name)}
                           </div>
-                          <div>
-                            <div style={{ fontWeight: 600 }}>{u.name}</div>
-                            {u.title && <div className="sub" style={{ fontSize: '11px', margin: 0 }}>{u.title}</div>}
+                          <div style={{ textAlign: 'left' }}>
+                            <div className="user-profile-name" style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)' }}>
+                              {u.name}
+                            </div>
+                            {u.title && (
+                              <div className="sub" style={{ fontSize: '11px', margin: 0, color: 'var(--ink-muted)' }}>
+                                {u.title}
+                              </div>
+                            )}
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="mono" style={{ fontSize: '12px' }}>{u.email}</td>
                       <td>
@@ -218,7 +348,14 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                               ? 'badge-success'
                               : 'badge-secondary'
                           }`}
-                          style={{ fontSize: '11px', textTransform: 'capitalize' }}
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '3px 9px',
+                            borderRadius: '20px',
+                            textTransform: 'capitalize',
+                            whiteSpace: 'nowrap',
+                          }}
                         >
                           {u.role}
                         </span>
@@ -226,41 +363,295 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                       <td>
                         <span
                           className={`status-badge ${isSuspended ? 'badge-cancelled' : 'badge-accepted'} mono`}
-                          style={{ fontSize: '11px' }}
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '3px 9px',
+                            borderRadius: '20px',
+                            whiteSpace: 'nowrap',
+                          }}
                         >
                           {isSuspended ? 'Suspended' : 'Active'}
                         </span>
                       </td>
-                      <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'Recent'}
+                      <td>
+                        {(() => {
+                          if (u.role === 'admin' || u.role === 'superadmin') {
+                            return <span style={{ color: 'var(--ink-faint)', fontSize: '13px', fontWeight: 500 }}>—</span>;
+                          }
+
+                          const { activeContractsCount, activeSessionsCount, totalContractsCount } = getUserWorkload(u);
+                          const targetUrl = activeContractsCount > 0
+                            ? `/admin/contracts?search=${encodeURIComponent(u.name || '')}&status=active`
+                            : `/admin/contracts?search=${encodeURIComponent(u.name || '')}`;
+
+                          if (activeContractsCount > 0) {
+                            return (
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                                <Link
+                                  to={targetUrl}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '3px 10px',
+                                    borderRadius: '20px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    fontFamily: "'IBM Plex Mono', monospace",
+                                    textDecoration: 'none',
+                                    whiteSpace: 'nowrap',
+                                    background: '#E7F6EF',
+                                    color: '#157F53',
+                                    border: '1px solid rgba(21, 127, 83, 0.28)',
+                                    boxShadow: '0 1px 2px rgba(21, 127, 83, 0.05)',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                  title={`View ${activeContractsCount} active contract${activeContractsCount > 1 ? 's' : ''} for ${u.name} in Contracts view`}
+                                >
+                                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#157F53', display: 'inline-block' }} />
+                                  <span>{activeContractsCount} Active</span>
+                                </Link>
+                                {activeSessionsCount > 0 && (
+                                  <span
+                                    className="mono"
+                                    style={{ fontSize: '10.5px', color: 'var(--ink-muted)', paddingLeft: '4px', whiteSpace: 'nowrap' }}
+                                    title={`${activeSessionsCount} active or scheduled session${activeSessionsCount > 1 ? 's' : ''}`}
+                                  >
+                                    {activeSessionsCount} session{activeSessionsCount > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
+                              <Link
+                                to={targetUrl}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  padding: '3px 10px',
+                                  borderRadius: '20px',
+                                  fontSize: '11px',
+                                  fontWeight: 500,
+                                  fontFamily: "'IBM Plex Mono', monospace",
+                                  textDecoration: 'none',
+                                  whiteSpace: 'nowrap',
+                                  background: '#F1F3F7',
+                                  color: '#5B6270',
+                                  border: '1px solid #D2D6E0',
+                                  transition: 'all 0.15s ease',
+                                }}
+                                title={totalContractsCount > 0 ? `View ${totalContractsCount} past contract(s) for ${u.name}` : `View contracts directory for ${u.name}`}
+                              >
+                                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#9098A8', display: 'inline-block' }} />
+                                <span>0 Active</span>
+                              </Link>
+                              {activeSessionsCount > 0 && (
+                                <span
+                                  className="mono"
+                                  style={{ fontSize: '10.5px', color: 'var(--ink-muted)', paddingLeft: '4px', whiteSpace: 'nowrap' }}
+                                  title={`${activeSessionsCount} standalone session${activeSessionsCount > 1 ? 's' : ''}`}
+                                >
+                                  {activeSessionsCount} session{activeSessionsCount > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            style={{ padding: '3px 8px', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            onClick={() => {
-                              setSelectedUser(u);
-                              setUserModalTab('profile');
-                            }}
-                          >
-                            <EyeIcon size={12} />
-                            <span>Detail</span>
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            style={{
-                              padding: '3px 8px',
-                              fontSize: '11.5px',
-                              color: isSuspended ? '#10b981' : 'var(--danger, #ef4444)',
-                            }}
-                            onClick={() => handleToggleSuspend(userId, isSuspended)}
-                          >
-                            {isSuspended ? 'Activate' : 'Suspend'}
-                          </button>
-                        </div>
+                        {(() => {
+                          if (u.role === 'admin' || u.role === 'superadmin') {
+                            return <span style={{ color: 'var(--ink-faint)', fontSize: '13px', fontWeight: 500 }}>—</span>;
+                          }
+
+                          const fin = getUserFinances(u);
+
+                          if (u.role === 'mentor') {
+                            const earned = fin.totalEarned;
+                            const escrow = fin.pendingEscrow;
+                            const targetUrl = `/admin/payouts?search=${encodeURIComponent(u.name || '')}`;
+
+                            if (earned > 0 || escrow > 0) {
+                              return (
+                                <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                                  <Link
+                                    to={targetUrl}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      padding: '3px 10px',
+                                      borderRadius: '20px',
+                                      fontSize: '11px',
+                                      fontWeight: 600,
+                                      fontFamily: "'IBM Plex Mono', monospace",
+                                      textDecoration: 'none',
+                                      whiteSpace: 'nowrap',
+                                      background: '#E7F6EF',
+                                      color: '#157F53',
+                                      border: '1px solid rgba(21, 127, 83, 0.28)',
+                                      boxShadow: '0 1px 2px rgba(21, 127, 83, 0.05)',
+                                      transition: 'all 0.15s ease',
+                                    }}
+                                    title={`View payouts ledger for ${u.name}: ${formatCurrency(earned)} earned`}
+                                  >
+                                    <span>{formatCurrency(earned)}</span>
+                                    <span style={{ fontSize: '9.5px', opacity: 0.85, textTransform: 'uppercase' }}>Earned</span>
+                                  </Link>
+                                  {escrow > 0 ? (
+                                    <span
+                                      className="mono"
+                                      style={{ fontSize: '10.5px', color: 'var(--warn, #B54708)', fontWeight: 600, paddingLeft: '4px', whiteSpace: 'nowrap' }}
+                                      title={`${formatCurrency(escrow)} currently held in escrow`}
+                                    >
+                                      + {formatCurrency(escrow)} escrow
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className="mono"
+                                      style={{ fontSize: '10.5px', color: 'var(--ink-muted)', paddingLeft: '4px', whiteSpace: 'nowrap' }}
+                                    >
+                                      {fin.payoutCount > 0 ? `${fin.payoutCount} payout${fin.payoutCount === 1 ? '' : 's'}` : 'Net payouts'}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
+                                <Link
+                                  to={targetUrl}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    padding: '3px 10px',
+                                    borderRadius: '20px',
+                                    fontSize: '11px',
+                                    fontWeight: 500,
+                                    fontFamily: "'IBM Plex Mono', monospace",
+                                    textDecoration: 'none',
+                                    whiteSpace: 'nowrap',
+                                    background: '#F1F3F7',
+                                    color: '#5B6270',
+                                    border: '1px solid #D2D6E0',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                  title={`View payouts ledger for ${u.name}`}
+                                >
+                                  <span>{formatCurrency(0)}</span>
+                                  <span style={{ fontSize: '9.5px', opacity: 0.8, textTransform: 'uppercase' }}>Earned</span>
+                                </Link>
+                              </div>
+                            );
+                          }
+
+                          // Default / Learner role
+                          const spent = fin.totalSpent;
+                          const targetUrl = `/admin/payments?search=${encodeURIComponent(u.name || '')}`;
+
+                          if (spent > 0) {
+                            return (
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                                <Link
+                                  to={targetUrl}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    padding: '3px 10px',
+                                    borderRadius: '20px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    fontFamily: "'IBM Plex Mono', monospace",
+                                    textDecoration: 'none',
+                                    whiteSpace: 'nowrap',
+                                    background: '#EDF0FF',
+                                    color: '#2647D6',
+                                    border: '1px solid rgba(38, 71, 214, 0.28)',
+                                    boxShadow: '0 1px 2px rgba(38, 71, 214, 0.05)',
+                                    transition: 'all 0.15s ease',
+                                  }}
+                                  title={`View transactions for ${u.name}: ${formatCurrency(spent)} total lifetime spend`}
+                                >
+                                  <span>{formatCurrency(spent)}</span>
+                                  <span style={{ fontSize: '9.5px', opacity: 0.85, textTransform: 'uppercase' }}>Spent</span>
+                                </Link>
+                                <span
+                                  className="mono"
+                                  style={{ fontSize: '10.5px', color: 'var(--ink-muted)', paddingLeft: '4px', whiteSpace: 'nowrap' }}
+                                >
+                                  Lifetime spend
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start' }}>
+                              <Link
+                                to={targetUrl}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  padding: '3px 10px',
+                                  borderRadius: '20px',
+                                  fontSize: '11px',
+                                  fontWeight: 500,
+                                  fontFamily: "'IBM Plex Mono', monospace",
+                                  textDecoration: 'none',
+                                  whiteSpace: 'nowrap',
+                                  background: '#F1F3F7',
+                                  color: '#5B6270',
+                                  border: '1px solid #D2D6E0',
+                                  transition: 'all 0.15s ease',
+                                }}
+                                title={`View payments ledger for ${u.name}`}
+                              >
+                                <span>{formatCurrency(0)}</span>
+                                <span style={{ fontSize: '9.5px', opacity: 0.8, textTransform: 'uppercase' }}>Spent</span>
+                              </Link>
+                            </div>
+                          );
+                        })()}
+                      </td>
+                      <td className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)', whiteSpace: 'nowrap' }}>
+                        {u.created_at
+                          ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                          : 'Recent'}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          disabled={currentUser && (currentUser.id === userId || currentUser.user_id === userId)}
+                          title={currentUser && (currentUser.id === userId || currentUser.user_id === userId) ? 'You cannot suspend your own account' : undefined}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '4px 12px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            borderRadius: '6px',
+                            border: isSuspended ? '1px solid #A7F3D0' : '1px solid #FCA5A5',
+                            background: isSuspended ? '#ECFDF5' : '#FEF2F2',
+                            color: isSuspended ? '#059669' : '#DC2626',
+                            cursor: (currentUser && (currentUser.id === userId || currentUser.user_id === userId)) ? 'not-allowed' : 'pointer',
+                            opacity: (currentUser && (currentUser.id === userId || currentUser.user_id === userId)) ? 0.45 : 1,
+                            transition: 'all 0.15s ease',
+                            whiteSpace: 'nowrap',
+                          }}
+                          onClick={() => handleToggleSuspend(userId, isSuspended)}
+                        >
+                          {isSuspended ? 'Activate' : 'Suspend'}
+                        </button>
                       </td>
                     </tr>
                   );
@@ -410,6 +801,35 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
             {userModalTab === 'sessions' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div style={{ padding: '12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px' }}>
+                      Live Contracts &amp; Workload:
+                    </div>
+                    {selectedUser.role !== 'admin' && selectedUser.role !== 'superadmin' && (
+                      <Link
+                        to={`/admin/contracts?search=${encodeURIComponent(selectedUser.name || '')}`}
+                        className="btn btn-ghost"
+                        style={{ fontSize: '11.5px', padding: '2px 8px', textDecoration: 'none' }}
+                      >
+                        View in Contracts →
+                      </Link>
+                    )}
+                  </div>
+                  {(() => {
+                    const workload = getUserWorkload(selectedUser);
+                    return (
+                      <div className="sub" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <span>Active Contracts: <strong style={{ color: workload.activeContractsCount > 0 ? '#10b981' : 'inherit' }}>{workload.activeContractsCount}</strong></span>
+                        <span>•</span>
+                        <span>Active Sessions: <strong>{workload.activeSessionsCount}</strong></span>
+                        <span>•</span>
+                        <span>Total Agreements: <strong>{workload.totalContractsCount}</strong></span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div style={{ padding: '12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
                   <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>
                     Sessions History (Attended / Mentored):
                   </div>
@@ -430,40 +850,82 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
             )}
 
             {/* Modal Body Tab 3: Payments & Reviews */}
-            {userModalTab === 'payments' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <div style={{ padding: '10px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
-                    <div className="sub" style={{ fontSize: '11px' }}>Total Spent / Transacted</div>
-                    <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--brand)', marginTop: '2px' }}>
-                      ₹{selectedUser.role === 'mentor' ? '14,500' : '3,200'}
-                    </div>
-                  </div>
-                  <div style={{ padding: '10px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
-                    <div className="sub" style={{ fontSize: '11px' }}>Average Rating Given/Received</div>
-                    <div style={{ fontWeight: 700, fontSize: '15px', color: '#f59e0b', marginTop: '2px' }}>
-                      {selectedUser.rating_avg && Number(selectedUser.rating_avg) > 0
-                        ? `★ ${Number(selectedUser.rating_avg).toFixed(1)} / 5.0`
-                        : '★ New (No reviews)'}
-                    </div>
-                  </div>
-                </div>
+            {userModalTab === 'payments' && (() => {
+              const fin = getUserFinances(selectedUser);
+              const isMentor = selectedUser.role === 'mentor';
 
-                <div style={{ padding: '12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
-                  <div className="sub" style={{ fontSize: '12px' }}>
-                    No disputes or chargebacks on record for this user account.
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div style={{ padding: '10px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
+                      <div className="sub" style={{ fontSize: '11px' }}>
+                        {isMentor ? 'Lifetime Payouts Earned' : 'Lifetime Spend'}
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: '16px', color: isMentor ? '#10b981' : '#818cf8', marginTop: '2px' }}>
+                        {formatCurrency(isMentor ? fin.totalEarned : fin.totalSpent)}
+                      </div>
+                      {isMentor && fin.pendingEscrow > 0 && (
+                        <div style={{ fontSize: '11px', color: '#f59e0b', marginTop: '3px' }}>
+                          + {formatCurrency(fin.pendingEscrow)} held in escrow
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ padding: '10px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
+                      <div className="sub" style={{ fontSize: '11px' }}>Average Rating Given/Received</div>
+                      <div style={{ fontWeight: 700, fontSize: '15px', color: '#f59e0b', marginTop: '2px' }}>
+                        {selectedUser.rating_avg && Number(selectedUser.rating_avg) > 0
+                          ? `★ ${Number(selectedUser.rating_avg).toFixed(1)} / 5.0`
+                          : '★ New (No reviews)'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedUser.role !== 'admin' && selectedUser.role !== 'superadmin' && (
+                    <div style={{ padding: '12px', background: 'var(--panel-bg)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '12.5px' }}>
+                          {isMentor ? 'Mentor Payouts Ledger' : 'Transactions & Invoices'}
+                        </div>
+                        <div className="sub" style={{ fontSize: '11.5px', marginTop: '2px' }}>
+                          {isMentor
+                            ? `${fin.payoutCount} completed payout${fin.payoutCount === 1 ? '' : 's'} on record.`
+                            : `Total recorded spend across 1-on-1 sessions & multi-session contracts.`}
+                        </div>
+                      </div>
+                      <Link
+                        to={isMentor ? `/admin/payouts?search=${encodeURIComponent(selectedUser.name || '')}` : `/admin/payments?search=${encodeURIComponent(selectedUser.name || '')}`}
+                        className="btn btn-ghost"
+                        style={{ fontSize: '11.5px', padding: '4px 10px', textDecoration: 'none' }}
+                      >
+                        {isMentor ? 'View Payouts →' : 'View Payments →'}
+                      </Link>
+                    </div>
+                  )}
+
+                  <div style={{ padding: '12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
+                    <div className="sub" style={{ fontSize: '12px' }}>
+                      {selectedUser.disputes_count && selectedUser.disputes_count > 0
+                        ? `⚠️ ${selectedUser.disputes_count} dispute(s) flagged on record.`
+                        : 'No disputes or chargebacks on record for this user account.'}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Bottom Modal Actions */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
+                disabled={currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id))}
+                title={currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id)) ? 'You cannot suspend your own account' : undefined}
                 style={{
-                  color: selectedUser.is_suspended ? '#10b981' : 'var(--danger, #ef4444)',
+                  color: (currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id)))
+                    ? 'var(--text-muted)'
+                    : selectedUser.is_suspended ? '#10b981' : 'var(--danger, #ef4444)',
+                  opacity: (currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id))) ? 0.5 : 1,
+                  cursor: (currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id))) ? 'not-allowed' : 'pointer',
                 }}
                 onClick={() => handleToggleSuspend(selectedUser.id || selectedUser.user_id, selectedUser.is_suspended)}
               >

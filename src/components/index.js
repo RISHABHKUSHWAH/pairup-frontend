@@ -12,4 +12,6 @@ export { default as Alert } from './Alert';
 export { default as PairUpLoader } from './PairUpLoader';
 export { default as Loader } from './PairUpLoader';
 export { default as PairUpLogo } from './PairUpLogo';
+export { default as BookSessionModal } from './BookSessionModal';
 export * from './Icons';
+

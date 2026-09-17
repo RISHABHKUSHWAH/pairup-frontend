@@ -10,6 +10,7 @@ export default function AdminMentorsPage() {
   const { confirm } = useConfirm();
   const { toast } = useToast();
   const [mentors, setMentors] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusTab, setStatusTab] = useState('all'); // 'all' | 'pending' | 'verified' | 'suspended' | 'rejected'
@@ -24,13 +25,38 @@ export default function AdminMentorsPage() {
     setLoading(true);
     setError('');
     try {
-      const data = await api.getAdminUsers('mentor');
+      const [data, contractsData] = await Promise.all([
+        api.getAdminUsers('mentor'),
+        api.getContracts ? api.getContracts().catch(() => []) : Promise.resolve([]),
+      ]);
       setMentors(data || []);
+      setContracts(Array.isArray(contractsData) ? contractsData : []);
     } catch (err) {
       setError(err.message || 'Failed to load mentors');
     } finally {
       setLoading(false);
     }
+  };
+
+  const getMentorContracts = (m) => {
+    const mentorId = m.user_id || m.id;
+    const mentorName = (m.name || '').toLowerCase().trim();
+
+    const mentorContracts = contracts.filter((c) => {
+      const matchId = c.mentor_id === mentorId;
+      const matchName = mentorName && (c.mentor_name || '').toLowerCase().trim() === mentorName;
+      return matchId || matchName;
+    });
+
+    const activeContracts = mentorContracts.filter(
+      (c) => c.status === 'active' || c.status === 'completed_by_mentor'
+    );
+
+    return {
+      activeCount: activeContracts.length,
+      totalCount: mentorContracts.length,
+      activeContracts,
+    };
   };
 
   const handleApprove = async (id) => {
@@ -86,17 +112,23 @@ export default function AdminMentorsPage() {
     });
     if (!confirmed) return;
 
-    setMentors((prev) =>
-      prev.map((m) => {
-        const mId = m.user_id || m.id;
-        return mId === id ? { ...m, approval_status: nextStatus } : m;
-      })
-    );
-    if (selectedMentor && (selectedMentor.id === id || selectedMentor.user_id === id)) {
-      setSelectedMentor((prev) => (prev ? { ...prev, approval_status: nextStatus } : null));
+    try {
+      const res = await api.adminToggleSuspendUser(id, isSuspend);
+
+      setMentors((prev) =>
+        prev.map((m) => {
+          const mId = m.user_id || m.id;
+          return mId === id ? { ...m, approval_status: nextStatus, is_suspended: isSuspend, is_active: !isSuspend } : m;
+        })
+      );
+      if (selectedMentor && (selectedMentor.id === id || selectedMentor.user_id === id)) {
+        setSelectedMentor((prev) => (prev ? { ...prev, approval_status: nextStatus, is_suspended: isSuspend, is_active: !isSuspend } : null));
+      }
+      const msg = res?.message || `Mentor status changed to ${nextStatus}.`;
+      toast.success(msg);
+    } catch (err) {
+      toast.error(err.message || 'Could not update mentor status.');
     }
-    const msg = `Mentor status changed to ${nextStatus}.`;
-    toast.success(msg);
   };
 
   // Filter mentors
@@ -206,14 +238,17 @@ export default function AdminMentorsPage() {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Mentor</th>
-                  <th>Email</th>
-                  <th>Rate</th>
-                  <th>Rating</th>
-                  <th>Sessions</th>
-                  <th>Disputes</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Mentor</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Email</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Rate</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Rating</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Sessions</th>
+                  <th style={{ whiteSpace: 'nowrap' }} title="Active contract agreements currently in progress">
+                    Active Contracts
+                  </th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Disputes</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Status</th>
+                  <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -226,7 +261,12 @@ export default function AdminMentorsPage() {
                   return (
                     <tr key={mentorId}>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <button
+                          type="button"
+                          className="user-profile-clickable"
+                          onClick={() => setSelectedMentor(m)}
+                          title={`Click to view profile & verification details for ${m.name}`}
+                        >
                           <div
                             style={{
                               width: '32px',
@@ -239,29 +279,93 @@ export default function AdminMentorsPage() {
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
+                              flexShrink: 0,
                             }}
                           >
                             {initials(m.name)}
                           </div>
                           <div>
                             <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              {m.name}
+                              <span className="user-profile-name">{m.name}</span>
                               {isVerified && <span title="Verified Mentor" style={{ color: '#10b981', fontSize: '12px' }}>✓</span>}
                             </div>
                             <div className="sub" style={{ fontSize: '11px', margin: 0 }}>
                               {m.title || 'Full Stack Engineer'}
                             </div>
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="mono" style={{ fontSize: '12px' }}>{m.email}</td>
-                      <td className="mono" style={{ fontWeight: 600 }}>₹{Number(m.hourly_rate || 0).toLocaleString('en-IN')}/hr</td>
+                      <td className="mono" style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>₹{Number(m.hourly_rate || 0).toLocaleString('en-IN')}/hr</td>
                       <td>
                         <span style={{ color: '#f59e0b', fontWeight: 600, fontSize: '13px' }}>
                           {m.rating_avg && Number(m.rating_avg) > 0 ? `★ ${Number(m.rating_avg).toFixed(1)}` : '★ New'}
                         </span>
                       </td>
-                      <td>{m.sessions_completed ?? 4}</td>
+                      <td>{m.sessions_completed ?? 0}</td>
+                      <td>
+                        {(() => {
+                          const { activeCount, totalCount } = getMentorContracts(m);
+                          const targetUrl = activeCount > 0
+                            ? `/admin/contracts?search=${encodeURIComponent(m.name || '')}&status=active`
+                            : `/admin/contracts?search=${encodeURIComponent(m.name || '')}`;
+
+                          if (activeCount > 0) {
+                            return (
+                              <Link
+                                to={targetUrl}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  padding: '3px 10px',
+                                  borderRadius: '20px',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  fontFamily: "'IBM Plex Mono', monospace",
+                                  textDecoration: 'none',
+                                  whiteSpace: 'nowrap',
+                                  background: '#E7F6EF',
+                                  color: '#157F53',
+                                  border: '1px solid rgba(21, 127, 83, 0.28)',
+                                  boxShadow: '0 1px 2px rgba(21, 127, 83, 0.05)',
+                                  transition: 'all 0.15s ease',
+                                }}
+                                title={`View ${activeCount} active contract${activeCount > 1 ? 's' : ''} for ${m.name} in Contracts view`}
+                              >
+                                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#157F53', display: 'inline-block' }} />
+                                <span>{activeCount} Active Contract{activeCount > 1 ? 's' : ''}</span>
+                              </Link>
+                            );
+                          }
+
+                          return (
+                            <Link
+                              to={targetUrl}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '3px 10px',
+                                borderRadius: '20px',
+                                fontSize: '11px',
+                                fontWeight: 500,
+                                fontFamily: "'IBM Plex Mono', monospace",
+                                textDecoration: 'none',
+                                whiteSpace: 'nowrap',
+                                background: '#F1F3F7',
+                                color: '#5B6270',
+                                border: '1px solid #D2D6E0',
+                                transition: 'all 0.15s ease',
+                              }}
+                              title={totalCount > 0 ? `View ${totalCount} past contract(s) for ${m.name}` : `View contracts directory for ${m.name}`}
+                            >
+                              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#9098A8', display: 'inline-block' }} />
+                              <span>0 Active</span>
+                            </Link>
+                          );
+                        })()}
+                      </td>
                       <td>
                         {m.disputes_count > 0 ? (
                           <span style={{ color: 'var(--danger, #ef4444)', fontWeight: 600 }}>{m.disputes_count}</span>
@@ -391,7 +495,7 @@ export default function AdminMentorsPage() {
             </div>
 
             {/* Core Metrics Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px', marginBottom: '16px' }}>
               <div style={{ padding: '8px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
                 <div className="sub" style={{ fontSize: '11px' }}>Standard Rate</div>
                 <div style={{ fontWeight: 700, fontSize: '14px', marginTop: '2px' }}>
@@ -409,7 +513,31 @@ export default function AdminMentorsPage() {
               <div style={{ padding: '8px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
                 <div className="sub" style={{ fontSize: '11px' }}>Sessions Done</div>
                 <div style={{ fontWeight: 700, fontSize: '14px', marginTop: '2px' }}>
-                  {selectedMentor.sessions_completed ?? 4}
+                  {selectedMentor.sessions_completed ?? 0}
+                </div>
+              </div>
+              <div style={{ padding: '8px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>
+                <div className="sub" style={{ fontSize: '11px' }}>Active Contracts</div>
+                <div style={{ fontWeight: 700, fontSize: '14px', marginTop: '2px' }}>
+                  {(() => {
+                    const { activeCount } = getMentorContracts(selectedMentor);
+                    return (
+                      <Link
+                        to={activeCount > 0 ? `/admin/contracts?search=${encodeURIComponent(selectedMentor.name || '')}&status=active` : `/admin/contracts?search=${encodeURIComponent(selectedMentor.name || '')}`}
+                        style={{
+                          color: activeCount > 0 ? '#157F53' : 'inherit',
+                          textDecoration: 'none',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                        }}
+                        title={`View contracts for ${selectedMentor.name}`}
+                      >
+                        {activeCount > 0 && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#157F53', display: 'inline-block' }} />}
+                        <span>{activeCount} Active</span>
+                      </Link>
+                    );
+                  })()}
                 </div>
               </div>
               <div style={{ padding: '8px 12px', background: 'var(--panel-bg)', borderRadius: '6px' }}>

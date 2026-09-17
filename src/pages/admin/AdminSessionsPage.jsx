@@ -2,14 +2,27 @@ import React, { useState, useEffect, useMemo } from 'react';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import { api, initials } from '../../api/client';
-import { CalendarIcon, ScaleIcon, RefreshIcon, XIcon } from '../../components/Icons';
+import {
+  CalendarIcon,
+  ScaleIcon,
+  RefreshIcon,
+  XIcon,
+  SearchIcon,
+  ClockIcon,
+  CheckCircleIcon,
+  AlertTriangleIcon,
+  EyeIcon,
+  CheckIcon,
+  VideoIcon,
+  CodeIcon,
+} from '../../components/Icons';
 import { useToast } from '../../context';
 
 const TIME_TABS = [
   { id: 'all', label: 'All Sessions' },
-  { id: 'upcoming', label: 'Upcoming Sessions' },
-  { id: 'in_progress', label: 'In Progress Sessions' },
-  { id: 'past', label: 'Past Sessions' },
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'in_progress', label: 'In Progress' },
+  { id: 'past', label: 'Past Completed' },
 ];
 
 export default function AdminSessionsPage() {
@@ -22,6 +35,8 @@ export default function AdminSessionsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [techFilter, setTechFilter] = useState('all');
   const [selectedSession, setSelectedSession] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Modals for actions
   const [showRescheduleModal, setShowRescheduleModal] = useState(false);
@@ -42,7 +57,7 @@ export default function AdminSessionsPage() {
     try {
       const data = await api.getAdminBookings();
       // Augment session details if missing
-      const enhanced = data.map((b, idx) => {
+      const enhanced = (data || []).map((b, idx) => {
         const dateObj = b.created_at ? new Date(b.created_at) : new Date();
         const isUpcoming = b.status === 'pending' || b.status === 'accepted';
         const isInProgress = b.status === 'paid' || b.status === 'in_progress';
@@ -52,7 +67,7 @@ export default function AdminSessionsPage() {
           ...b,
           time_category: isUpcoming ? 'upcoming' : isInProgress ? 'in_progress' : 'past',
           scheduled_at: b.scheduled_at || new Date(dateObj.getTime() + (idx + 1) * 3600000 * 4).toISOString(),
-          session_type: b.session_type || (idx % 3 === 0 ? '1-on-1 Audio/Video Call' : idx % 3 === 1 ? 'Code Review & Audit' : 'Emergency Debugging'),
+          session_type: b.session_type || (idx % 3 === 0 ? '1-on-1 Video Call' : idx % 3 === 1 ? 'Code Review & Audit' : 'Live Debugging'),
           tech_stack: b.tech_stack || (idx % 4 === 0 ? 'Python' : idx % 4 === 1 ? 'React' : idx % 4 === 2 ? 'Docker' : 'PostgreSQL'),
           problem_description: b.problem_description || `Learner encountered an unhandled exception during database synchronization. Needed mentor to pair program and fix migrations.`,
           session_summary: b.session_summary || (b.status === 'completed' ? `Successfully debugged database pool timeouts. Optimized connection reuse and added retry decorators.` : 'Session pending or in progress.'),
@@ -61,7 +76,7 @@ export default function AdminSessionsPage() {
       });
       setBookings(enhanced);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Failed to load platform sessions');
     } finally {
       setLoading(false);
     }
@@ -80,19 +95,204 @@ export default function AdminSessionsPage() {
       // Tech filter
       if (techFilter !== 'all' && b.tech_stack !== techFilter) return false;
 
-      // Search query (learner, mentor, topic)
+      // Search query (learner, mentor, topic, tech, id)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchLearner = (b.learner_name || '').toLowerCase().includes(q);
         const matchMentor = (b.mentor_name || '').toLowerCase().includes(q);
         const matchTopic = (b.topic || '').toLowerCase().includes(q);
         const matchTech = (b.tech_stack || '').toLowerCase().includes(q);
-        if (!matchLearner && !matchMentor && !matchTopic && !matchTech) return false;
+        const matchId = String(b.id).includes(q);
+        if (!matchLearner && !matchMentor && !matchTopic && !matchTech && !matchId) return false;
       }
 
       return true;
     });
   }, [bookings, activeTab, statusFilter, techFilter, searchQuery]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, statusFilter, techFilter, searchQuery]);
+
+  const totalPages = Math.ceil(filteredSessions.length / itemsPerPage) || 1;
+  const paginatedSessions = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredSessions.slice(start, start + itemsPerPage);
+  }, [filteredSessions, currentPage]);
+
+  const renderSessionStatusBadge = (status) => {
+    switch (status) {
+      case 'completed':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '3px 9px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: '#E7F6EF',
+              color: '#157F53',
+              border: '1px solid rgba(21, 127, 83, 0.28)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <CheckIcon size={11} />
+            <span>Completed</span>
+          </span>
+        );
+      case 'in_progress':
+      case 'paid':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '3px 9px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: 'rgba(14, 165, 233, 0.12)',
+              color: '#0284c7',
+              border: '1px solid rgba(14, 165, 233, 0.28)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0284c7' }} />
+            <span>In Progress</span>
+          </span>
+        );
+      case 'accepted':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '3px 9px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: 'rgba(99, 102, 241, 0.12)',
+              color: '#4f46e5',
+              border: '1px solid rgba(99, 102, 241, 0.28)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <ClockIcon size={11} />
+            <span>Scheduled</span>
+          </span>
+        );
+      case 'pending':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '3px 9px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: 'rgba(245, 158, 11, 0.12)',
+              color: '#b45309',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#b45309' }} />
+            <span>Pending</span>
+          </span>
+        );
+      case 'disputed':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '3px 9px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: 'rgba(239, 68, 68, 0.12)',
+              color: '#dc2626',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <AlertTriangleIcon size={11} />
+            <span>Disputed</span>
+          </span>
+        );
+      case 'cancelled':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '3px 9px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: 'rgba(100, 116, 139, 0.12)',
+              color: '#475569',
+              border: '1px solid rgba(100, 116, 139, 0.25)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span>Cancelled</span>
+          </span>
+        );
+      default:
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '3px 9px',
+              borderRadius: '20px',
+              fontSize: '11px',
+              fontWeight: 600,
+              background: 'var(--grid)',
+              color: 'var(--ink-muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {status}
+          </span>
+        );
+    }
+  };
+
+  const renderSessionTypeBadge = (type) => {
+    const isVideo = (type || '').toLowerCase().includes('video') || (type || '').toLowerCase().includes('call');
+    return (
+      <span
+        style={{
+          fontSize: '11px',
+          fontWeight: 600,
+          padding: '2px 8px',
+          borderRadius: '6px',
+          background: isVideo ? 'rgba(38, 71, 214, 0.08)' : 'rgba(14, 165, 233, 0.08)',
+          color: isVideo ? 'var(--brand)' : '#0284c7',
+          border: isVideo ? '1px solid rgba(38, 71, 214, 0.2)' : '1px solid rgba(14, 165, 233, 0.2)',
+          whiteSpace: 'nowrap',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+        }}
+      >
+        {isVideo ? <VideoIcon size={12} /> : <CodeIcon size={12} />}
+        <span>{type || 'Pair Programming'}</span>
+      </span>
+    );
+  };
 
   // Admin Actions handlers
   const handleReschedule = (e) => {
@@ -180,202 +380,671 @@ export default function AdminSessionsPage() {
 
   return (
     <PortalLayout title="All Platform Sessions" portalType="admin">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
-        <div>
-          <p className="sub" style={{ margin: 0 }}>
-            Comprehensive schedule and operational monitor for all live pairing sessions across PairUp.
-          </p>
-        </div>
-        <div>
-          <button type="button" className="btn btn-ghost" onClick={loadSessions}>
-            ↻ Refresh Sessions
-          </button>
-        </div>
-      </div>
-
-      {error && <div className="error-box" style={{ marginBottom: '16px' }}>{error}</div>}
-
-      {/* Metrics Row */}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-        <div className="card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginTop: 0 }}>Total Sessions</div>
-          <div className="stat-num">{bookings.length}</div>
-        </div>
-        <div className="card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginTop: 0, color: 'var(--brand)' }}>Upcoming</div>
-          <div className="stat-num" style={{ color: 'var(--brand)' }}>
-            {bookings.filter((b) => b.time_category === 'upcoming').length}
+      <div style={{ paddingBottom: '40px' }}>
+        {/* Top Header Row */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+            gap: '16px',
+            marginBottom: '20px',
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h1 style={{ fontSize: '22px', fontWeight: 800, margin: 0, color: 'var(--ink)' }}>
+                All Platform Sessions
+              </h1>
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  padding: '2px 9px',
+                  borderRadius: '12px',
+                  background: 'rgba(38, 71, 214, 0.09)',
+                  color: 'var(--brand)',
+                  border: '1px solid rgba(38, 71, 214, 0.2)',
+                }}
+              >
+                Operational Monitor
+              </span>
+            </div>
+            <p className="sub" style={{ margin: '5px 0 0', fontSize: '13.5px', color: 'var(--ink-muted)' }}>
+              Comprehensive schedule, video pairing logs, and operational controls for all live sessions across PairUp.
+            </p>
           </div>
-        </div>
-        <div className="card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginTop: 0, color: 'var(--accent)' }}>In Progress</div>
-          <div className="stat-num" style={{ color: 'var(--accent)' }}>
-            {bookings.filter((b) => b.time_category === 'in_progress').length}
-          </div>
-        </div>
-        <div className="card" style={{ padding: '14px' }}>
-          <div className="section-label" style={{ marginTop: 0, color: 'var(--success, #16A34A)' }}>Past Completed</div>
-          <div className="stat-num" style={{ color: 'var(--success, #16A34A)' }}>
-            {bookings.filter((b) => b.status === 'completed').length}
-          </div>
-        </div>
-      </div>
 
-      {/* Time Tabs */}
-      <div className="admin-filter-tabs" style={{ marginBottom: '16px' }}>
-        {TIME_TABS.map((t) => {
-          let count = 0;
-          if (t.id === 'all') count = bookings.length;
-          else if (t.id === 'upcoming') count = bookings.filter((b) => b.time_category === 'upcoming').length;
-          else if (t.id === 'in_progress') count = bookings.filter((b) => b.time_category === 'in_progress').length;
-          else if (t.id === 'past') count = bookings.filter((b) => b.time_category === 'past').length;
-
-          return (
+          <div>
             <button
-              key={t.id}
               type="button"
-              className={`admin-filter-tab ${activeTab === t.id ? 'active' : ''}`}
-              onClick={() => setActiveTab(t.id)}
+              className="btn btn-secondary"
+              onClick={loadSessions}
+              disabled={loading}
+              style={{
+                fontSize: '13px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                fontWeight: 600,
+              }}
             >
-              {t.label} <span className="mono" style={{ fontSize: '11px', opacity: 0.7 }}>({count})</span>
+              <RefreshIcon size={14} className={loading ? 'spin' : ''} />
+              <span>{loading ? 'Refreshing...' : 'Refresh Sessions'}</span>
             </button>
-          );
-        })}
-      </div>
+          </div>
+        </div>
 
-      {/* Filters Toolbar */}
-      <div className="card" style={{ padding: '14px', marginBottom: '20px', display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
-        <div style={{ flex: '1 1 240px' }}>
-          <input
-            type="text"
-            placeholder="Search by learner, mentor, topic, or technology..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ width: '100%', margin: 0 }}
-          />
-        </div>
-        <div style={{ minWidth: '150px' }}>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            style={{ width: '100%', margin: 0 }}
-          >
-            <option value="all">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="accepted">Accepted / Scheduled</option>
-            <option value="paid">Paid / Escrow</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="disputed">Disputed</option>
-          </select>
-        </div>
-        <div style={{ minWidth: '150px' }}>
-          <select
-            value={techFilter}
-            onChange={(e) => setTechFilter(e.target.value)}
-            style={{ width: '100%', margin: 0 }}
-          >
-            <option value="all">All Tech Stacks</option>
-            <option value="Python">Python</option>
-            <option value="React">React</option>
-            <option value="Docker">Docker</option>
-            <option value="PostgreSQL">PostgreSQL</option>
-          </select>
-        </div>
-        {(searchQuery || statusFilter !== 'all' || techFilter !== 'all') && (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ fontSize: '12px' }}
-            onClick={() => {
-              setSearchQuery('');
-              setStatusFilter('all');
-              setTechFilter('all');
+        {error && <div className="error-box" style={{ marginBottom: '18px' }}>{error}</div>}
+
+        {/* 4 Modern KPI Stats Cards */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+            gap: '14px',
+            marginBottom: '22px',
+          }}
+        >
+          {/* Total Sessions */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
             }}
           >
-            Clear Filters
-          </button>
-        )}
-      </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                Total Sessions
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  color: '#6366f1',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <CalendarIcon size={17} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', lineHeight: 1 }}>
+              {bookings.length}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              All-time pairing bookings
+            </div>
+          </div>
 
-      {/* Sessions Table */}
-      <div className="admin-panel">
-        <div className="admin-panel-head">
-          <h3>
-            Sessions Registry <span className="sub" style={{ fontSize: '13px' }}>({filteredSessions.length} results)</span>
-          </h3>
+          {/* Upcoming */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #0284c7',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#0284c7' }}>
+                Upcoming
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(14, 165, 233, 0.12)',
+                  color: '#0284c7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ClockIcon size={17} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: '#0284c7', lineHeight: 1 }}>
+              {bookings.filter((b) => b.time_category === 'upcoming').length}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              Confirmed &amp; awaiting kickoff
+            </div>
+          </div>
+
+          {/* In Progress */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #6366f1',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6366f1', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6366f1', display: 'inline-block' }} />
+                In Progress
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(99, 102, 241, 0.12)',
+                  color: '#6366f1',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <VideoIcon size={17} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: '#4f46e5', lineHeight: 1 }}>
+              {bookings.filter((b) => b.time_category === 'in_progress').length}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              Active call or escrow funded
+            </div>
+          </div>
+
+          {/* Past Completed */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #10b981',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#059669' }}>
+                Past Completed
+              </span>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  color: '#059669',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <CheckCircleIcon size={17} />
+              </div>
+            </div>
+            <div style={{ fontSize: '28px', fontWeight: 800, color: '#059669', lineHeight: 1 }}>
+              {bookings.filter((b) => b.status === 'completed').length}
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '8px' }}>
+              Finished &amp; escrow released
+            </div>
+          </div>
         </div>
 
-        {loading ? (
-          <p className="sub" style={{ padding: '24px' }}>Loading session records...</p>
-        ) : filteredSessions.length === 0 ? (
-          <p className="sub" style={{ padding: '24px' }}>No sessions found matching your filters.</p>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Session #</th>
-                  <th>Learner</th>
-                  <th>Mentor</th>
-                  <th>Topic &amp; Type</th>
-                  <th>Price</th>
-                  <th>Duration</th>
-                  <th>Status</th>
-                  <th>Scheduled For</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredSessions.map((b) => (
-                  <tr key={b.id}>
-                    <td className="mono" style={{ fontWeight: 600 }}>#{b.id}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div className="avatar-sm" style={{ width: '28px', height: '28px', fontSize: '11px' }}>
-                          {initials(b.learner_name)}
-                        </div>
-                        <div style={{ fontWeight: 600, fontSize: '13px' }}>{b.learner_name}</div>
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div className="avatar-sm" style={{ width: '28px', height: '28px', fontSize: '11px', background: 'var(--brand)' }}>
-                          {initials(b.mentor_name)}
-                        </div>
-                        <div style={{ fontWeight: 600, fontSize: '13px' }}>{b.mentor_name}</div>
-                      </div>
-                    </td>
-                    <td style={{ maxWidth: '240px' }}>
-                      <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '2px' }}>{b.topic || 'Pair Programming'}</div>
-                      <span className="tag" style={{ fontSize: '10.5px' }}>{b.session_type}</span>
-                    </td>
-                    <td style={{ fontWeight: 700 }}>₹{b.price}</td>
-                    <td className="mono">{b.duration_minutes} min</td>
-                    <td>
-                      <span className={`status-badge badge-${b.status} mono`}>
-                        {b.status}
-                      </span>
-                    </td>
-                    <td className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-                      {b.scheduled_at ? new Date(b.scheduled_at).toLocaleString() : '—'}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{ padding: '4px 10px', fontSize: '11.5px' }}
-                        onClick={() => setSelectedSession(b)}
-                      >
-                        Details &amp; Actions
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Filter Tabs */}
+        <div className="filter-bar" style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {TIME_TABS.map((t) => {
+            let count = 0;
+            if (t.id === 'all') count = bookings.length;
+            else if (t.id === 'upcoming') count = bookings.filter((b) => b.time_category === 'upcoming').length;
+            else if (t.id === 'in_progress') count = bookings.filter((b) => b.time_category === 'in_progress').length;
+            else if (t.id === 'past') count = bookings.filter((b) => b.time_category === 'past').length;
+
+            const isActive = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={`filter-chip ${isActive ? 'active' : ''}`}
+                onClick={() => setActiveTab(t.id)}
+              >
+                <span>{t.label}</span>
+                <span className="mono" style={{ fontSize: '11px', opacity: isActive ? 0.9 : 0.65, fontWeight: 700 }}>
+                  ({count})
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Search & Filter Toolbar */}
+        <div
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--grid-strong)',
+            borderRadius: '12px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '12px',
+            alignItems: 'center',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.02)',
+          }}
+        >
+          <div style={{ position: 'relative', flex: '1 1 280px', minWidth: '220px' }}>
+            <div
+              style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--ink-muted)',
+                pointerEvents: 'none',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <SearchIcon size={16} />
+            </div>
+            <input
+              type="text"
+              placeholder="Search by learner, mentor, topic, or technology..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                paddingLeft: '38px',
+                paddingRight: '12px',
+                height: '38px',
+                borderRadius: '8px',
+                border: '1px solid var(--grid-strong)',
+                fontSize: '13px',
+                background: 'var(--bg)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
           </div>
-        )}
+
+          <div style={{ minWidth: '160px' }}>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                width: '100%',
+                height: '38px',
+                padding: '0 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--grid-strong)',
+                fontSize: '13px',
+                background: 'var(--surface)',
+                color: 'var(--ink)',
+                outline: 'none',
+                boxSizing: 'border-box',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="accepted">Accepted / Scheduled</option>
+              <option value="paid">Paid / Escrow</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="disputed">Disputed</option>
+            </select>
+          </div>
+
+          <div style={{ minWidth: '160px' }}>
+            <select
+              value={techFilter}
+              onChange={(e) => setTechFilter(e.target.value)}
+              style={{
+                width: '100%',
+                height: '38px',
+                padding: '0 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--grid-strong)',
+                fontSize: '13px',
+                background: 'var(--surface)',
+                color: 'var(--ink)',
+                outline: 'none',
+                boxSizing: 'border-box',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Tech Stacks</option>
+              <option value="Python">Python</option>
+              <option value="React">React</option>
+              <option value="Docker">Docker</option>
+              <option value="PostgreSQL">PostgreSQL</option>
+            </select>
+          </div>
+
+          {(searchQuery || statusFilter !== 'all' || techFilter !== 'all') && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: '12px', height: '38px', padding: '0 12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              onClick={() => {
+                setSearchQuery('');
+                setStatusFilter('all');
+                setTechFilter('all');
+              }}
+            >
+              <XIcon size={14} />
+              <span>Reset</span>
+            </button>
+          )}
+        </div>
+
+        {/* Sessions Table Panel */}
+        <div className="admin-panel" style={{ borderRadius: '14px', overflow: 'hidden', border: '1px solid var(--grid-strong)' }}>
+          <div
+            style={{
+              padding: '14px 18px',
+              borderBottom: '1px solid var(--grid-strong)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '8px',
+              background: 'var(--surface)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--ink)' }}>
+                Sessions Registry
+              </h3>
+              <span
+                style={{
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  borderRadius: '20px',
+                  background: 'var(--grid)',
+                  color: 'var(--ink-muted)',
+                  fontFamily: "'IBM Plex Mono', monospace",
+                }}
+              >
+                {filteredSessions.length} result{filteredSessions.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+
+          {loading ? (
+            <div style={{ padding: '36px', textAlign: 'center' }}>
+              <p className="sub" style={{ margin: 0 }}>Loading session records...</p>
+            </div>
+          ) : filteredSessions.length === 0 ? (
+            <div style={{ padding: '36px', textAlign: 'center' }}>
+              <p className="sub" style={{ margin: 0 }}>No sessions found matching your filters.</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th style={{ whiteSpace: 'nowrap', width: '85px' }}>Session #</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '170px' }}>Learner</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '170px' }}>Mentor</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '240px' }}>Topic &amp; Format</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '95px' }}>Price</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '95px' }}>Duration</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '120px' }}>Status</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '160px' }}>Scheduled For</th>
+                    <th style={{ whiteSpace: 'nowrap', minWidth: '95px', textAlign: 'right' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedSessions.map((b) => (
+                    <tr key={b.id}>
+                      <td>
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: '11.5px',
+                            fontWeight: 700,
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            background: 'var(--grid)',
+                            color: 'var(--ink)',
+                            display: 'inline-block',
+                          }}
+                        >
+                          #{b.id}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              background: 'linear-gradient(135deg, #0284c7, #2563eb)',
+                              color: '#fff',
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {initials(b.learner_name)}
+                          </div>
+                          <div style={{ textAlign: 'left' }}>
+                            <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)' }}>
+                              {b.learner_name}
+                            </div>
+                            <div className="sub" style={{ fontSize: '11px', margin: 0, color: 'var(--ink-muted)' }}>
+                              Learner
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
+                              color: '#fff',
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {initials(b.mentor_name)}
+                          </div>
+                          <div style={{ textAlign: 'left' }}>
+                            <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)' }}>
+                              {b.mentor_name}
+                            </div>
+                            <div className="sub" style={{ fontSize: '11px', margin: 0, color: 'var(--ink-muted)' }}>
+                              {b.tech_stack || 'Mentor'}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ maxWidth: '280px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                          <div style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)', lineHeight: 1.3 }}>
+                            {b.topic || 'Pair Programming Session'}
+                          </div>
+                          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' }}>
+                            {renderSessionTypeBadge(b.session_type)}
+                            {b.tech_stack && (
+                              <span
+                                className="mono"
+                                style={{
+                                  fontSize: '10.5px',
+                                  fontWeight: 600,
+                                  padding: '2px 6px',
+                                  borderRadius: '5px',
+                                  background: 'var(--grid)',
+                                  color: 'var(--ink-muted)',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {b.tech_stack}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span
+                          className="mono"
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '13px',
+                            color: 'var(--ink)',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          ₹{Number(b.price || 0).toLocaleString('en-IN')}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: '11.5px',
+                            fontWeight: 600,
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            background: 'var(--grid)',
+                            color: 'var(--ink)',
+                            whiteSpace: 'nowrap',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <ClockIcon size={12} />
+                          {b.duration_minutes || 60} min
+                        </span>
+                      </td>
+                      <td>
+                        {renderSessionStatusBadge(b.status)}
+                      </td>
+                      <td>
+                        {b.scheduled_at ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', whiteSpace: 'nowrap' }}>
+                            <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--ink)' }}>
+                              {new Date(b.scheduled_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </span>
+                            <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                              {new Date(b.scheduled_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--ink-muted)', fontSize: '12px' }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '11.5px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--grid-strong)',
+                            background: 'var(--surface)',
+                          }}
+                          onClick={() => setSelectedSession(b)}
+                          title={`Inspect & manage Session #${b.id}`}
+                        >
+                          <EyeIcon size={13} />
+                          <span>Details</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '12px 18px',
+                borderTop: '1px solid var(--grid-strong)',
+                background: 'var(--surface)',
+                flexWrap: 'wrap',
+                gap: '10px',
+              }}
+            >
+              <div style={{ fontSize: '12.5px', color: 'var(--ink-muted)' }}>
+                Showing <strong style={{ color: 'var(--ink)' }}>{(currentPage - 1) * itemsPerPage + 1}</strong>–
+                <strong style={{ color: 'var(--ink)' }}>{Math.min(currentPage * itemsPerPage, filteredSessions.length)}</strong> of{' '}
+                <strong style={{ color: 'var(--ink)' }}>{filteredSessions.length}</strong> sessions
+              </div>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '6px' }}
+                >
+                  Previous
+                </button>
+                <span className="mono" style={{ fontSize: '12px', fontWeight: 600, padding: '0 6px' }}>
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  style={{ padding: '4px 10px', fontSize: '12px', borderRadius: '6px' }}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Session Details Modal */}

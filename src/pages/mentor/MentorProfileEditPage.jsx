@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
-import { mentorProfileSettings, initials, stars } from '../../api/client';
+import { mentorProfileSettings, initials, stars, api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
-import { EyeIcon, ShieldIcon, UsersIcon } from '../../components/Icons';
+import { EyeIcon, ShieldIcon, UsersIcon, ExternalLinkIcon } from '../../components/Icons';
 
 export default function MentorProfileEditPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('basic'); // 'basic' | 'expertise' | 'pricing' | 'trust'
   const [newSkill, setNewSkill] = useState('');
   const [newLang, setNewLang] = useState('');
@@ -24,11 +27,81 @@ export default function MentorProfileEditPage() {
   const [showWorkForm, setShowWorkForm] = useState(false);
 
   useEffect(() => {
-    const data = mentorProfileSettings.getProfile(user);
-    setProfile(data);
+    async function loadProfile() {
+      setLoading(true);
+      try {
+        // 1. Fetch real mentor profile from backend database
+        const data = await api.getMyMentorProfile();
+        const local = mentorProfileSettings.getProfile(user);
+
+        setProfile({
+          name: data.name || user?.name || local.name || '',
+          email: user?.email || local.email || '',
+          headline: data.title || local.headline || '',
+          company: data.company || local.company || '',
+          bio: data.bio || local.bio || '',
+          location: data.location || local.location || '',
+          languages: data.languages && data.languages.length ? data.languages : (local.languages || ['English']),
+          skills: data.skills && data.skills.length ? data.skills : (local.skills || []),
+          primaryTech: local.primaryTech || (data.skills?.[0] ? `${data.skills[0]} Architecture` : ''),
+          yearsExperience: data.years_experience !== undefined ? data.years_experience : (local.yearsExperience || 0),
+          hourlyRate: data.hourly_rate !== undefined ? data.hourly_rate : (local.hourlyRate || 500),
+          githubUrl: data.github_url || local.githubUrl || '',
+          linkedinUrl: data.linkedin_url || local.linkedinUrl || '',
+          portfolioUrl: data.portfolio_url || local.portfolioUrl || '',
+          websiteUrl: data.website_url || local.websiteUrl || '',
+          certifications: (data.certifications && data.certifications.length)
+            ? data.certifications.map((c) => ({
+                id: c.id,
+                title: c.name || c.title || '',
+                issuer: c.issuer || '',
+                year: c.year || '',
+              }))
+            : (local.certifications || []),
+          workHistory: (data.experience && data.experience.length)
+            ? data.experience.map((e) => ({
+                id: e.id,
+                role: e.job_title || e.role || '',
+                company: e.company || '',
+                duration: e.duration || (e.start_date ? `${e.start_date} - ${e.end_date || 'Present'}` : ''),
+                description: e.description || '',
+              }))
+            : (local.workHistory || []),
+          sessionTypes: local.sessionTypes || [
+            { id: '1on1', name: '1-on-1 Mentorship', active: true, price: data.hourly_rate || 500, desc: 'Career guidance, architectural discussions, mock interviews' },
+            { id: 'code_review', name: 'Code Review & Architecture', active: true, price: Math.round((data.hourly_rate || 500) * 1.2), desc: 'Deep dive into PRs, codebase audits, and security best practices' },
+            { id: 'bug_fixing', name: 'Live Bug Solving & Pairing', active: true, price: Math.round((data.hourly_rate || 500) * 1.5), desc: 'Pair programming on active bugs, stack traces, and production issues' },
+          ],
+          durationOptions: local.durationOptions || [30, 60, 90],
+          weeklyHours: local.weeklyHours || 15,
+          isVerified: data.verified || false,
+          rating: data.rating_avg !== undefined ? Number(data.rating_avg).toFixed(1) : '5.0',
+          reviewCount: data.reviews?.length || 0,
+          sessionsCompleted: data.sessions_completed || 0,
+          completionRate: data.completion_rate,
+          memberSince: local.memberSince || 'March 2024',
+        });
+      } catch (err) {
+        console.error('Failed to load profile from backend, falling back to local:', err);
+        const data = mentorProfileSettings.getProfile(user);
+        setProfile(data);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadProfile();
   }, [user]);
 
-  if (!profile) return null;
+  if (loading || !profile) {
+    return (
+      <PortalLayout title="Mentor Profile" portalType="mentor">
+        <div style={{ padding: '60px 0', textAlign: 'center' }}>
+          <div className="spinner-sm" style={{ margin: '0 auto 16px' }}></div>
+          <p className="sub">Loading your mentor profile from database...</p>
+        </div>
+      </PortalLayout>
+    );
+  }
 
   const handleChange = (field, value) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
@@ -60,29 +133,86 @@ export default function MentorProfileEditPage() {
     setProfile((prev) => ({ ...prev, languages: prev.languages.filter((l) => l !== langToRemove) }));
   };
 
-  const handleAddCert = (e) => {
+  const handleAddCert = async (e) => {
     e.preventDefault();
     if (!certForm.title || !certForm.issuer) return;
-    const item = { id: 'cert_' + Date.now(), ...certForm };
-    setProfile((prev) => ({ ...prev, certifications: [...prev.certifications, item] }));
-    setCertForm({ title: '', issuer: '', year: new Date().getFullYear().toString() });
-    setShowCertForm(false);
+    try {
+      const res = await api.addCertification({
+        name: certForm.title,
+        issuer: certForm.issuer,
+        year: certForm.year,
+      });
+      const item = {
+        id: res.id || 'cert_' + Date.now(),
+        name: certForm.title,
+        title: certForm.title,
+        issuer: certForm.issuer,
+        year: certForm.year,
+      };
+      setProfile((prev) => ({ ...prev, certifications: [...prev.certifications, item] }));
+      setCertForm({ title: '', issuer: '', year: new Date().getFullYear().toString() });
+      setShowCertForm(false);
+      toast.success('Certification added to database!');
+    } catch (err) {
+      console.error(err);
+      const item = { id: 'cert_' + Date.now(), name: certForm.title, title: certForm.title, ...certForm };
+      setProfile((prev) => ({ ...prev, certifications: [...prev.certifications, item] }));
+      setCertForm({ title: '', issuer: '', year: new Date().getFullYear().toString() });
+      setShowCertForm(false);
+    }
   };
 
-  const handleRemoveCert = (id) => {
+  const handleRemoveCert = async (id) => {
+    try {
+      if (typeof id === 'number') {
+        await api.deleteCertification(id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
     setProfile((prev) => ({ ...prev, certifications: prev.certifications.filter((c) => c.id !== id) }));
   };
 
-  const handleAddWork = (e) => {
+  const handleAddWork = async (e) => {
     e.preventDefault();
     if (!workForm.role || !workForm.company) return;
-    const item = { id: 'work_' + Date.now(), ...workForm };
-    setProfile((prev) => ({ ...prev, workHistory: [...prev.workHistory, item] }));
-    setWorkForm({ role: '', company: '', duration: '', description: '' });
-    setShowWorkForm(false);
+    try {
+      const res = await api.addExperience({
+        job_title: workForm.role,
+        company: workForm.company,
+        start_date: workForm.duration ? workForm.duration.split('-')[0].trim() : '2023-01-01',
+        end_date: workForm.duration?.includes('Present') ? null : (workForm.duration?.split('-')[1]?.trim() || null),
+        description: workForm.description,
+      });
+      const item = {
+        id: res.id || 'work_' + Date.now(),
+        role: workForm.role,
+        job_title: workForm.role,
+        company: workForm.company,
+        duration: workForm.duration,
+        description: workForm.description,
+      };
+      setProfile((prev) => ({ ...prev, workHistory: [...prev.workHistory, item] }));
+      setWorkForm({ role: '', company: '', duration: '', description: '' });
+      setShowWorkForm(false);
+      toast.success('Work position added to database!');
+    } catch (err) {
+      console.error(err);
+      const item = { id: 'work_' + Date.now(), role: workForm.role, job_title: workForm.role, ...workForm };
+      setProfile((prev) => ({ ...prev, workHistory: [...prev.workHistory, item] }));
+      setWorkForm({ role: '', company: '', duration: '', description: '' });
+      setShowWorkForm(false);
+    }
   };
 
-  const handleRemoveWork = (id) => {
+  const handleRemoveWork = async (id) => {
+    try {
+      if (typeof id === 'number') {
+        await api.deleteExperience(id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
     setProfile((prev) => ({ ...prev, workHistory: prev.workHistory.filter((w) => w.id !== id) }));
   };
 
@@ -111,10 +241,38 @@ export default function MentorProfileEditPage() {
     });
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     if (e) e.preventDefault();
-    mentorProfileSettings.saveProfile(profile, user?.id);
-    toast.success('Profile changes saved successfully!');
+    setSaving(true);
+    try {
+      // 1. Save directly to Django database via API
+      await api.updateMyMentorProfile({
+        name: profile.name,
+        title: profile.headline,
+        company: profile.company,
+        bio: profile.bio,
+        location: profile.location,
+        languages: profile.languages,
+        skills: profile.skills,
+        hourly_rate: Number(profile.hourlyRate) || 0,
+        years_experience: Number(profile.yearsExperience) || 0,
+        github_url: profile.githubUrl,
+        linkedin_url: profile.linkedinUrl,
+        portfolio_url: profile.portfolioUrl,
+        website_url: profile.websiteUrl,
+      });
+
+      // 2. Also save to localStorage fallback
+      mentorProfileSettings.saveProfile(profile, user?.id);
+
+      toast.success('Profile saved to database successfully! Changes are live on learner side.');
+    } catch (err) {
+      console.error('Failed to save profile to database:', err);
+      mentorProfileSettings.saveProfile(profile, user?.id);
+      toast.error(err.message || 'Error saving to database');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -123,25 +281,35 @@ export default function MentorProfileEditPage() {
       portalType="mentor"
       actions={
         <div style={{ display: 'flex', gap: '8px' }}>
+          <Link
+            to={`/mentor/${user?.id}`}
+            className="btn btn-ghost"
+            style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            title="View public profile as seen by learners"
+          >
+            <ExternalLinkIcon size={14} /> View Public Profile ↗
+          </Link>
           <button
             type="button"
             className="btn btn-ghost"
             style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             onClick={() => setPreviewOpen(true)}
           >
-            <EyeIcon size={14} /> Preview Profile Card
+            <EyeIcon size={14} /> Preview Card
           </button>
           <button
             type="button"
             className="btn btn-primary"
             style={{ fontSize: '13px' }}
             onClick={handleSave}
+            disabled={saving}
           >
-            Save Changes
+            {saving ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
       }
     >
+         
       <p className="sub" style={{ marginBottom: '20px' }}>
         Manage your public mentor persona across 4 core pillars: Personal Info, Technical Expertise, Sessions & Pricing, and Trust & Verification.
       </p>
@@ -209,14 +377,26 @@ export default function MentorProfileEditPage() {
               />
             </div>
 
-            <div className="field">
-              <label>Professional Headline</label>
-              <input
-                type="text"
-                value={profile.headline}
-                onChange={(e) => handleChange('headline', e.target.value)}
-                placeholder="e.g. Senior Full-Stack & Cloud Architect | Ex-Staff Engineer"
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="field">
+                <label>Professional Headline</label>
+                <input
+                  type="text"
+                  value={profile.headline}
+                  onChange={(e) => handleChange('headline', e.target.value)}
+                  placeholder="e.g. Senior Full-Stack & Cloud Architect"
+                />
+              </div>
+
+              <div className="field">
+                <label>Current Company / Organization</label>
+                <input
+                  type="text"
+                  value={profile.company || ''}
+                  onChange={(e) => handleChange('company', e.target.value)}
+                  placeholder="e.g. Google, TechFlow, Stripe"
+                />
+              </div>
             </div>
 
             <div className="field">
@@ -429,7 +609,7 @@ export default function MentorProfileEditPage() {
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{c.title}</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{c.title || c.name}</div>
                       <div className="sub" style={{ fontSize: '12px', margin: '2px 0 0' }}>
                         {c.issuer} • Issued {c.year}
                       </div>
@@ -511,7 +691,7 @@ export default function MentorProfileEditPage() {
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{w.role} at {w.company}</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{(w.role || w.job_title)} at {w.company}</div>
                       <button
                         type="button"
                         className="btn btn-ghost"
@@ -521,7 +701,9 @@ export default function MentorProfileEditPage() {
                         Remove
                       </button>
                     </div>
-                    <div className="sub" style={{ fontSize: '11px', margin: '2px 0 6px' }}>{w.duration}</div>
+                    <div className="sub" style={{ fontSize: '11px', margin: '2px 0 6px' }}>
+                      {w.duration || (w.start_date ? `${w.start_date} - ${w.end_date || 'Present'}` : '')}
+                    </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{w.description}</div>
                   </div>
                 ))}

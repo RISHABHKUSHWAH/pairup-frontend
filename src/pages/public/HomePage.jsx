@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
+import BookSessionModal from '../../components/BookSessionModal';
+import { CalendarIcon } from '../../components/Icons';
 import { api, initials, stars } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
@@ -14,6 +16,7 @@ export default function HomePage() {
   const [search, setSearch] = useState('');
   const [selectedMentor, setSelectedMentor] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [bookModalMentor, setBookModalMentor] = useState(null);
   const [topic, setTopic] = useState('');
   const [bookingError, setBookingError] = useState('');
 
@@ -522,23 +525,25 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div className="section-label">Request a session</div>
-                {bookingError && <div className="error-box">{bookingError}</div>}
-
-                <form onSubmit={handleBooking}>
-                  <div className="field">
-                    <label>What do you need help with?</label>
-                    <textarea
-                      value={topic}
-                      onChange={(e) => setTopic(e.target.value)}
-                      placeholder="e.g. My Django migration keeps failing with an IntegrityError"
-                      required
-                    ></textarea>
-                  </div>
-                  <button type="submit" className="btn btn-primary btn-block">
-                    Request 30-min session (~₹{Math.round(((selectedMentor.hourly_rate || 500) * 30) / 60).toLocaleString('en-IN')})
-                  </button>
-                </form>
+                <div className="section-label">Book a Live Session</div>
+                <p className="sub" style={{ fontSize: '12.5px', margin: '0 0 10px' }}>
+                  Select your desired session duration and pick an open slot that fits your schedule.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-block"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', fontSize: '14px', fontWeight: 700 }}
+                  onClick={() => {
+                    if (!user) {
+                      navigate('/login');
+                      return;
+                    }
+                    setBookModalMentor(selectedMentor);
+                  }}
+                >
+                  <CalendarIcon size={16} />
+                  <span>Choose Duration &amp; Book Slot</span>
+                </button>
 
                 <div className="section-label">Recent reviews</div>
                 {selectedMentor.reviews && selectedMentor.reviews.length > 0 ? (
@@ -567,6 +572,12 @@ export default function HomePage() {
           </div>
         </div>
       </main>
+
+      <BookSessionModal
+        isOpen={!!bookModalMentor}
+        onClose={() => setBookModalMentor(null)}
+        mentor={bookModalMentor}
+      />
 
       <Footer />
     </div>
