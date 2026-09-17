@@ -497,14 +497,14 @@ export default function SessionRoomPage() {
     }
   };
 
-  // 7. Session Elapsed Timer
+  // 7. Session Elapsed Timer (counts active call time only while connected or testing dual video)
   useEffect(() => {
-    if (!sessionData) return;
+    if (!sessionData || (connectionStatus !== 'connected' && !testLoopbackActive)) return;
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, [sessionData]);
+  }, [sessionData, connectionStatus, testLoopbackActive]);
 
   // 8. Notes auto-save
   const handleNotesChange = (e) => {
@@ -770,13 +770,18 @@ export default function SessionRoomPage() {
                     color: isTimeOver ? '#F87171' : isEndingSoon ? '#FBBF24' : '#F8FAFC',
                   }}
                 >
-                  {elapsedMinStr}:{elapsedSecStr} / {totalMinutes}:00
+                  {connectionStatus === 'connected' || testLoopbackActive
+                    ? `${elapsedMinStr}:${elapsedSecStr} / ${totalMinutes}:00`
+                    : `00:00 / ${totalMinutes}:00`}
                 </span>
-                {isEndingSoon && !isTimeOver && (
+                {(connectionStatus === 'connected' || testLoopbackActive) && isEndingSoon && !isTimeOver && (
                   <span style={{ fontSize: '11px', color: '#FBBF24', fontWeight: 700, marginLeft: '4px' }}>5m left</span>
                 )}
-                {isTimeOver && (
+                {(connectionStatus === 'connected' || testLoopbackActive) && isTimeOver && (
                   <span style={{ fontSize: '11px', color: '#F87171', fontWeight: 700, marginLeft: '4px' }}>Overtime</span>
+                )}
+                {connectionStatus !== 'connected' && !testLoopbackActive && (
+                  <span style={{ fontSize: '11px', color: '#94A3B8', fontWeight: 500, marginLeft: '4px' }}>Ready · Timer Paused</span>
                 )}
               </div>
 
@@ -952,10 +957,18 @@ export default function SessionRoomPage() {
                       </div>
                     ) : (
                       <div>
-                        <p style={{ color: '#94A3B8', fontSize: '13px', margin: '8px 0 16px' }}>
-                          Waiting for {otherName} to enter the session room.
+                        <p style={{ color: '#94A3B8', fontSize: '13px', margin: '8px 0 14px', lineHeight: 1.6 }}>
+                          Waiting for <strong>{otherName}</strong> ({isMentor ? 'Learner' : 'Mentor'}) to enter the session room.
                           <br />
-                          Video and audio will link automatically over WebRTC.
+                          {sessionData?.scheduled_at && (
+                            <span style={{ color: '#38BDF8', display: 'inline-block', marginTop: '4px' }}>
+                              📅 Scheduled Time: {new Date(sessionData.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                            </span>
+                          )}
+                          <br />
+                          <span style={{ fontSize: '11.5px', color: '#64748B', display: 'inline-block', marginTop: '4px' }}>
+                            Video, audio, and session timer will start automatically when both of you are connected.
+                          </span>
                         </p>
                         <div
                           style={{
@@ -968,6 +981,7 @@ export default function SessionRoomPage() {
                             borderRadius: '20px',
                             fontSize: '12px',
                             color: '#38BDF8',
+                            marginBottom: '16px',
                           }}
                         >
                           <div
@@ -979,7 +993,24 @@ export default function SessionRoomPage() {
                               animation: 'pulse 1.5s infinite',
                             }}
                           />
-                          Listening for incoming peer connection…
+                          Room Ready · Waiting for {otherName}…
+                        </div>
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => navigate(isMentor ? '/mentor/sessions' : '/learner/sessions')}
+                            style={{
+                              background: 'transparent',
+                              border: '1px solid #475569',
+                              color: '#CBD5E1',
+                              padding: '6px 16px',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ← Return to Sessions (Join Later)
+                          </button>
                         </div>
                       </div>
                     )}

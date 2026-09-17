@@ -14,6 +14,7 @@ import {
   DocumentIcon,
   RefreshIcon,
   MessageIcon,
+  ShieldIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
 
@@ -56,6 +57,8 @@ export default function LearnerSessionsPage() {
   const [loadingNotes, setLoadingNotes] = useState(false);
 
   const [submittingAction, setSubmittingAction] = useState(false);
+  const [payingBookingId, setPayingBookingId] = useState(null);
+  const [paidSuccessBooking, setPaidSuccessBooking] = useState(null);
 
   const navigate = useNavigate();
 
@@ -75,12 +78,17 @@ export default function LearnerSessionsPage() {
     }
   };
 
-  const handlePay = async (bookingId) => {
+  const handlePay = async (booking) => {
+    setPayingBookingId(booking.id);
     try {
-      await api.payBooking(bookingId);
-      navigate(`/session?booking_id=${bookingId}`);
+      await api.payBooking(booking.id);
+      toast.success('Escrow secured! Session is confirmed.');
+      await loadBookings();
+      setPaidSuccessBooking(booking);
     } catch (err) {
       toast.error('Payment failed: ' + err.message);
+    } finally {
+      setPayingBookingId(null);
     }
   };
 
@@ -297,6 +305,48 @@ export default function LearnerSessionsPage() {
                 </div>
               </div>
 
+              {/* Status Information Banners */}
+              {b.status === 'accepted' && (
+                <div
+                  style={{
+                    background: 'rgba(245, 158, 11, 0.08)',
+                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    color: 'var(--ink)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <CreditCardIcon size={14} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                  <div>
+                    <strong>Mentor Accepted:</strong> Deposit ₹{b.price} into platform escrow to confirm your booking. The live room unlocks for both you and your mentor once paid.
+                  </div>
+                </div>
+              )}
+              {b.status === 'paid' && (
+                <div
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.08)',
+                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    color: 'var(--ink)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <ShieldIcon size={14} style={{ color: '#10b981', flexShrink: 0 }} />
+                  <div>
+                    <strong>Escrow Protected:</strong> ₹{b.price} is secured in PairUp escrow. You can join the live room now or at your scheduled session time. Funds are only released after session completion.
+                  </div>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div
                 style={{
@@ -351,10 +401,12 @@ export default function LearnerSessionsPage() {
                     <button
                       type="button"
                       className="btn btn-primary"
+                      disabled={payingBookingId === b.id}
                       style={{ fontSize: '12.5px', padding: '7px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                      onClick={() => handlePay(b.id)}
+                      onClick={() => handlePay(b)}
                     >
-                      <CreditCardIcon size={14} /> Pay &amp; Start (Escrow)
+                      <CreditCardIcon size={14} />
+                      {payingBookingId === b.id ? 'Securing Escrow...' : `Deposit Escrow (₹${b.price})`}
                     </button>
                     <button
                       type="button"
@@ -745,6 +797,115 @@ export default function LearnerSessionsPage() {
                 onClick={() => setNotesModalBooking(null)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Escrow Payment Secured Confirmation Modal */}
+      <Modal
+        isOpen={!!paidSuccessBooking}
+        onClose={() => setPaidSuccessBooking(null)}
+        title="Escrow Payment Secured 🛡️"
+      >
+        {paidSuccessBooking && (
+          <div style={{ textAlign: 'center', padding: '10px 4px 6px' }}>
+            <div
+              style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                background: 'rgba(16, 185, 129, 0.12)',
+                border: '2px solid #10b981',
+                color: '#10b981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 14px',
+              }}
+            >
+              <ShieldIcon size={30} />
+            </div>
+
+            <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 700 }}>
+              Payment Secured in Escrow!
+            </h3>
+
+            <p style={{ fontSize: '13.5px', color: 'var(--ink)', lineHeight: 1.6, margin: '0 0 16px' }}>
+              <strong>₹{paidSuccessBooking.price}</strong> has been safely deposited into PairUp platform escrow.
+              Funds are protected and will only release to <strong>{paidSuccessBooking.mentor_name}</strong> after the session is completed.
+            </p>
+
+            <div
+              style={{
+                background: 'var(--bg)',
+                border: '1px solid var(--grid)',
+                borderRadius: '10px',
+                padding: '14px',
+                textAlign: 'left',
+                marginBottom: '18px',
+                fontSize: '13px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--ink-muted)' }}>Mentor:</span>
+                <span style={{ fontWeight: 600 }}>{paidSuccessBooking.mentor_name}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--ink-muted)' }}>Topic:</span>
+                <span style={{ fontWeight: 600 }}>{paidSuccessBooking.topic || 'Pair Programming'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--ink-muted)' }}>Scheduled Time:</span>
+                <span style={{ fontWeight: 600, color: 'var(--brand)' }}>
+                  {paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time
+                    ? new Date(paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                    : 'Flexible / As agreed'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--ink-muted)' }}>Live Call Room:</span>
+                <span style={{ fontWeight: 600, color: '#10b981' }}>● Unlocked &amp; Ready</span>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: 'rgba(59, 130, 246, 0.08)',
+                border: '1px solid rgba(59, 130, 246, 0.25)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '12px',
+                color: 'var(--ink)',
+                marginBottom: '18px',
+                textAlign: 'left',
+                lineHeight: 1.5,
+              }}
+            >
+              💡 <strong>When will the call start?</strong> Both you and your mentor can enter the room at the scheduled time. The session timer will only start ticking once you and your mentor are connected on video!
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPaidSuccessBooking(null)}
+                style={{ flex: 1 }}
+              >
+                Back to Sessions
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const bId = paidSuccessBooking.id;
+                  setPaidSuccessBooking(null);
+                  navigate(`/session?booking_id=${bId}`);
+                }}
+                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <VideoIcon size={15} /> Enter Live Room Now
               </button>
             </div>
           </div>
