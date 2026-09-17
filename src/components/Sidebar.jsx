@@ -462,37 +462,67 @@ export default function Sidebar({
               className={`admin-help-btn ${helpOpen ? 'open' : ''}`}
               data-tour="help-menu"
               onClick={() => setHelpOpen((prev) => !prev)}
-              title={isCollapsed ? "Help & Support" : undefined}
+              title={isCollapsed ? "Help & Guides" : undefined}
               aria-haspopup="true"
               aria-expanded={helpOpen}
             >
               <span className="admin-help-icon">
                 <HelpCircleIcon size={18} />
               </span>
-              <span className="admin-help-label">Help</span>
+              <span className="admin-help-label">Help &amp; Guides</span>
               <span className="admin-help-arrow">
-                <ChevronRightIcon size={14} />
+                {helpOpen ? <ChevronUpIcon size={14} /> : <ChevronRightIcon size={14} />}
               </span>
             </button>
 
             {helpOpen && (
               <div className="admin-help-flyout" role="menu" aria-label="Help Options">
+                <Link
+                  to="/help"
+                  className="admin-help-flyout-item"
+                  style={{ color: 'var(--accent)', fontWeight: 600 }}
+                  onClick={() => setHelpOpen(false)}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <BookIcon size={15} /> Full Platform Guide
+                  </span>
+                </Link>
+
+                <Link
+                  to="/help?category=learner"
+                  className="admin-help-flyout-item"
+                  onClick={() => setHelpOpen(false)}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <UsersIcon size={15} /> Learner Guide
+                  </span>
+                </Link>
+
+                <Link
+                  to="/help?category=mentor"
+                  className="admin-help-flyout-item"
+                  onClick={() => setHelpOpen(false)}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <MentorIcon size={15} /> Mentor Guide
+                  </span>
+                </Link>
+
+                <div className="admin-user-menu-divider" style={{ margin: '3px 0' }} />
+
                 <button
                   type="button"
                   className="admin-help-flyout-item"
-                  style={{ color: 'var(--accent)', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
                   onClick={() => {
                     setHelpOpen(false);
                     startTour(portalType);
                   }}
                 >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <CrownIcon size={14} /> Platform tour
-                  </span>
-                  <span style={{ fontSize: '9.5px', background: 'var(--accent-soft)', color: 'var(--accent)', padding: '1px 6px', borderRadius: '8px', fontWeight: 700 }}>
-                    Guide
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CrownIcon size={15} /> Interactive tour
                   </span>
                 </button>
+
                 <button
                   type="button"
                   className="admin-help-flyout-item"
@@ -501,8 +531,11 @@ export default function Sidebar({
                     setShowHelpCenter(true);
                   }}
                 >
-                  Help center
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <HelpCircleIcon size={15} /> Quick FAQs modal
+                  </span>
                 </button>
+
                 <button
                   type="button"
                   className="admin-help-flyout-item"
@@ -511,8 +544,11 @@ export default function Sidebar({
                     setShowSupportRequests(true);
                   }}
                 >
-                  My support requests
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <MessageIcon size={15} /> My support requests
+                  </span>
                 </button>
+
                 <button
                   type="button"
                   className="admin-help-flyout-item"
@@ -521,7 +557,9 @@ export default function Sidebar({
                     setShowWhatsNew(true);
                   }}
                 >
-                  What's new
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <StarIcon size={15} /> What's new
+                  </span>
                 </button>
               </div>
             )}

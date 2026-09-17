@@ -35,6 +35,7 @@ export default function Footer() {
           </div>
           <div className="footer-links">
             <div className="footer-col">
+              <Link to="/what-is-pairup">What is PairUp?</Link>
               <Link to="/">Browse mentors</Link>
               <Link to="/become-a-mentor">Become a mentor</Link>
             </div>

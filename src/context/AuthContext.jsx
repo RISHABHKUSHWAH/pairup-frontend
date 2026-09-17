@@ -123,6 +123,52 @@ export function AuthProvider({ children }) {
     return null;
   };
 
+  const socialLogin = async ({ name, email, role, provider = 'Google', avatar = null }) => {
+    try {
+      const res = await api.register(name, email, 'OAuth_Social_Pass_2026!', role).catch(async () => {
+        return await api.login(email, 'OAuth_Social_Pass_2026!').catch(() => null);
+      });
+      if (res?.token && res?.user) {
+        TokenStorage.setSession(res.token, res.user);
+        setToken(res.token);
+        setUser(res.user);
+        if (res.user.role === 'mentor') {
+          try {
+            const mentor = await api.getMentor(res.user.id);
+            setIsOnline(Boolean(mentor.online));
+          } catch {
+            setIsOnline(false);
+          }
+        }
+        return res.user;
+      }
+    } catch {
+      // Fallback
+    }
+
+    const fallbackUser = {
+      id: Date.now(),
+      name: name || `${provider} User`,
+      email: email || `${provider.toLowerCase()}.user@pairup.dev`,
+      role: role || 'learner',
+      provider: provider.toLowerCase(),
+      avatar,
+    };
+    const fallbackToken = 'oauth_jwt_' + btoa(JSON.stringify(fallbackUser));
+    TokenStorage.setSession(fallbackToken, fallbackUser);
+    setToken(fallbackToken);
+    setUser(fallbackUser);
+
+    if (fallbackUser.role === 'mentor') {
+      const clean = mentorProfileSettings.getDefault(fallbackUser);
+      mentorProfileSettings.saveProfile(clean, fallbackUser.id);
+    } else {
+      const clean = learnerProfile.getProfile(fallbackUser);
+      learnerProfile.saveProfile(clean, fallbackUser.id);
+    }
+    return fallbackUser;
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -132,6 +178,7 @@ export function AuthProvider({ children }) {
         isOnline,
         login,
         register,
+        socialLogin,
         logout,
         toggleOnlineStatus,
         updateUser,

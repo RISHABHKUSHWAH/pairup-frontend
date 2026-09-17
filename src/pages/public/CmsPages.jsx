@@ -52,9 +52,8 @@ export function GenericCmsPage({ slug, defaultTitle, defaultSubtitle }) {
   );
 }
 
-export function HelpPage() {
-  return <GenericCmsPage slug="help" defaultTitle="Help & Support" defaultSubtitle="Frequently asked questions and guides." />;
-}
+
+
 
 export function ContactPage() {
   return <GenericCmsPage slug="contact" defaultTitle="Contact Us" defaultSubtitle="Get in touch with the PairUp team." />;

@@ -303,7 +303,22 @@ export default function MentorDashboard() {
                     </td>
                     <td style={{ fontWeight: 600 }}>₹{b.price}</td>
                     <td>
-                      <span className={`status-badge badge-${b.status} mono`}>{b.status}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                        <span className={`status-badge badge-${b.status} mono`}>{b.status}</span>
+                        {b.status === 'paid' || b.payment_status === 'paid' || b.payment_status === 'held_in_escrow' ? (
+                          <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            🛡️ Escrow Paid
+                          </span>
+                        ) : b.status === 'accepted' ? (
+                          <span style={{ fontSize: '10.5px', color: '#d97706', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            ⏳ Awaiting Payment
+                          </span>
+                        ) : b.status === 'completed' ? (
+                          <span style={{ fontSize: '10.5px', color: '#059669', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            ✓ Escrow Released
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td>
                       {b.status === 'paid' ? (

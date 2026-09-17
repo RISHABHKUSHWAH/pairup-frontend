@@ -7,6 +7,7 @@ import {
   MentorProfilePage,
   BecomeMentorPage,
   LoginPage,
+  WhatIsPairUpPage,
   HelpPage,
   ContactPage,
   PrivacyPage,
@@ -81,6 +82,8 @@ export default function App() {
     <Routes>
       {/* Public */}
       <Route path="/" element={<HomePage />} />
+      <Route path="/what-is-pairup" element={<WhatIsPairUpPage />} />
+      <Route path="/about" element={<WhatIsPairUpPage />} />
       <Route path="/mentor/:id" element={<MentorProfilePage />} />
       <Route path="/become-a-mentor" element={<BecomeMentorPage />} />
       <Route path="/explore" element={<Navigate to="/learner/explore" replace />} />
@@ -128,6 +131,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <ContractDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/contracts"
+        element={
+          <ProtectedRoute>
+            <ContractsListPage />
           </ProtectedRoute>
         }
       />

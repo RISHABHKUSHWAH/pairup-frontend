@@ -32,6 +32,8 @@ const formatPreviewText = (text) => {
   if (!text) return '';
   let str = String(text);
   str = str.replace(/\[Attachment:\s*([^\]|]+)(?:\|[^\]]+)?\]/g, '📎 $1');
+  str = str.replace(/\[(?:contract:)?\d+\]/gi, '').trim();
+  str = str.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
   const lines = str.split('\n');
   const nonQuote = lines.filter((l) => !l.trim().startsWith('>')).join(' ').trim();
   if (nonQuote) return nonQuote;
@@ -55,6 +57,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [activeContract, setActiveContract] = useState(null);
+  const [userContracts, setUserContracts] = useState([]);
   const [dismissedContractId, setDismissedContractId] = useState(null);
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState('');
@@ -327,10 +330,10 @@ export default function ChatPage() {
     title: '',
     description: '',
     technology: 'Full Stack',
-    total_sessions: 3,
+    total_sessions: 1,
     session_duration_minutes: 60,
-    total_price: 1500,
-    topics: ['', '', ''],
+    total_price: 500,
+    topics: [''],
   });
   const [submittingContract, setSubmittingContract] = useState(false);
 
@@ -499,12 +502,15 @@ export default function ChatPage() {
 
         // Check if there is an actionable contract with this user (proposed, active, or pending release; NEVER disputed, completed, or declined)
         const contracts = await api.getContracts().catch(() => []);
-        const activeC = contracts.find(
-          (c) =>
-            (Number(c.learner_id) === Number(otherId) || Number(c.mentor_id) === Number(otherId)) &&
-            ['proposed', 'active', 'completed_by_mentor'].includes(c.status)
-        );
-        if (isMounted) setActiveContract(activeC || null);
+        if (isMounted) {
+          setUserContracts(contracts || []);
+          const activeC = (contracts || []).find(
+            (c) =>
+              (Number(c.learner_id) === Number(otherId) || Number(c.mentor_id) === Number(otherId)) &&
+              ['proposed', 'active', 'completed_by_mentor'].includes(c.status)
+          );
+          setActiveContract(activeC || null);
+        }
       } catch (err) {
         // Ignore background polling errors
       }
@@ -630,7 +636,12 @@ export default function ChatPage() {
   };
 
   const handleAddTopic = () => {
-    setContractForm({ ...contractForm, topics: [...contractForm.topics, ''] });
+    const nextTopics = [...contractForm.topics, ''];
+    setContractForm({
+      ...contractForm,
+      topics: nextTopics,
+      total_sessions: Math.max(Number(contractForm.total_sessions) || 1, nextTopics.length),
+    });
   };
 
   const handleRemoveTopic = (index) => {
@@ -667,7 +678,7 @@ export default function ChatPage() {
       try {
         await api.sendMessage(
           Number(otherId),
-          `📋 Proposed a Mentorship Contract: "${contractForm.title.trim()}" (${contractForm.total_sessions} sessions, ₹${contractForm.total_price}). View milestones & details in the Contract Hub!`
+          `📋 Proposed a Mentorship Contract: "${contractForm.title.trim()}" (${contractForm.total_sessions} sessions, ₹${contractForm.total_price}). View milestones & details: [Contract #${created.id}](/contracts/${created.id}) [contract:${created.id}]`
         );
         const msgs = await api.getMessages(otherId);
         setMessages(msgs);
@@ -678,15 +689,16 @@ export default function ChatPage() {
       }
 
       setActiveContract(created);
+      setUserContracts((prev) => [created, ...(prev || []).filter((c) => c.id !== created.id)]);
       setContractModalOpen(false);
       setContractForm({
         title: '',
         description: '',
         technology: 'Full Stack',
-        total_sessions: 3,
+        total_sessions: 1,
         session_duration_minutes: 60,
-        total_price: 1500,
-        topics: ['', '', ''],
+        total_price: 500,
+        topics: [''],
       });
       toast.success('Mentorship contract proposal sent successfully!');
     } catch (err) {
@@ -789,6 +801,39 @@ export default function ChatPage() {
     }
   };
 
+  const resolveContract = (title, explicitId = null) => {
+    if (explicitId) {
+      const found = (userContracts || []).find((c) => String(c.id) === String(explicitId));
+      if (found) return found;
+      return { id: explicitId, title: title || `Contract #${explicitId}` };
+    }
+    const cleanTitle = (title || '').trim().toLowerCase();
+    if (cleanTitle && userContracts?.length > 0) {
+      const matchPartner = userContracts.find(
+        (c) =>
+          (Number(c.learner_id) === Number(otherId) || Number(c.mentor_id) === Number(otherId)) &&
+          c.title?.trim().toLowerCase() === cleanTitle
+      );
+      if (matchPartner) return matchPartner;
+
+      const matchAny = userContracts.find((c) => c.title?.trim().toLowerCase() === cleanTitle);
+      if (matchAny) return matchAny;
+    }
+    if (activeContract && (!cleanTitle || activeContract.title?.trim().toLowerCase() === cleanTitle)) {
+      return activeContract;
+    }
+    if (activeContract) {
+      return activeContract;
+    }
+    if (userContracts?.length > 0 && otherId) {
+      const matchPartnerOnly = userContracts.find(
+        (c) => Number(c.learner_id) === Number(otherId) || Number(c.mentor_id) === Number(otherId)
+      );
+      if (matchPartnerOnly) return matchPartnerOnly;
+    }
+    return null;
+  };
+
   const renderFormattedMessage = (text, currentMsg = null, msgIndex = null) => {
     if (!text) return null;
 
@@ -820,21 +865,63 @@ export default function ChatPage() {
         .trim();
     }
 
-    const codeBlockRegex = /```(?:[a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g;
-    const parts = [];
-    let lastIdx = 0;
-    let match;
+    // Helper: Render clickable links (markdown, contract tags, direct urls)
+    const renderTextWithLinks = (content) => {
+      if (!content) return null;
+      const linkRegex = /(\[[^\]]+\]\([^)]+\)|\[(?:contract:)?\d+\]|https?:\/\/[^\s<]+|\/contracts\/\d+)/g;
+      const linkParts = content.split(linkRegex);
 
-    while ((match = codeBlockRegex.exec(mainText)) !== null) {
-      if (match.index > lastIdx) {
-        parts.push({ type: 'text', content: mainText.substring(lastIdx, match.index) });
-      }
-      parts.push({ type: 'code', content: match[1] });
-      lastIdx = match.index + match[0].length;
-    }
-    if (lastIdx < mainText.length) {
-      parts.push({ type: 'text', content: mainText.substring(lastIdx) });
-    }
+      return linkParts.map((lPart, lpIdx) => {
+        if (!lPart) return null;
+
+        const mdMatch = lPart.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+        if (mdMatch) {
+          const label = mdMatch[1];
+          const url = mdMatch[2];
+          if (url.startsWith('/')) {
+            return (
+              <Link key={lpIdx} to={url} className="chat-link">
+                {label}
+              </Link>
+            );
+          }
+          return (
+            <a key={lpIdx} href={url} target="_blank" rel="noopener noreferrer" className="chat-link">
+              {label} ↗
+            </a>
+          );
+        }
+
+        const tagMatch = lPart.match(/^\[(?:contract:)?(\d+)\]$/i);
+        if (tagMatch) {
+          const cId = tagMatch[1];
+          return (
+            <Link key={lpIdx} to={`/contracts/${cId}`} className="chat-contract-pill" title={`Open Contract #${cId}`}>
+              <DocumentIcon size={12} />
+              <span>Contract #{cId} →</span>
+            </Link>
+          );
+        }
+
+        if (lPart.startsWith('/contracts/')) {
+          return (
+            <Link key={lpIdx} to={lPart} className="chat-link">
+              {lPart}
+            </Link>
+          );
+        }
+
+        if (lPart.startsWith('http://') || lPart.startsWith('https://')) {
+          return (
+            <a key={lpIdx} href={lPart} target="_blank" rel="noopener noreferrer" className="chat-link">
+              {lPart} ↗
+            </a>
+          );
+        }
+
+        return lPart;
+      });
+    };
 
     const renderInline = (str) => {
       if (!str) return null;
@@ -984,13 +1071,13 @@ export default function ChatPage() {
           <span key={sIdx}>
             {inlineParts.map((sub, iIdx) => {
               if (sub.startsWith('**') && sub.endsWith('**') && sub.length > 4) {
-                return <strong key={iIdx}>{sub.slice(2, -2)}</strong>;
+                return <strong key={iIdx}>{renderTextWithLinks(sub.slice(2, -2))}</strong>;
               }
               if (sub.startsWith('*') && sub.endsWith('*') && sub.length > 2) {
-                return <em key={iIdx}>{sub.slice(1, -1)}</em>;
+                return <em key={iIdx}>{renderTextWithLinks(sub.slice(1, -1))}</em>;
               }
               if (sub.startsWith('~~') && sub.endsWith('~~') && sub.length > 4) {
-                return <del key={iIdx}>{sub.slice(2, -2)}</del>;
+                return <del key={iIdx}>{renderTextWithLinks(sub.slice(2, -2))}</del>;
               }
               if (sub.startsWith('`') && sub.endsWith('`') && sub.length > 2) {
                 return (
@@ -1009,12 +1096,256 @@ export default function ChatPage() {
                   </code>
                 );
               }
-              return sub;
+              return <React.Fragment key={iIdx}>{renderTextWithLinks(sub)}</React.Fragment>;
             })}
           </span>
         );
       });
     };
+
+    // Check for Contract Proposal message pattern
+    const contractProposalRegex = /(?:📋\s*)?(?:Proposed a\s+)?Mentorship Contract:\s*["“]?([^"”\n(]+)["”]?\s*(?:\(([^)]+)\))?(?:[.\s]*View milestones & details(?:\s+in the Contract Hub!?|:\s*\[Contract #\d+\]\([^)]+\))?)?(?:\s*\[(?:contract:)?(\d+)\])?/i;
+    const proposalMatch = mainText.match(contractProposalRegex);
+
+    if (proposalMatch) {
+      const pTitle = proposalMatch[1]?.trim() || '';
+      const pDetails = proposalMatch[2]?.trim() || '';
+      const pExplicitId = proposalMatch[3] ? Number(proposalMatch[3]) : null;
+
+      const contract = resolveContract(pTitle, pExplicitId);
+      const contractId = contract?.id || pExplicitId;
+      const targetUrl = contractId ? `/contracts/${contractId}` : '/contracts';
+      const status = contract?.status;
+
+      const beforeStr = mainText.slice(0, proposalMatch.index).trim();
+      const afterStr = mainText
+        .slice(proposalMatch.index + proposalMatch[0].length)
+        .replace(/^\s*\[(?:contract:)?\d+\]\s*/i, '')
+        .trim();
+
+      return (
+        <div>
+          {displayQuote && (
+            <div
+              className="chat-quote-badge"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleQuoteClick(displayQuote, targetMsgIdFromQuote, msgIndex);
+              }}
+              title="Click to jump to original message"
+              style={{
+                borderLeft: '3px solid var(--accent)',
+                padding: '4px 10px',
+                marginBottom: '6px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '0 6px 6px 0',
+                fontSize: '12px',
+                color: 'var(--ink-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                userSelect: 'none',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <ReplyIcon size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                {displayQuote}
+              </span>
+              <span
+                style={{
+                  fontSize: '10.5px',
+                  color: 'var(--accent)',
+                  opacity: 0.9,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                  marginLeft: '4px',
+                  padding: '1px 5px',
+                  borderRadius: '4px',
+                  background: 'rgba(38, 71, 214, 0.12)',
+                }}
+              >
+                Jump ↗
+              </span>
+            </div>
+          )}
+
+          {beforeStr && <div style={{ marginBottom: '6px' }}>{renderInline(beforeStr)}</div>}
+
+          {/* Rich Contract Proposal Card */}
+          <div
+            className="chat-contract-card"
+            style={{
+              margin: '8px 0',
+              padding: '14px 16px',
+              borderRadius: '12px',
+              background: 'var(--surface)',
+              border: '1.5px solid rgba(99, 102, 241, 0.35)',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(99, 102, 241, 0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              maxWidth: '440px',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.18) 0%, rgba(168, 85, 247, 0.18) 100%)',
+                    color: 'var(--accent, #6366f1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <DocumentIcon size={20} />
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      color: 'var(--accent, #6366f1)',
+                      lineHeight: 1.2,
+                      marginBottom: '2px',
+                    }}
+                  >
+                    Mentorship Contract Proposal
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '14.5px',
+                      fontWeight: 700,
+                      color: 'var(--ink)',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {pTitle || contract?.title || 'Mentorship Contract'}
+                  </div>
+                </div>
+              </div>
+
+              <span
+                className={`status-badge ${
+                  status === 'active'
+                    ? 'badge-paid'
+                    : status === 'completed_by_mentor'
+                    ? 'badge-accepted'
+                    : status === 'completed'
+                    ? 'badge-completed'
+                    : 'badge-pending'
+                }`}
+                style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  flexShrink: 0,
+                  fontWeight: 600,
+                  textTransform: 'capitalize',
+                }}
+              >
+                {status ? status.replace(/_/g, ' ') : 'Escrow Protected'}
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+                fontSize: '12px',
+                color: 'var(--ink-muted)',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid var(--grid-strong, rgba(255, 255, 255, 0.08))',
+                padding: '7px 10px',
+                borderRadius: '8px',
+              }}
+            >
+              {pDetails ? (
+                <span style={{ fontWeight: 500 }}>{pDetails}</span>
+              ) : (
+                <>
+                  {contract?.total_sessions && (
+                    <span>📅 {contract.completed_sessions || 0} of {contract.total_sessions} Sessions</span>
+                  )}
+                  {contract?.total_price && (
+                    <span style={{ fontWeight: 700, color: 'var(--ink)' }}>• ₹{contract.total_price}</span>
+                  )}
+                  {contract?.technology && <span>• {contract.technology}</span>}
+                </>
+              )}
+              {(contract?.escrow_status || status) && (
+                <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--teal, #14b8a6)' }}>
+                  🛡️ Escrow: {contract?.escrow_status || (status === 'active' ? 'funded' : 'pending')}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+              <Link
+                to={targetUrl}
+                className="btn btn-primary"
+                style={{
+                  padding: '7px 14px',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderRadius: '7px',
+                  boxShadow: '0 2px 10px rgba(99, 102, 241, 0.35)',
+                }}
+              >
+                <DocumentIcon size={14} />
+                <span>View Contract & Milestones</span>
+                <span style={{ fontSize: '13px', marginLeft: '2px' }}>→</span>
+              </Link>
+              <Link
+                to="/contracts"
+                className="btn btn-ghost"
+                style={{
+                  padding: '7px 10px',
+                  fontSize: '12px',
+                  textDecoration: 'none',
+                  color: 'var(--ink-muted)',
+                  borderRadius: '7px',
+                }}
+              >
+                All Contracts
+              </Link>
+            </div>
+          </div>
+
+          {afterStr && <div style={{ marginTop: '6px' }}>{renderInline(afterStr)}</div>}
+        </div>
+      );
+    }
+
+    const codeBlockRegex = /```(?:[a-zA-Z0-9_-]+)?\n?([\s\S]*?)```/g;
+    const parts = [];
+    let lastIdx = 0;
+    let match;
+
+    while ((match = codeBlockRegex.exec(mainText)) !== null) {
+      if (match.index > lastIdx) {
+        parts.push({ type: 'text', content: mainText.substring(lastIdx, match.index) });
+      }
+      parts.push({ type: 'code', content: match[1] });
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx < mainText.length) {
+      parts.push({ type: 'text', content: mainText.substring(lastIdx) });
+    }
 
     return (
       <div>

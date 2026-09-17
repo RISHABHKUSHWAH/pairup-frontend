@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { initials, notificationsApi, learnerNotifications, mentorNotifications } from '../api/client';
@@ -86,6 +86,21 @@ export default function Navbar() {
       >
         {theme === 'dark' ? <SunIcon size={17} /> : <MoonIcon size={17} />}
       </button>
+
+      <nav className="topbar-nav" aria-label="Main navigation">
+        <NavLink
+          to="/what-is-pairup"
+          className={({ isActive }) => `topbar-nav-link ${isActive ? 'active' : ''}`}
+        >
+          What is PairUp?
+        </NavLink>
+        <NavLink
+          to="/help"
+          className={({ isActive }) => `topbar-nav-link ${isActive ? 'active' : ''}`}
+        >
+          Help &amp; Guides
+        </NavLink>
+      </nav>
 
       <div className="topbar-actions">
         {user ? (

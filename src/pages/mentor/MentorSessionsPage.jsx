@@ -13,6 +13,8 @@ import {
   CheckIcon,
   XIcon,
   VideoIcon,
+  ShieldIcon,
+  CreditCardIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
 
@@ -167,6 +169,137 @@ export default function MentorSessionsPage() {
     );
   };
 
+  const getPaymentStatusBadge = (b) => {
+    const isPaid = b.status === 'paid' || b.payment_status === 'held';
+    const isAccepted = b.status === 'accepted' || b.payment_status === 'pending_escrow';
+    const isCompleted = b.status === 'completed' || b.payment_status === 'released';
+    const isCancelled = b.status === 'cancelled' || b.payment_status === 'refunded';
+    const isDisputed = b.status === 'disputed' || b.payment_status === 'disputed';
+
+    if (isPaid) {
+      return (
+        <span
+          className="status-badge"
+          style={{
+            fontSize: '11px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            background: 'rgba(16, 185, 129, 0.15)',
+            color: '#10b981',
+            border: '1px solid rgba(16, 185, 129, 0.35)',
+            fontWeight: 600,
+            padding: '2px 8px',
+            borderRadius: '4px',
+          }}
+          title="Full session payment is held safely in platform escrow"
+        >
+          <ShieldIcon size={12} />
+          <span>Escrow Secured · Paid</span>
+        </span>
+      );
+    }
+
+    if (isAccepted) {
+      return (
+        <span
+          className="status-badge"
+          style={{
+            fontSize: '11px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            background: 'rgba(245, 158, 11, 0.15)',
+            color: '#f59e0b',
+            border: '1px solid rgba(245, 158, 11, 0.35)',
+            fontWeight: 600,
+            padding: '2px 8px',
+            borderRadius: '4px',
+          }}
+          title="Booking accepted by you. Waiting for learner to deposit funds into escrow."
+        >
+          <CreditCardIcon size={12} />
+          <span>Unpaid · Awaiting Escrow Deposit</span>
+        </span>
+      );
+    }
+
+    if (isCompleted) {
+      return (
+        <span
+          className="status-badge"
+          style={{
+            fontSize: '11px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            background: 'rgba(99, 102, 241, 0.15)',
+            color: '#6366f1',
+            border: '1px solid rgba(99, 102, 241, 0.35)',
+            fontWeight: 600,
+            padding: '2px 8px',
+            borderRadius: '4px',
+          }}
+          title="Session finished. Payment released to your earnings."
+        >
+          <CheckIcon size={12} />
+          <span>Escrow Released · Paid Out</span>
+        </span>
+      );
+    }
+
+    if (isDisputed) {
+      return (
+        <span
+          className="status-badge badge-disputed mono"
+          style={{
+            fontSize: '11px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}
+        >
+          <span>Disputed · Escrow Frozen</span>
+        </span>
+      );
+    }
+
+    if (isCancelled) {
+      return (
+        <span
+          className="status-badge badge-cancelled mono"
+          style={{
+            fontSize: '11px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}
+        >
+          <span>Cancelled · Refunded</span>
+        </span>
+      );
+    }
+
+    return (
+      <span
+        className="status-badge mono"
+        style={{
+          fontSize: '11px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          background: 'rgba(100, 116, 139, 0.12)',
+          color: 'var(--ink-muted)',
+          border: '1px solid var(--grid-strong)',
+          padding: '2px 8px',
+          borderRadius: '4px',
+        }}
+      >
+        <span>Payment Pending Confirmation</span>
+      </span>
+    );
+  };
+
   return (
     <PortalLayout
       title="My Sessions"
@@ -273,6 +406,7 @@ export default function MentorSessionsPage() {
                         <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '11px' }}>
                           {b.status}
                         </span>
+                        {getPaymentStatusBadge(b)}
                         {getSessionTypeBadge(b.topic)}
                       </div>
                       <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 500 }}>
@@ -281,12 +415,31 @@ export default function MentorSessionsPage() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                    <div className="mono" style={{ fontWeight: 700, fontSize: '16px', color: 'var(--brand)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+                    <div className="mono" style={{ fontWeight: 700, fontSize: '17px', color: 'var(--brand)' }}>
                       ₹{b.price}
                     </div>
-                    <div className="sub" style={{ fontSize: '11px' }}>
+                    <div className="sub" style={{ fontSize: '11.5px', color: 'var(--ink-muted)' }}>
                       {b.duration_minutes || 60} Minutes Session
+                    </div>
+                    <div style={{ marginTop: '2px', fontSize: '11px', fontWeight: 600 }}>
+                      {b.status === 'paid' ? (
+                        <span style={{ color: '#10b981', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          <ShieldIcon size={11} /> Escrow Funded
+                        </span>
+                      ) : b.status === 'accepted' ? (
+                        <span style={{ color: '#f59e0b', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          <CreditCardIcon size={11} /> Awaiting Payment
+                        </span>
+                      ) : b.status === 'completed' ? (
+                        <span style={{ color: '#6366f1', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          ✓ Released (Net: ₹{b.net_amount || Math.round(b.price * 0.9)})
+                        </span>
+                      ) : b.status === 'cancelled' ? (
+                        <span style={{ color: 'var(--ink-muted)' }}>Refunded</span>
+                      ) : (
+                        <span style={{ color: 'var(--ink-faint)' }}>Pending Acceptance</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -309,6 +462,26 @@ export default function MentorSessionsPage() {
                       : 'Pending learner time selection'}
                   </div>
                   <div>
+                    <strong>Payment &amp; Escrow:</strong>{' '}
+                    {b.status === 'paid' ? (
+                      <span style={{ color: '#10b981', fontWeight: 600 }}>
+                        ₹{b.price} Secured in Platform Escrow (Net take-home: ₹{b.net_amount || Math.round(b.price * 0.9)})
+                      </span>
+                    ) : b.status === 'accepted' ? (
+                      <span style={{ color: '#f59e0b', fontWeight: 600 }}>
+                        ₹{b.price} Unpaid · Learner prompted to deposit before session starts
+                      </span>
+                    ) : b.status === 'completed' ? (
+                      <span style={{ color: '#6366f1', fontWeight: 600 }}>
+                        ₹{b.price} Paid · Disbursed to mentor earnings
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--ink-muted)' }}>
+                        Pending mentor confirmation
+                      </span>
+                    )}
+                  </div>
+                  <div>
                     <strong>Tools:</strong> Live Video, Collaborative Screen Share &amp; Code IDE
                   </div>
                   {hasNotes && (
@@ -317,6 +490,50 @@ export default function MentorSessionsPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Status Notice Banner */}
+                {b.status === 'accepted' && (
+                  <div
+                    style={{
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.25)',
+                      borderRadius: '8px',
+                      padding: '9px 13px',
+                      margin: '10px 0 6px',
+                      fontSize: '12px',
+                      color: 'var(--ink)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <CreditCardIcon size={15} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ color: '#b45309' }}>Awaiting Escrow Payment:</strong> You have accepted this booking request. The learner (<strong>{b.learner_name}</strong>) has been prompted to deposit <strong>₹{b.price}</strong> into 100% platform escrow. Once deposited, the session will move to <em>In Progress (Live)</em> and the live pairing room link will activate.
+                    </div>
+                  </div>
+                )}
+                {b.status === 'paid' && (
+                  <div
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.08)',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                      borderRadius: '8px',
+                      padding: '9px 13px',
+                      margin: '10px 0 6px',
+                      fontSize: '12px',
+                      color: 'var(--ink)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <ShieldIcon size={15} style={{ color: '#10b981', flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ color: '#047857' }}>Payment Secured in Escrow:</strong> <strong>₹{b.price}</strong> is safely held in PairUp platform escrow. You can join the live pairing room at the scheduled time. Funds will be released to your earnings upon session completion.
+                    </div>
+                  </div>
+                )}
 
                 {/* Review received if past session */}
                 {activeTab === 'past' && b.status === 'completed' && (
