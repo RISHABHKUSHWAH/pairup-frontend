@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import BookSessionModal from '../../components/BookSessionModal';
+import Pagination from '../../components/Pagination';
 import { api, initials, stars } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -50,6 +51,8 @@ function formatTime12h(t) {
 export default function MentorProfilePage() {
   const { toast } = useToast();
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [mentor, setMentor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [topic, setTopic] = useState('');
@@ -57,6 +60,8 @@ export default function MentorProfilePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookModalOpen, setBookModalOpen] = useState(false);
   const [selectedDuration, setSelectedDuration] = useState(60);
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewsPerPage, setReviewsPerPage] = useState(3);
 
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -64,6 +69,7 @@ export default function MentorProfilePage() {
   useEffect(() => {
     async function loadMentor() {
       setLoading(true);
+      setReviewPage(1);
       try {
         const data = await api.getMentor(id);
         setMentor(data);
@@ -76,16 +82,52 @@ export default function MentorProfilePage() {
     loadMentor();
   }, [id]);
 
+  // Resume booking modal if returned from login
+  useEffect(() => {
+    if (!user || !mentor) return;
+    const shouldBook = searchParams.get('book') === 'true' || location.state?.action === 'book_session';
+    if (shouldBook) {
+      try {
+        sessionStorage.removeItem('pairup_pending_action');
+      } catch (e) {}
+      if (searchParams.has('book')) {
+        const next = new URLSearchParams(searchParams);
+        next.delete('book');
+        setSearchParams(next, { replace: true });
+      }
+      setBookModalOpen(true);
+      toast.success(`Resuming your session booking with ${mentor.name}!`);
+    }
+  }, [user, mentor]);
+
   const handleBooking = async (e) => {
     e.preventDefault();
     if (!user) {
-      navigate('/login');
+      const mId = mentor?.user_id || mentor?.id || id;
+      const returnUrl = `/mentor/${mId}?book=true`;
+      try {
+        sessionStorage.setItem('pairup_pending_action', JSON.stringify({
+          action: 'book_session',
+          mentorId: mId,
+          mentor,
+          returnUrl,
+        }));
+      } catch (err) {}
+      navigate(`/login?redirect=${encodeURIComponent(returnUrl)}`, {
+        state: {
+          from: { pathname: `/mentor/${mId}`, search: '?book=true' },
+          action: 'book_session',
+          mentorId: mId,
+          mentor,
+        },
+      });
       return;
     }
     setBookingError('');
     setIsSubmitting(true);
     try {
-      const price = Math.round(((mentor.hourly_rate || 500) * 30) / 60);
+      const rate = Number(mentor.hourly_rate || 0);
+      const price = rate > 0 ? Math.max(1, Math.round((rate * 30) / 60)) : 0;
       await api.createBooking({
         mentor_id: mentor.user_id,
         topic,
@@ -136,7 +178,7 @@ export default function MentorProfilePage() {
   const completionPercent = mentor.completion_rate !== null && mentor.completion_rate !== undefined 
     ? `${mentor.completion_rate}%` 
     : '100%';
-  const priceFor30Min = Math.round(((mentor.hourly_rate || 500) * 30) / 60);
+  const priceFor30Min = Math.max(1, Math.round(((Number(mentor.hourly_rate) || 0) * 30) / 60));
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -477,31 +519,62 @@ export default function MentorProfilePage() {
             )}
 
             {/* Reviews Section */}
-            <div className="mentor-section-card">
+            <div className="mentor-section-card" id="mentor-reviews-section">
               <div className="mentor-card-header">
                 <div className="mentor-card-icon">
                   <StarIcon size={18} style={{ color: 'var(--gold)' }} />
                 </div>
-                <h3 className="mentor-card-title">Learner Reviews</h3>
+                <h3 className="mentor-card-title">
+                  Learner Reviews {mentor.reviews && mentor.reviews.length > 0 ? `(${mentor.reviews.length})` : ''}
+                </h3>
               </div>
               {mentor.reviews && mentor.reviews.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {mentor.reviews.map((r, idx) => (
-                    <div key={idx} className="review" style={{ padding: '14px 16px', borderRadius: '10px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div className="review-name" style={{ fontWeight: 700 }}>
-                          {r.learner_name}
-                        </div>
-                        <div style={{ color: 'var(--gold)', fontWeight: 700, fontSize: '13px' }}>
-                          ★ {r.rating}.0
-                        </div>
+                (() => {
+                  const totalPages = Math.ceil(mentor.reviews.length / reviewsPerPage) || 1;
+                  const currentReviews = mentor.reviews.slice((reviewPage - 1) * reviewsPerPage, reviewPage * reviewsPerPage);
+                  return (
+                    <>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {currentReviews.map((r, idx) => (
+                          <div key={r.id || idx} className="review" style={{ padding: '14px 16px', borderRadius: '10px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div className="review-name" style={{ fontWeight: 700 }}>
+                                {r.learner_name}
+                              </div>
+                              <div style={{ color: 'var(--gold)', fontWeight: 700, fontSize: '13px' }}>
+                                ★ {r.rating}.0
+                              </div>
+                            </div>
+                            <div className="review-body" style={{ marginTop: '6px', fontSize: '13.5px' }}>
+                              {r.comment || 'No written feedback provided.'}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="review-body" style={{ marginTop: '6px', fontSize: '13.5px' }}>
-                        {r.comment || 'No written feedback provided.'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+
+                      <Pagination
+                        currentPage={reviewPage}
+                        totalPages={totalPages}
+                        onPageChange={(page) => {
+                          setReviewPage(page);
+                          const el = document.getElementById('mentor-reviews-section');
+                          if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                          }
+                        }}
+                        totalItems={mentor.reviews.length}
+                        itemsPerPage={reviewsPerPage}
+                        itemLabel="reviews"
+                        pageSizeOptions={[3, 5, 10]}
+                        onPageSizeChange={(newSize) => {
+                          setReviewsPerPage(newSize);
+                          setReviewPage(1);
+                        }}
+                        compact={true}
+                      />
+                    </>
+                  );
+                })()
               ) : (
                 <p className="sub" style={{ margin: 0 }}>
                   No reviews yet. Book a session with {mentor.name} and be the first to leave feedback!
@@ -525,7 +598,7 @@ export default function MentorProfilePage() {
                     <span className="mentor-price-unit">/ hr</span>
                   </div>
                   <div className="mentor-price-estimate">
-                    ~₹{Math.max(1, Math.round(((mentor.hourly_rate || 50) * selectedDuration) / 60)).toLocaleString('en-IN')} for {selectedDuration}m
+                    ~₹{Math.max(1, Math.round(((Number(mentor.hourly_rate) || 0) * selectedDuration) / 60)).toLocaleString('en-IN')} for {selectedDuration}m
                   </div>
                 </div>
 
@@ -570,7 +643,24 @@ export default function MentorProfilePage() {
                       className="btn btn-primary btn-block"
                       onClick={() => {
                         if (!user) {
-                          navigate('/login');
+                          const mId = mentor?.user_id || mentor?.id || id;
+                          const returnUrl = `/mentor/${mId}?book=true`;
+                          try {
+                            sessionStorage.setItem('pairup_pending_action', JSON.stringify({
+                              action: 'book_session',
+                              mentorId: mId,
+                              mentor,
+                              returnUrl,
+                            }));
+                          } catch (err) {}
+                          navigate(`/login?redirect=${encodeURIComponent(returnUrl)}`, {
+                            state: {
+                              from: { pathname: `/mentor/${mId}`, search: '?book=true' },
+                              action: 'book_session',
+                              mentorId: mId,
+                              mentor,
+                            },
+                          });
                           return;
                         }
                         setBookModalOpen(true);
@@ -578,7 +668,7 @@ export default function MentorProfilePage() {
                       style={{ padding: '12px 18px', fontSize: '14px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                     >
                       <CalendarIcon size={16} />
-                      <span>Book Session · ₹{Math.max(1, Math.round(((mentor.hourly_rate || 50) * selectedDuration) / 60)).toLocaleString('en-IN')} ({selectedDuration}m)</span>
+                      <span>Book Session · ₹{Math.max(1, Math.round(((Number(mentor.hourly_rate) || 0) * selectedDuration) / 60)).toLocaleString('en-IN')} ({selectedDuration}m)</span>
                     </button>
 
                     {/* Escrow Guarantee Box */}

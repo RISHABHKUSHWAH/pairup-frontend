@@ -21,6 +21,7 @@ import {
   MentorIcon,
   CalendarIcon,
   WalletIcon,
+  RupeeIcon,
   PercentIcon,
   RefreshIcon,
   ScaleIcon,
@@ -60,6 +61,9 @@ export default function Sidebar({
 
   const [helpOpen, setHelpOpen] = useState(false);
   const helpMenuRef = useRef(null);
+
+  const [financesFlyoutOpen, setFinancesFlyoutOpen] = useState(false);
+  const financesRef = useRef(null);
 
   const [showHelpCenter, setShowHelpCenter] = useState(false);
   const [showSupportRequests, setShowSupportRequests] = useState(false);
@@ -105,14 +109,21 @@ export default function Sidebar({
       ) {
         setHelpOpen(false);
       }
+      if (
+        financesRef.current &&
+        !financesRef.current.contains(event.target)
+      ) {
+        setFinancesFlyoutOpen(false);
+      }
     }
     function handleKeyDown(event) {
       if (event.key === 'Escape') {
         setMenuOpen(false);
         setHelpOpen(false);
+        setFinancesFlyoutOpen(false);
       }
     }
-    if (menuOpen || helpOpen) {
+    if (menuOpen || helpOpen || financesFlyoutOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('keydown', handleKeyDown);
     }
@@ -120,12 +131,13 @@ export default function Sidebar({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [menuOpen, helpOpen]);
+  }, [menuOpen, helpOpen, financesFlyoutOpen]);
 
   useEffect(() => {
     setMenuOpen(false);
     setHelpOpen(false);
-  }, [location.pathname]);
+    setFinancesFlyoutOpen(false);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     const handleOpenSupport = () => {
@@ -173,7 +185,20 @@ export default function Sidebar({
     { to: '/chat', label: 'Messages', icon: <MessageIcon size={20} />, dataTour: 'nav-messages' },
     { to: '/mentor/availability', label: 'Availability', icon: <ClockIcon size={20} />, dataTour: 'nav-availability' },
     { to: '/mentor/calendar', label: 'Calendar', icon: <CalendarIcon size={20} />, dataTour: 'nav-calendar' },
-    { to: '/mentor/earnings', label: 'Earnings & Payouts', icon: <WalletIcon size={20} />, dataTour: 'nav-earnings' },
+    {
+      to: '/mentor/earnings',
+      label: 'Finances',
+      icon: <RupeeIcon size={20} />,
+      dataTour: 'nav-earnings',
+      subitems: [
+        { label: 'Overview', to: '/mentor/earnings?tab=overview' },
+        { label: 'Transactions', to: '/mentor/transactions' },
+        { label: 'Withdraw earnings', to: '/mentor/earnings?action=withdraw' },
+        { label: 'Billings and earnings', to: '/mentor/billings' },
+        { label: 'My reports', to: '/mentor/reports' },
+        { label: 'Taxes', to: '/mentor/taxes' },
+      ],
+    },
     { to: '/mentor/reviews', label: 'Reviews', icon: <StarIcon size={20} />, dataTour: 'nav-reviews' },
   ];
 
@@ -259,19 +284,90 @@ export default function Sidebar({
       </div>
 
       <nav className={`admin-nav ${portalType === 'admin' ? 'admin-nav--scrollable' : 'admin-nav--no-scroll'}`}>
-        {items.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            title={item.label}
-            data-tour={item.dataTour}
-            className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
-          >
-            <span className="admin-nav-icon">{item.icon}</span>
-            <span className="admin-nav-label">{item.label}</span>
-          </NavLink>
-        ))}
+        {items.map((item) => {
+          if (item.subitems) {
+            const isFinancesActive =
+              location.pathname.startsWith('/mentor/earnings') ||
+              location.pathname.startsWith('/mentor/transactions') ||
+              location.pathname.startsWith('/mentor/billings') ||
+              location.pathname.startsWith('/mentor/reports') ||
+              location.pathname.startsWith('/mentor/taxes');
+            return (
+              <div
+                key={item.to}
+                ref={financesRef}
+                className="sidebar-nav-item-wrapper"
+                onMouseEnter={() => setFinancesFlyoutOpen(true)}
+                onMouseLeave={() => setFinancesFlyoutOpen(false)}
+              >
+                <NavLink
+                  to={item.to}
+                  end={item.end}
+                  title={item.label}
+                  data-tour={item.dataTour}
+                  className={`admin-nav-item admin-nav-item--has-submenu ${isFinancesActive ? 'active' : ''}`}
+                  onClick={() => setFinancesFlyoutOpen((prev) => !prev)}
+                >
+                  <span className="admin-nav-icon">{item.icon}</span>
+                  <span className="admin-nav-label">{item.label}</span>
+                  {!isCollapsed && (
+                    <span className="admin-nav-chevron">
+                      <ChevronRightIcon size={14} />
+                    </span>
+                  )}
+                </NavLink>
+
+                {financesFlyoutOpen && (
+                  <div
+                    className="sidebar-flyout-menu"
+                    role="menu"
+                    aria-label={`${item.label} options`}
+                  >
+                    {item.subitems.map((sub) => {
+                      const isCurrent =
+                        (sub.to === '/mentor/transactions' &&
+                          location.pathname.startsWith('/mentor/transactions')) ||
+                        (sub.to === '/mentor/billings' &&
+                          location.pathname.startsWith('/mentor/billings')) ||
+                        (sub.to === '/mentor/reports' &&
+                          location.pathname.startsWith('/mentor/reports')) ||
+                        (sub.to === '/mentor/taxes' &&
+                          location.pathname.startsWith('/mentor/taxes')) ||
+                        (sub.to.includes('tab=overview') &&
+                          location.pathname === '/mentor/earnings' &&
+                          (!location.search || location.search === '?tab=overview')) ||
+                        location.pathname + location.search === sub.to;
+                      return (
+                        <Link
+                          key={sub.label}
+                          to={sub.to}
+                          className={`sidebar-flyout-item ${isCurrent ? 'active' : ''}`}
+                          onClick={() => setFinancesFlyoutOpen(false)}
+                        >
+                          <span>{sub.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              title={item.label}
+              data-tour={item.dataTour}
+              className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
+            >
+              <span className="admin-nav-icon">{item.icon}</span>
+              <span className="admin-nav-label">{item.label}</span>
+            </NavLink>
+          );
+        })}
       </nav>
 
       <div className="admin-sidebar-bottom">

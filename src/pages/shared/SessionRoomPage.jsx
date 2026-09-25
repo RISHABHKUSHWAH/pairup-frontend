@@ -41,6 +41,7 @@ export default function SessionRoomPage() {
 
   // Session & Auth state
   const [sessionData, setSessionData] = useState(null);
+  const [tooEarlyInfo, setTooEarlyInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -115,6 +116,25 @@ export default function SessionRoomPage() {
           bookingApi.getSessionSummary(bookingId).catch(() => ({ summary_text: '', action_items: '' })),
         ]);
 
+        const rawScheduled = tokenRes.scheduled_at || tokenRes.scheduled_time;
+        if (rawScheduled && tokenRes.status === 'paid') {
+          const schedDate = new Date(rawScheduled);
+          if (!isNaN(schedDate.getTime())) {
+            const startMs = schedDate.getTime();
+            const openMs = startMs - 15 * 60 * 1000;
+            const now = Date.now();
+            if (now < openMs) {
+              setSessionData(tokenRes);
+              setTooEarlyInfo({
+                scheduledAt: schedDate,
+                opensAt: new Date(openMs),
+              });
+              setLoading(false);
+              return;
+            }
+          }
+        }
+
         setSessionData(tokenRes);
         setNotes(notesRes.notes || '');
         setFiles(Array.isArray(filesRes) ? filesRes : []);
@@ -188,7 +208,7 @@ export default function SessionRoomPage() {
       }
     }
 
-    if (sessionData) {
+    if (sessionData && !tooEarlyInfo) {
       setupLocalMedia();
     }
 
@@ -204,7 +224,7 @@ export default function SessionRoomPage() {
         peerConnectionRef.current.close();
       }
     };
-  }, [sessionData]);
+  }, [sessionData, tooEarlyInfo]);
 
   // 3. WebRTC PeerConnection and Signaling Engine
   const createPeerConnection = () => {
@@ -625,6 +645,46 @@ export default function SessionRoomPage() {
         </div>
         <Footer />
         <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (tooEarlyInfo && sessionData) {
+    const isMentor = sessionData.is_mentor;
+    return (
+      <div style={{ minHeight: '100vh', background: '#0F172A', color: '#F8FAFC', display: 'flex', flexDirection: 'column' }}>
+        <Navbar />
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px', padding: '20px' }}>
+          <div style={{ background: '#1E293B', border: '1px solid #334155', borderRadius: '16px', padding: '36px 32px', maxWidth: '520px', textAlign: 'center', boxShadow: '0 8px 30px rgba(0,0,0,0.3)' }}>
+            <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid #38BDF8', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px', color: '#38BDF8' }}>
+              <ClockIcon size={28} />
+            </div>
+            <h3 style={{ color: '#F8FAFC', marginBottom: '8px', fontSize: '18px', fontWeight: 700 }}>Live Room Not Open Yet</h3>
+            <p style={{ color: '#94A3B8', fontSize: '13.5px', lineHeight: 1.5, marginBottom: '20px' }}>
+              This session ({sessionData.topic || 'Pair Programming'}) is scheduled for{' '}
+              <strong style={{ color: '#F8FAFC' }}>{tooEarlyInfo.scheduledAt.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</strong>.
+              <br />
+              The live video call room activates <strong style={{ color: '#38BDF8' }}>15 minutes</strong> before start time ({tooEarlyInfo.opensAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}).
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => navigate(isMentor ? '/mentor/sessions' : '/learner/sessions')}
+                style={{ background: '#0284C7', color: '#fff', border: 'none', padding: '10px 22px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+              >
+                Back to My Sessions
+              </button>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                style={{ background: 'transparent', color: '#94A3B8', border: '1px solid #475569', padding: '10px 18px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+              >
+                Refresh Room
+              </button>
+            </div>
+          </div>
+        </div>
+        <Footer />
       </div>
     );
   }

@@ -15,19 +15,26 @@ export default function ContractsListPage() {
 
   useEffect(() => {
     loadContracts();
-  }, [filter]);
+  }, []);
 
   const loadContracts = async () => {
     setLoading(true);
     try {
-      const data = await api.getContracts(filter !== 'all' ? { status: filter } : {});
-      setContracts(data);
+      const data = await api.getContracts({});
+      setContracts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load contracts:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  const filteredContracts = contracts.filter((c) => {
+    if (filter === 'all') return true;
+    if (filter === 'active') return ['active', 'in_progress'].includes(c.status);
+    if (filter === 'completed') return ['completed', 'completed_by_mentor'].includes(c.status);
+    return c.status === filter;
+  });
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -85,10 +92,12 @@ export default function ContractsListPage() {
         {/* Contracts Grid */}
         {loading ? (
           <div className="empty">Loading contracts...</div>
-        ) : contracts.length === 0 ? (
+        ) : filteredContracts.length === 0 ? (
           <div className="empty" style={{ background: 'var(--surface)', border: '1px solid var(--grid-strong)', borderRadius: '12px' }}>
             <DocumentIcon size={36} color="var(--ink-muted)" style={{ margin: '0 auto 12px' }} />
-            <div style={{ fontWeight: 600, fontSize: '15px', color: 'var(--ink)' }}>No contracts found</div>
+            <div style={{ fontWeight: 600, fontSize: '15px', color: 'var(--ink)' }}>
+              {filter === 'all' ? 'No contracts found' : `No ${filter} contracts found`}
+            </div>
             <p className="sub" style={{ maxWidth: '400px', margin: '6px auto 16px' }}>
               {portalType === 'mentor'
                 ? 'Discuss with your learners in chat and propose custom multi-session curricula.'
@@ -100,7 +109,7 @@ export default function ContractsListPage() {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
-            {contracts.map((c) => {
+            {filteredContracts.map((c) => {
               const otherName = portalType === 'mentor' ? c.learner_name : c.mentor_name;
               const isDone = c.status === 'completed';
               const progressPct = Math.round(((c.completed_sessions || 0) / c.total_sessions) * 100);

@@ -24,6 +24,9 @@ import {
   TrashIcon,
   MoreHorizontalIcon,
   ArchiveIcon,
+  VideoIcon,
+  ShieldIcon,
+  SearchIcon,
 } from '../../components/Icons';
 import { formatChatDayDate, isSameDay } from '../../utils/formatters';
 import { useToast } from '../../context';
@@ -31,14 +34,71 @@ import { useToast } from '../../context';
 const formatPreviewText = (text) => {
   if (!text) return '';
   let str = String(text);
-  str = str.replace(/\[Attachment:\s*([^\]|]+)(?:\|[^\]]+)?\]/g, '📎 $1');
+  // Clean contract tags and attachments
   str = str.replace(/\[(?:contract:)?\d+\]/gi, '').trim();
   str = str.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  str = str.replace(/\[Attachment:\s*([^\]|]+)(?:\|[^\]]+)?\]/g, '📎 $1');
+  // Strip code fences and inline code
+  str = str.replace(/```[a-zA-Z0-9_-]*\n?([\s\S]*?)```/g, '$1');
+  str = str.replace(/`([^`]+)`/g, '$1');
+  str = str.replace(/`+/g, '');
+  // Strip markdown styles
+  str = str.replace(/\*\*([^*]+)\*\*/g, '$1');
+  str = str.replace(/\*([^*]+)\*/g, '$1');
+  str = str.replace(/~~([^~]+)~~/g, '$1');
+  str = str.replace(/__([^_]+)__/g, '$1');
+  // Strip blockquotes
   const lines = str.split('\n');
   const nonQuote = lines.filter((l) => !l.trim().startsWith('>')).join(' ').trim();
-  if (nonQuote) return nonQuote;
-  return str.replace(/(?:^|\s)>+\s*(@[^:]+:\s*)?/g, '').trim();
+  const cleaned = nonQuote || str.replace(/(?:^|\s)>+\s*(@[^:]+:\s*)?/g, '').trim();
+  return cleaned.replace(/\s+/g, ' ').trim();
 };
+
+export function getSessionTiming(b) {
+  if (!b) return { isLiveNow: false, isUpcoming: false, isPast: false, isFlexible: false, timeLabel: '' };
+  const raw = b.scheduled_at || b.scheduled_time;
+  if (!raw) {
+    return {
+      isLiveNow: b.status === 'paid',
+      isUpcoming: false,
+      isPast: false,
+      isFlexible: true,
+      timeLabel: 'Flexible / Unscheduled',
+    };
+  }
+
+  const date = new Date(raw);
+  if (isNaN(date.getTime())) {
+    return {
+      isLiveNow: b.status === 'paid',
+      isUpcoming: false,
+      isPast: false,
+      isFlexible: true,
+      timeLabel: 'Flexible / Unscheduled',
+    };
+  }
+
+  const durationMs = (b.duration_minutes || 60) * 60 * 1000;
+  const startMs = date.getTime();
+  const endMs = startMs + durationMs;
+  const now = Date.now();
+
+  // Call room is considered "Live Now" from 15 minutes before scheduled start through 30 minutes after end time
+  const isLiveNow = now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
+  const isUpcoming = now < (startMs - 15 * 60 * 1000);
+  const isPast = now > (endMs + 30 * 60 * 1000);
+
+  return {
+    isLiveNow,
+    isUpcoming,
+    isPast,
+    isFlexible: false,
+    timeLabel: date.toLocaleString([], {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }),
+  };
+}
 
 export default function ChatPage() {
   const { toast } = useToast();
@@ -59,6 +119,7 @@ export default function ChatPage() {
   const [activeContract, setActiveContract] = useState(null);
   const [userContracts, setUserContracts] = useState([]);
   const [dismissedContractId, setDismissedContractId] = useState(null);
+  const [dismissedSessionId, setDismissedSessionId] = useState(null);
   const [inputText, setInputText] = useState('');
   const [error, setError] = useState('');
   const [loadingConv, setLoadingConv] = useState(true);
@@ -375,20 +436,26 @@ export default function ChatPage() {
     (c) => String(c.user_id || c.other_id) === String(otherId) && String(c.contract_id || null) === String(searchContractId || null)
   );
 
-  // If otherId is set but name is missing and not in conversation list, try fetching profile
+  // Fetch mentor profile for otherId so we always have the real hourly rate, title, and details
   useEffect(() => {
     if (!otherId) {
       setPartnerProfile(null);
       return;
     }
-    if (!activeConvo && !searchName) {
-      api.getMentor(otherId)
-        .then((m) => {
-          if (m?.name) setPartnerProfile({ name: m.name, role: 'mentor' });
-        })
-        .catch(() => {});
-    }
-  }, [otherId, activeConvo, searchName]);
+    api.getMentor(otherId)
+      .then((m) => {
+        if (m) {
+          setPartnerProfile({
+            id: m.user_id || m.id,
+            name: m.name,
+            role: 'mentor',
+            title: m.title || 'Technical Mentor',
+            hourly_rate: m.hourly_rate !== undefined && m.hourly_rate !== null ? Number(m.hourly_rate) : undefined,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [otherId]);
 
   const otherName =
     searchName ||
@@ -493,12 +560,34 @@ export default function ChatPage() {
           return msgs;
         });
 
-        // Check if there is an active paid booking
+        // Check if there is an active/upcoming booking with this partner
         const bookings = await api.getBookings().catch(() => []);
-        const active = bookings.find(
-          (b) => ['paid', 'accepted', 'pending'].includes(b.status) && (b.learner_id == otherId || b.mentor_id == otherId)
+        const partnerBookings = (bookings || []).filter(
+          (b) =>
+            ['paid', 'accepted', 'pending'].includes(b.status) &&
+            (Number(b.learner_id) === Number(otherId) || Number(b.mentor_id) === Number(otherId))
         );
-        if (isMounted) setActiveSession(active || null);
+
+        // Sort: 1st priority = Live Now session; 2nd priority = Earliest upcoming session; 3rd = Most recent
+        let chosenSession = null;
+        const liveNow = partnerBookings.find((b) => b.status === 'paid' && getSessionTiming(b).isLiveNow);
+        if (liveNow) {
+          chosenSession = liveNow;
+        } else {
+          const upcoming = partnerBookings
+            .filter((b) => getSessionTiming(b).isUpcoming)
+            .sort((a, b) => {
+              const aTime = new Date(a.scheduled_at || a.scheduled_time || 0).getTime();
+              const bTime = new Date(b.scheduled_at || b.scheduled_time || 0).getTime();
+              return aTime - bTime;
+            });
+          if (upcoming.length > 0) {
+            chosenSession = upcoming[0];
+          } else if (partnerBookings.length > 0) {
+            chosenSession = partnerBookings[0];
+          }
+        }
+        if (isMounted) setActiveSession(chosenSession || null);
 
         // Check if there is an actionable contract with this user (proposed, active, or pending release; NEVER disputed, completed, or declined)
         const contracts = await api.getContracts().catch(() => []);
@@ -1428,7 +1517,7 @@ export default function ChatPage() {
   return (
     <PortalLayout title="Messages" portalType={user?.role || 'learner'} showBack={true} fullHeight={true}>
         <div
-          className="chat-page-grid"
+          className={`chat-page-grid ${otherId ? 'has-active-chat' : ''}`}
           style={{
             display: 'grid',
             gridTemplateColumns: '320px 1fr',
@@ -1441,6 +1530,7 @@ export default function ChatPage() {
         >
           {/* Left Column: Conversations List */}
           <div
+            className="chat-sidebar-col"
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--grid-strong)',
@@ -1453,55 +1543,88 @@ export default function ChatPage() {
             }}
           >
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--grid-strong)', flexShrink: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <MessageIcon size={16} /> Conversations
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--ink)' }}>
+                  <MessageIcon size={17} style={{ color: 'var(--accent)' }} />
+                  <span>Conversations</span>
+                </div>
               </div>
-              <input
-                type="text"
-                placeholder="Search chats..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '7px 10px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--grid-strong)',
-                  fontSize: '12px',
-                  background: 'var(--bg)',
-                  color: 'var(--ink)',
-                }}
-              />
+              <div className="chat-search-bar">
+                <span style={{ color: 'var(--ink-faint)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+                  <SearchIcon size={14} />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search conversations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--ink)',
+                    fontSize: '12.5px',
+                    outline: 'none',
+                    padding: 0,
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--ink-muted)',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      padding: '0 2px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      lineHeight: 1,
+                    }}
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Tabs: All / Active / Archived */}
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--grid-strong)', background: 'var(--bg)', flexShrink: 0 }}>
-              {['all', 'active', 'archived'].map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setConvTab(t)}
-                  style={{
-                    flex: 1,
-                    padding: '8px 4px',
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    textTransform: 'capitalize',
-                    border: 'none',
-                    background: convTab === t ? 'var(--surface)' : 'transparent',
-                    color: convTab === t ? 'var(--ink)' : 'var(--ink-muted)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {t}
-                </button>
-              ))}
+            <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--grid-strong)', background: 'var(--bg)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', background: 'var(--surface)', padding: '3px', borderRadius: '8px', border: '1px solid var(--grid-strong)', gap: '2px' }}>
+                {['all', 'active', 'archived'].map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setConvTab(t)}
+                    style={{
+                      flex: 1,
+                      padding: '5px 4px',
+                      fontSize: '11.5px',
+                      fontWeight: convTab === t ? 700 : 500,
+                      textTransform: 'capitalize',
+                      border: 'none',
+                      borderRadius: '6px',
+                      background: convTab === t ? 'var(--accent)' : 'transparent',
+                      color: convTab === t ? '#fff' : 'var(--ink-muted)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px' }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px' }}>
               {loadingConv ? (
-                <p className="sub" style={{ padding: '12px', fontSize: '12px' }}>Loading conversations...</p>
+                <p className="sub" style={{ padding: '12px', fontSize: '12px', textAlign: 'center' }}>Loading conversations...</p>
               ) : filteredConversations.length === 0 && !otherId ? (
-                <p className="sub" style={{ padding: '12px', fontSize: '12px' }}>No {convTab} chats found.</p>
+                <p className="sub" style={{ padding: '16px', fontSize: '12px', textAlign: 'center' }}>No {convTab} chats found.</p>
               ) : (
                 filteredConversations.map((c) => {
                   const partnerId = c.user_id || c.other_id;
@@ -1521,26 +1644,60 @@ export default function ChatPage() {
                         if (c.contract_id) newParams.contract = String(c.contract_id);
                         setSearchParams(newParams);
                       }}
+                      className={`chat-convo-item ${isSelected ? 'selected' : ''}`}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
                         gap: '10px',
                         padding: '10px 12px',
-                        borderRadius: '8px',
+                        borderRadius: '9px',
                         cursor: 'pointer',
-                        background: isSelected ? 'var(--accent-soft)' : 'transparent',
-                        border: isSelected ? '1px solid var(--grid-strong)' : '1px solid transparent',
-                        marginBottom: '3px',
-                        transition: 'background 0.15s ease',
+                        marginBottom: '4px',
+                        borderLeft: isSelected ? '3px solid var(--accent)' : '3px solid transparent',
+                        borderTop: isSelected ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent',
+                        borderRight: isSelected ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent',
+                        borderBottom: isSelected ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid transparent',
                       }}
                     >
-                      <div className="avatar" style={{ width: '36px', height: '36px', fontSize: '13px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {c.contract_id ? <UsersIcon size={18} /> : initials(displayName)}
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <div
+                          className="avatar"
+                          style={{
+                            width: '38px',
+                            height: '38px',
+                            fontSize: '13px',
+                            borderRadius: '10px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: c.contract_id
+                              ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)'
+                              : undefined,
+                            color: c.contract_id ? 'var(--accent)' : '#fff',
+                            border: c.contract_id ? '1px solid rgba(99, 102, 241, 0.3)' : undefined,
+                          }}
+                        >
+                          {c.contract_id ? <DocumentIcon size={18} /> : initials(displayName)}
+                        </div>
+                        <span
+                          style={{
+                            position: 'absolute',
+                            bottom: '-1px',
+                            right: '-1px',
+                            width: '9px',
+                            height: '9px',
+                            borderRadius: '50%',
+                            background: '#10b981',
+                            border: '2px solid var(--surface)',
+                          }}
+                        />
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-                          <span style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {displayName}
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                             <span className="mono" style={{ fontSize: '10px', color: 'var(--ink-faint)' }}>
                               {c.last_time || ''}
                             </span>
@@ -1566,17 +1723,16 @@ export default function ChatPage() {
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 borderRadius: '4px',
-                                transition: 'color 0.15s ease',
                               }}
-                              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red, #ef4444)'; }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; }}
                               onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--ink-faint)'; }}
                             >
                               <TrashIcon size={12} />
                             </button>
                           </div>
                         </div>
-                        <div style={{ fontSize: '12px', color: 'var(--ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {c.last_message_mine ? <span style={{ opacity: 0.6 }}>You: </span> : ''}
+                        <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {c.last_message_mine ? <span style={{ opacity: 0.7, fontWeight: 500 }}>You: </span> : ''}
                           {formatPreviewText(c.last_message)}
                         </div>
                       </div>
@@ -1589,6 +1745,7 @@ export default function ChatPage() {
 
           {/* Right Column: Chat Window */}
           <div
+            className="chat-window-col"
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--grid-strong)',
@@ -1611,27 +1768,85 @@ export default function ChatPage() {
                     alignItems: 'center',
                     gap: '12px',
                     flexShrink: 0,
+                    background: 'var(--surface)',
                   }}
                 >
-                  <div className="avatar" style={{ width: '38px', height: '38px', fontSize: '14px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {searchContractId ? <UsersIcon size={20} /> : initials(otherName)}
+                  {/* Mobile back button */}
+                  <button
+                    type="button"
+                    className="btn btn-ghost hide-desktop"
+                    onClick={() => setSearchParams({})}
+                    style={{ padding: '6px', marginRight: '-4px' }}
+                    title="Back to conversations"
+                    aria-label="Back to conversations"
+                  >
+                    <ArrowLeftIcon size={18} />
+                  </button>
+
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <div
+                      className="avatar"
+                      style={{
+                        width: '40px',
+                        height: '40px',
+                        fontSize: '14px',
+                        borderRadius: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: searchContractId
+                          ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)'
+                          : undefined,
+                        color: searchContractId ? 'var(--accent)' : '#fff',
+                        border: searchContractId ? '1px solid rgba(99, 102, 241, 0.3)' : undefined,
+                      }}
+                    >
+                      {searchContractId ? <DocumentIcon size={20} /> : initials(otherName)}
+                    </div>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        bottom: '-1px',
+                        right: '-1px',
+                        width: '9px',
+                        height: '9px',
+                        borderRadius: '50%',
+                        background: '#10b981',
+                        border: '2px solid var(--surface)',
+                      }}
+                    />
                   </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {searchContractId && activeConvo?.contract_title ? activeConvo.contract_title : otherName}
+
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--ink)' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {searchContractId && activeConvo?.contract_title ? activeConvo.contract_title : otherName}
+                      </span>
                       {searchContractId && (
-                        <span style={{ fontSize: '10px', background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                        <span
+                          style={{
+                            fontSize: '10.5px',
+                            background: 'var(--accent-soft)',
+                            color: 'var(--accent)',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            whiteSpace: 'nowrap',
+                            fontWeight: 600,
+                            border: '1px solid rgba(99, 102, 241, 0.25)',
+                          }}
+                        >
                           Contract #{searchContractId}
                         </span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--add)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', marginTop: '2px' }}>
                       {searchContractId && activeConvo?.contract_title && (
-                        <span style={{ color: 'var(--ink-muted)', marginRight: '4px' }}>
-                          with {otherName} •
-                        </span>
+                        <>
+                          <span style={{ color: 'var(--ink-muted)' }}>with {otherName}</span>
+                          <span style={{ color: 'var(--ink-faint)' }}>•</span>
+                        </>
                       )}
-                      <span className="status online">
+                      <span className="chat-status-indicator">
                         <span className="led"></span>
                         Active on PairUp
                       </span>
@@ -1922,103 +2137,145 @@ export default function ChatPage() {
 
 
                 {/* Session Information Banner */}
-                {activeSession && (
-                  <div
-                    style={{
-                      background: 'var(--accent-soft)',
-                      borderBottom: '1px solid var(--grid-strong)',
-                      padding: '10px 18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                      flexWrap: 'wrap',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '240px' }}>
-                      <div
-                        style={{
-                          width: '32px',
-                          height: '32px',
-                          borderRadius: '8px',
-                          background: 'var(--accent)',
-                          color: '#fff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <CalendarIcon size={16} />
-                      </div>
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--ink)' }}>
-                            Active Session
-                          </span>
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              padding: '2px 7px',
-                              borderRadius: '10px',
-                              fontWeight: 600,
-                              textTransform: 'uppercase',
-                              background:
-                                activeSession.status === 'paid' || activeSession.status === 'confirmed'
-                                  ? 'rgba(16, 185, 129, 0.15)'
-                                  : activeSession.status === 'completed'
-                                  ? 'rgba(59, 130, 246, 0.15)'
-                                  : 'rgba(245, 158, 11, 0.15)',
-                              color:
-                                activeSession.status === 'paid' || activeSession.status === 'confirmed'
-                                  ? '#10b981'
-                                  : activeSession.status === 'completed'
-                                  ? '#3b82f6'
-                                  : '#f59e0b',
-                            }}
-                          >
-                            {activeSession.status}
-                          </span>
-                        </div>
+                {activeSession && dismissedSessionId !== activeSession.id && (() => {
+                  const timing = getSessionTiming(activeSession);
+                  const isMentor = user?.role === 'mentor';
+                  const targetSessionsLink = isMentor ? '/mentor/sessions' : '/learner/sessions';
+
+                  return (
+                    <div
+                      style={{
+                        background: timing.isLiveNow
+                          ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%)'
+                          : 'var(--accent-soft)',
+                        borderBottom: '1px solid var(--grid-strong)',
+                        padding: '10px 18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        flexWrap: 'wrap',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '240px' }}>
                         <div
                           style={{
-                            fontSize: '11.5px',
-                            color: 'var(--ink-muted)',
-                            marginTop: '2px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            maxWidth: '480px',
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '8px',
+                            background: timing.isLiveNow ? '#10b981' : 'var(--accent)',
+                            color: '#fff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
                           }}
-                          title={activeSession.topic || 'Pairing Session'}
                         >
-                          {activeSession.topic || 'Pairing Session'}
+                          {timing.isLiveNow ? <VideoIcon size={16} /> : <CalendarIcon size={16} />}
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--ink)' }}>
+                              {timing.isLiveNow ? '🔴 Live Session Now' : 'Upcoming Scheduled Session'}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                padding: '2px 7px',
+                                borderRadius: '10px',
+                                fontWeight: 600,
+                                textTransform: 'uppercase',
+                                background: timing.isLiveNow
+                                  ? 'rgba(16, 185, 129, 0.18)'
+                                  : activeSession.status === 'paid'
+                                  ? 'rgba(59, 130, 246, 0.15)'
+                                  : 'rgba(245, 158, 11, 0.15)',
+                                color: timing.isLiveNow
+                                  ? '#059669'
+                                  : activeSession.status === 'paid'
+                                  ? '#2563eb'
+                                  : '#d97706',
+                              }}
+                            >
+                              {timing.isLiveNow ? 'Live Now' : activeSession.status === 'paid' ? 'Paid & Confirmed' : activeSession.status}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '11.5px',
+                              color: 'var(--ink-muted)',
+                              marginTop: '2px',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: '520px',
+                            }}
+                            title={activeSession.topic || 'Pairing Session'}
+                          >
+                            <span>{activeSession.topic || 'Pairing Session'}</span>
+                            <span style={{ margin: '0 6px' }}>•</span>
+                            <span style={{ color: timing.isLiveNow ? '#059669' : 'var(--brand)', fontWeight: 600 }}>
+                              {timing.isLiveNow
+                                ? 'Happening right now!'
+                                : `📅 Scheduled for: ${timing.timeLabel}`}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
-                      {activeSession.status === 'paid' ? (
-                        <Link
-                          to={`/session?booking_id=${activeSession.id}`}
-                          className="btn btn-primary"
-                          style={{ fontSize: '12px', padding: '6px 14px', whiteSpace: 'nowrap' }}
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                        {timing.isLiveNow && activeSession.status === 'paid' ? (
+                          <Link
+                            to={`/session?booking_id=${activeSession.id}`}
+                            className="btn btn-primary"
+                            style={{ fontSize: '12px', padding: '6px 14px', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                          >
+                            <VideoIcon size={13} /> Enter Live Room →
+                          </Link>
+                        ) : (
+                          <>
+                            <Link
+                              to={targetSessionsLink}
+                              className="btn btn-secondary"
+                              style={{ fontSize: '12px', padding: '5px 12px', whiteSpace: 'nowrap' }}
+                            >
+                              Session Details →
+                            </Link>
+                            {activeSession.status === 'paid' && (
+                              <Link
+                                to={`/session?booking_id=${activeSession.id}`}
+                                className="btn btn-ghost"
+                                title="Enter early to test camera/microphone"
+                                style={{ fontSize: '11px', padding: '5px 10px', whiteSpace: 'nowrap', color: 'var(--ink-muted)' }}
+                              >
+                                Join Early
+                              </Link>
+                            )}
+                          </>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setDismissedSessionId(activeSession.id)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--ink-muted)',
+                            fontSize: '14px',
+                            padding: '2px 6px',
+                            lineHeight: 1,
+                            borderRadius: '4px',
+                          }}
+                          title="Dismiss session banner"
                         >
-                          Enter Session Room →
-                        </Link>
-                      ) : (
-                        <Link
-                          to="/learner/sessions"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '12px', padding: '6px 14px', whiteSpace: 'nowrap' }}
-                        >
-                          Session Details →
-                        </Link>
-                      )}
+                          ✕
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Message Stream */}
                 <div
@@ -2040,29 +2297,14 @@ export default function ChatPage() {
 
                       return (
                         <React.Fragment key={m.id || idx}>
-                          {/* Day & Date Separator Header */}
+                          {/* Centered Day & Date Separator Header */}
                           {showDateDivider && m.created_at && (
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '12px',
-                                margin: idx === 0 ? '6px 0 12px' : '18px 0 12px',
-                                userSelect: 'none',
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  color: 'var(--ink-muted)',
-                                  whiteSpace: 'nowrap',
-                                  letterSpacing: '0.01em',
-                                }}
-                              >
+                            <div className="chat-date-divider" style={{ margin: idx === 0 ? '6px 0 14px' : '18px 0 14px' }}>
+                              <div className="chat-date-divider-line" />
+                              <span className="chat-date-divider-pill">
                                 {formatChatDayDate(m.created_at)}
                               </span>
-                              <div style={{ flex: 1, height: '1px', background: 'var(--grid-strong)' }} />
+                              <div className="chat-date-divider-line" />
                             </div>
                           )}
 
@@ -2073,32 +2315,52 @@ export default function ChatPage() {
                               display: 'flex',
                               gap: '12px',
                               padding: '8px 12px',
-                              borderRadius: '8px',
+                              borderRadius: '10px',
                               background: isHighlighted
                                 ? 'rgba(38, 71, 214, 0.22)'
                                 : isMine
-                                ? 'rgba(38, 75, 228, 0.07)'
+                                ? 'rgba(99, 102, 241, 0.05)'
                                 : 'transparent',
                               border: isHighlighted
                                 ? '1px solid var(--accent)'
                                 : isMine
-                                ? '1px solid rgba(38, 75, 228, 0.15)'
+                                ? '1px solid rgba(99, 102, 241, 0.12)'
                                 : '1px solid transparent',
-                              transition: 'all 0.25s ease',
+                              transition: 'all 0.2s ease',
                             }}
                             className={`chat-message-row ${isHighlighted ? 'chat-message-highlighted' : ''}`}
                           >
+                            {/* Floating action bar on message hover */}
+                            <div className="chat-msg-actions">
+                              <button
+                                type="button"
+                                onClick={() => handleStartReply(m, senderDisplayName)}
+                                className="chat-msg-action-btn"
+                                title="Reply to message"
+                              >
+                                <ReplyIcon size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMessageToDelete(m)}
+                                className="chat-msg-action-btn delete-btn"
+                                title="Delete message"
+                              >
+                                <TrashIcon size={13} />
+                              </button>
+                            </div>
+
                             <div
                               className="avatar"
                               style={{
-                                width: '34px',
-                                height: '34px',
+                                width: '36px',
+                                height: '36px',
                                 fontSize: '12.5px',
                                 flexShrink: 0,
                                 background: isMine ? 'var(--accent)' : 'var(--surface-hover, #232733)',
                                 color: '#fff',
                                 fontWeight: 700,
-                                borderRadius: '50%',
+                                borderRadius: '8px',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -2110,59 +2372,17 @@ export default function ChatPage() {
 
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
-                                <span style={{ fontWeight: 700, fontSize: '13.5px', color: isMine ? 'var(--accent)' : 'var(--ink)' }}>
+                                <span style={{ fontWeight: 700, fontSize: '13px', color: isMine ? 'var(--accent)' : 'var(--ink)' }}>
                                   {senderDisplayName}
                                 </span>
+                                {isMine && (
+                                  <span style={{ fontSize: '9.5px', fontWeight: 600, background: 'var(--accent-soft)', color: 'var(--accent)', padding: '1px 5px', borderRadius: '4px' }}>
+                                    You
+                                  </span>
+                                )}
                                 <span style={{ fontSize: '11px', color: 'var(--ink-faint)' }}>
                                   {m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                 </span>
-                                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStartReply(m, senderDisplayName)}
-                                    className="chat-reply-btn"
-                                    title="Reply to this message"
-                                    style={{
-                                      background: 'transparent',
-                                      border: 'none',
-                                      color: 'var(--ink-muted)',
-                                      cursor: 'pointer',
-                                      fontSize: '11.5px',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                    }}
-                                  >
-                                    <ReplyIcon size={12} />
-                                    <span>Reply</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setMessageToDelete(m)}
-                                    className="chat-delete-msg-btn"
-                                    title="Delete message"
-                                    style={{
-                                      background: 'transparent',
-                                      border: 'none',
-                                      color: 'var(--ink-faint)',
-                                      cursor: 'pointer',
-                                      fontSize: '11.5px',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '3px',
-                                      padding: '2px 6px',
-                                      borderRadius: '4px',
-                                      transition: 'color 0.15s ease',
-                                    }}
-                                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--red, #ef4444)'; }}
-                                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--ink-faint)'; }}
-                                  >
-                                    <TrashIcon size={12} />
-                                    <span>Delete</span>
-                                  </button>
-                                </div>
                               </div>
 
                               <div
@@ -2190,15 +2410,11 @@ export default function ChatPage() {
                   </div>
                 )}
 
-                {/* Rich Input Bar with Formatting Toolbar */}
+                {/* Rich Integrated Message Composer */}
                 <div
                   style={{
-                    borderTop: '1px solid var(--grid-strong)',
+                    padding: '10px 18px 14px',
                     background: 'var(--bg)',
-                    padding: '10px 14px 12px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
                     flexShrink: 0,
                     position: 'relative',
                   }}
@@ -2216,16 +2432,16 @@ export default function ChatPage() {
                     <div
                       style={{
                         position: 'absolute',
-                        bottom: '100%',
-                        left: '14px',
+                        bottom: 'calc(100% - 4px)',
+                        left: '18px',
                         marginBottom: '8px',
                         background: 'var(--surface)',
                         border: '1px solid var(--grid-strong)',
-                        borderRadius: '10px',
-                        padding: '8px 10px',
+                        borderRadius: '12px',
+                        padding: '10px 12px',
                         display: 'flex',
                         gap: '6px',
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                        boxShadow: '0 12px 28px rgba(0,0,0,0.3)',
                         zIndex: 50,
                       }}
                     >
@@ -2241,12 +2457,15 @@ export default function ChatPage() {
                           style={{
                             background: 'transparent',
                             border: 'none',
-                            fontSize: '18px',
+                            fontSize: '20px',
                             cursor: 'pointer',
                             padding: '4px',
                             borderRadius: '6px',
                             lineHeight: 1,
+                            transition: 'transform 0.15s ease',
                           }}
+                          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.25)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
                         >
                           {emoji}
                         </button>
@@ -2254,174 +2473,156 @@ export default function ChatPage() {
                     </div>
                   )}
 
-                  {/* Replying Preview Banner */}
-                  {replyingTo &&
-                    String(replyingTo.targetPartnerId) === String(otherId) &&
-                    String(replyingTo.targetContractId || '') === String(searchContractId || '') && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 12px',
-                        background: 'var(--accent-soft)',
-                        borderLeft: '3px solid var(--accent)',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                        userSelect: 'none',
-                        transition: 'background 0.15s ease',
-                      }}
-                      onClick={() => scrollToMessage(replyingTo.id)}
-                      title="Click to view message being replied to"
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                        <ReplyIcon size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-                        <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
-                          Replying to {replyingTo.senderName}:
-                        </span>
-                        <span
-                          style={{
-                            color: 'var(--ink-muted)',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            maxWidth: '360px',
-                          }}
-                        >
-                          {replyingTo.text}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: '10.5px',
-                            color: 'var(--accent)',
-                            fontWeight: 600,
-                            padding: '1px 5px',
-                            borderRadius: '4px',
-                            background: 'rgba(38, 71, 214, 0.12)',
-                          }}
-                        >
-                          View ↗
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setReplyingTo(null);
-                        }}
+                  <form onSubmit={handleSend} className="chat-composer-card">
+                    {/* Replying Preview Banner inside composer */}
+                    {replyingTo &&
+                      String(replyingTo.targetPartnerId) === String(otherId) &&
+                      String(replyingTo.targetContractId || '') === String(searchContractId || '') && (
+                      <div
                         style={{
-                          background: 'transparent',
-                          border: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '7px 12px',
+                          background: 'linear-gradient(90deg, rgba(99, 102, 241, 0.12) 0%, rgba(168, 85, 247, 0.08) 100%)',
+                          borderBottom: '1px solid var(--grid-strong)',
+                          fontSize: '12px',
                           cursor: 'pointer',
-                          color: 'var(--ink-muted)',
-                          fontSize: '13px',
-                          padding: '0 4px',
+                          userSelect: 'none',
                         }}
-                        title="Cancel reply"
+                        onClick={() => scrollToMessage(replyingTo.id)}
+                        title="Click to view message being replied to"
                       >
-                        ✕
-                      </button>
-                    </div>
-                  )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                          <ReplyIcon size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                          <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
+                            Replying to {replyingTo.senderName}:
+                          </span>
+                          <span
+                            style={{
+                              color: 'var(--ink-muted)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              maxWidth: '380px',
+                            }}
+                          >
+                            {replyingTo.text}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReplyingTo(null);
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--ink-muted)',
+                            fontSize: '13px',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                          }}
+                          title="Cancel reply (Esc)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
 
-                  {/* Message Text Input Form */}
-                  <form onSubmit={handleSend} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input
+                    {/* Message Text Input */}
+                    <textarea
                       ref={inputRef}
-                      type="text"
                       value={inputText}
+                      rows={2}
                       onChange={(e) => handleInputChange(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Escape' && replyingTo) {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend(e);
+                        } else if (e.key === 'Escape' && replyingTo) {
                           setReplyingTo(null);
                         }
                       }}
-                      placeholder="Send a message..."
-                      style={{
-                        flex: 1,
-                        padding: '11px 14px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--grid-strong)',
-                        fontSize: '13.5px',
-                        background: 'var(--surface)',
-                        color: 'var(--ink)',
-                      }}
+                      placeholder={`Message ${otherName}... (Enter to send, Shift+Enter for new line)`}
+                      className="chat-composer-textarea"
                     />
-                    <button
-                      type="submit"
-                      className="btn btn-primary"
-                      style={{
-                        padding: '10px 18px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <span>Send</span>
-                      <SendIcon size={15} />
-                    </button>
-                  </form>
 
-                  {/* Formatting & Action Toolbar (like Upwork/Slack) */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', paddingTop: '2px' }}>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title="Bold (**text**)"
-                      onClick={() => applyFormatting('**')}
-                      style={{ width: '28px', height: '28px', fontSize: '12px', fontWeight: 800, padding: 0 }}
-                    >
-                      B
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title="Italic (*text*)"
-                      onClick={() => applyFormatting('*')}
-                      style={{ width: '28px', height: '28px', fontSize: '12px', fontStyle: 'italic', fontWeight: 700, padding: 0 }}
-                    >
-                      I
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title="Strikethrough (~~text~~)"
-                      onClick={() => applyFormatting('~~')}
-                      style={{ width: '28px', height: '28px', fontSize: '12px', textDecoration: 'line-through', padding: 0 }}
-                    >
-                      S
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title="Code Snippet"
-                      onClick={() => setSnippetModalOpen(true)}
-                      style={{ width: '28px', height: '28px', padding: 0 }}
-                    >
-                      <CodeIcon size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title={uploadingFile ? 'Uploading file...' : 'Attach File'}
-                      onClick={() => !uploadingFile && fileInputRef.current?.click()}
-                      disabled={uploadingFile}
-                      style={{ width: '28px', height: '28px', padding: 0, opacity: uploadingFile ? 0.5 : 1 }}
-                    >
-                      <PaperclipIcon size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title="Insert Emoji"
-                      onClick={() => setEmojiPickerOpen((prev) => !prev)}
-                      style={{ width: '28px', height: '28px', padding: 0 }}
-                    >
-                      <SmileIcon size={14} />
-                    </button>
-                  </div>
+                    {/* Integrated Toolbar & Send row */}
+                    <div className="chat-composer-footer">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                        <button
+                          type="button"
+                          className="chat-format-btn"
+                          title="Bold (**text**)"
+                          onClick={() => applyFormatting('**')}
+                          style={{ fontWeight: 800, fontSize: '13px' }}
+                        >
+                          B
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-format-btn"
+                          title="Italic (*text*)"
+                          onClick={() => applyFormatting('*')}
+                          style={{ fontStyle: 'italic', fontWeight: 700, fontSize: '13px' }}
+                        >
+                          I
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-format-btn"
+                          title="Strikethrough (~~text~~)"
+                          onClick={() => applyFormatting('~~')}
+                          style={{ textDecoration: 'line-through', fontSize: '13px' }}
+                        >
+                          S
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-format-btn"
+                          title="Code Snippet"
+                          onClick={() => setSnippetModalOpen(true)}
+                        >
+                          <CodeIcon size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-format-btn"
+                          title={uploadingFile ? 'Uploading file...' : 'Attach File'}
+                          onClick={() => !uploadingFile && fileInputRef.current?.click()}
+                          disabled={uploadingFile}
+                          style={{ opacity: uploadingFile ? 0.5 : 1 }}
+                        >
+                          <PaperclipIcon size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-format-btn"
+                          title="Insert Emoji"
+                          onClick={() => setEmojiPickerOpen((prev) => !prev)}
+                        >
+                          <SmileIcon size={15} />
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--ink-faint)' }} className="hide-mobile">
+                          Shift+Enter for newline
+                        </span>
+                        <button
+                          type="submit"
+                          className="chat-send-btn"
+                          disabled={!inputText.trim() && !uploadingFile}
+                        >
+                          <span>Send</span>
+                          <SendIcon size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </form>
                 </div>
               </>
             ) : (
@@ -2482,7 +2683,12 @@ export default function ChatPage() {
           id: Number(otherId),
           user_id: Number(otherId),
           name: otherName || 'Mentor',
-          hourly_rate: 50,
+          title: partnerProfile?.title || activeConvo?.title || 'Technical Mentor',
+          hourly_rate: partnerProfile?.hourly_rate !== undefined && partnerProfile?.hourly_rate !== null
+            ? partnerProfile.hourly_rate
+            : activeConvo?.hourly_rate !== undefined && activeConvo?.hourly_rate !== null
+            ? Number(activeConvo.hourly_rate)
+            : undefined,
         }}
         initialTopic={scheduleTopic}
       />

@@ -31,6 +31,11 @@ export default function MentorSessionsPage() {
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleReason, setRescheduleReason] = useState('');
 
+  const [denyRescheduleBooking, setDenyRescheduleBooking] = useState(null);
+  const [denyRescheduleReason, setDenyRescheduleReason] = useState('');
+  const [submittingDenyReschedule, setSubmittingDenyReschedule] = useState(false);
+  const [acceptingRescheduleId, setAcceptingRescheduleId] = useState(null);
+
   const [cancelBooking, setCancelBooking] = useState(null);
   const [cancelReason, setCancelReason] = useState('');
   const [submittingCancel, setSubmittingCancel] = useState(false);
@@ -64,11 +69,50 @@ export default function MentorSessionsPage() {
       await api.acceptBooking(id);
       const msg = 'Booking accepted! Learner has been notified.';
       toast.success(msg);
-      setActionSuccess(msg);
-      setTimeout(() => setActionSuccess(''), 3500);
       loadBookings();
     } catch (err) {
       toast.error('Could not accept booking: ' + err.message);
+    }
+  };
+
+  const handleAcceptReschedule = async (booking) => {
+    const formatted = booking.reschedule_requested_at
+      ? new Date(booking.reschedule_requested_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+      : 'the requested time';
+    const confirmed = await confirm({
+      title: 'Accept Reschedule Request',
+      message: `Accept rescheduling this session with ${booking.learner_name} to ${formatted}? The session will be officially updated to this new time.`,
+      confirmText: 'Accept Reschedule',
+      type: 'info',
+    });
+    if (!confirmed) return;
+
+    setAcceptingRescheduleId(booking.id);
+    try {
+      const res = await api.acceptReschedule(booking.id);
+      toast.success(res?.message || 'Reschedule request accepted! Session time updated.');
+      loadBookings();
+    } catch (err) {
+      toast.error('Could not accept reschedule: ' + err.message);
+    } finally {
+      setAcceptingRescheduleId(null);
+    }
+  };
+
+  const handleDenyRescheduleSubmit = async (e) => {
+    e.preventDefault();
+    if (!denyRescheduleBooking) return;
+    setSubmittingDenyReschedule(true);
+    try {
+      const res = await api.denyReschedule(denyRescheduleBooking.id, denyRescheduleReason.trim());
+      toast.success(res?.message || 'Reschedule request declined.');
+      setDenyRescheduleBooking(null);
+      setDenyRescheduleReason('');
+      loadBookings();
+    } catch (err) {
+      toast.error('Could not decline reschedule: ' + err.message);
+    } finally {
+      setSubmittingDenyReschedule(false);
     }
   };
 
@@ -90,19 +134,24 @@ export default function MentorSessionsPage() {
     }
   };
 
-  const handleConfirmReschedule = (e) => {
+  const handleConfirmReschedule = async (e) => {
     e.preventDefault();
-    if (!rescheduleDate) return;
-    // In our prototype, we update booking state & announce success
-    setBookings((prev) =>
-      prev.map((b) =>
-        b.id === rescheduleBooking.id ? { ...b, scheduled_time: rescheduleDate } : b
-      )
-    );
-    toast.success(`Session rescheduled to ${new Date(rescheduleDate).toLocaleString()}`);
-    setRescheduleBooking(null);
-    setRescheduleDate('');
-    setRescheduleReason('');
+    if (!rescheduleBooking || !rescheduleDate) return;
+    try {
+      const res = await api.rescheduleBooking(rescheduleBooking.id, rescheduleDate, rescheduleReason.trim());
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === rescheduleBooking.id ? { ...b, scheduled_time: rescheduleDate, scheduled_at: rescheduleDate } : b
+        )
+      );
+      toast.success(res?.message || `Session rescheduled to ${new Date(rescheduleDate).toLocaleString()}`);
+      setRescheduleBooking(null);
+      setRescheduleDate('');
+      setRescheduleReason('');
+      loadBookings();
+    } catch (err) {
+      toast.error('Could not reschedule: ' + err.message);
+    }
   };
 
   const handleConfirmCancel = async (e) => {
@@ -136,9 +185,36 @@ export default function MentorSessionsPage() {
     setNotesBooking(null);
   };
 
+  // Check session timing relative to right now
+  const isSessionLiveNow = (b) => {
+    if (b.status !== 'paid') return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return true; // flexible unscheduled sessions are accessible anytime
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return true;
+    const durationMs = (b.duration_minutes || 60) * 60 * 1000;
+    const startMs = date.getTime();
+    const endMs = startMs + durationMs;
+    const now = Date.now();
+    return now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
+  };
+
+  const isSessionUpcoming = (b) => {
+    if (['pending', 'accepted'].includes(b.status)) return true;
+    if (b.status === 'paid') {
+      const raw = b.scheduled_at || b.scheduled_time;
+      if (!raw) return true; // keep visible in upcoming as well
+      const date = new Date(raw);
+      if (isNaN(date.getTime())) return true;
+      const now = Date.now();
+      return now < (date.getTime() - 15 * 60 * 1000);
+    }
+    return false;
+  };
+
   // Classify sessions
-  const upcomingSessions = bookings.filter((b) => ['pending', 'accepted'].includes(b.status));
-  const liveSessions = bookings.filter((b) => b.status === 'paid');
+  const upcomingSessions = bookings.filter(isSessionUpcoming);
+  const liveSessions = bookings.filter(isSessionLiveNow);
   const pastSessions = bookings.filter((b) => ['completed', 'cancelled', 'declined'].includes(b.status));
 
   let currentList = [];
@@ -535,6 +611,130 @@ export default function MentorSessionsPage() {
                   </div>
                 )}
 
+                {/* Reschedule Request Notice Banner */}
+                {b.reschedule_status === 'pending' && (
+                  <div
+                    style={{
+                      background: 'rgba(234, 88, 12, 0.08)',
+                      border: '1.5px solid rgba(234, 88, 12, 0.35)',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      margin: '10px 0 6px',
+                      fontSize: '12.5px',
+                      color: 'var(--ink)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#c2410c' }}>
+                        <CalendarIcon size={16} />
+                        <span>Reschedule Requested by {b.learner_name}</span>
+                      </div>
+                      <span className="badge badge-warning" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        Pending Your Approval
+                      </span>
+                    </div>
+
+                    <div style={{ background: 'var(--panel-bg, #ffffff)', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '10px' }}>
+                      <div style={{ marginBottom: '4px' }}>
+                        <strong style={{ color: 'var(--ink-muted)' }}>Proposed New Time: </strong>
+                        <span style={{ fontWeight: 600, color: 'var(--brand, #2563eb)' }}>
+                          {b.reschedule_requested_at ? new Date(b.reschedule_requested_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' }) : 'Flexible'}
+                        </span>
+                      </div>
+                      {b.reschedule_note && (
+                        <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--ink)' }}>
+                          <strong style={{ color: 'var(--ink-muted)' }}>Learner Note: </strong>
+                          <em>"{b.reschedule_note}"</em>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 14px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          borderColor: 'rgba(239, 68, 68, 0.3)',
+                          color: 'var(--danger, #ef4444)',
+                        }}
+                        onClick={() => {
+                          setDenyRescheduleBooking(b);
+                          setDenyRescheduleReason('');
+                        }}
+                      >
+                        <XIcon size={13} /> Deny Reschedule
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 16px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          backgroundColor: '#16a34a',
+                          borderColor: '#16a34a',
+                          color: '#ffffff',
+                        }}
+                        disabled={acceptingRescheduleId === b.id}
+                        onClick={() => handleAcceptReschedule(b)}
+                      >
+                        <CheckIcon size={13} /> {acceptingRescheduleId === b.id ? 'Accepting...' : 'Accept Reschedule'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {b.reschedule_status === 'declined' && (
+                  <div
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.06)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      margin: '8px 0 6px',
+                      fontSize: '12px',
+                      color: 'var(--ink)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <XIcon size={14} style={{ color: '#ef4444', flexShrink: 0 }} />
+                    <div>
+                      <strong style={{ color: '#dc2626' }}>Reschedule Declined:</strong> You declined the reschedule request. The session remains scheduled for {b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'its scheduled time'}.
+                    </div>
+                  </div>
+                )}
+
+                {b.reschedule_status === 'accepted' && (
+                  <div
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.06)',
+                      border: '1px solid rgba(16, 185, 129, 0.2)',
+                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      margin: '8px 0 6px',
+                      fontSize: '12px',
+                      color: 'var(--ink)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <CheckIcon size={14} style={{ color: '#16a34a', flexShrink: 0 }} />
+                    <div>
+                      <strong style={{ color: '#16a34a' }}>Reschedule Confirmed:</strong> Session updated to {b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''}.
+                    </div>
+                  </div>
+                )}
+
                 {/* Review received if past session */}
                 {activeTab === 'past' && b.status === 'completed' && (
                   <div
@@ -601,6 +801,30 @@ export default function MentorSessionsPage() {
                           >
                             <CheckIcon size={13} /> Accept Booking
                           </button>
+                        )}
+                        {b.reschedule_status === 'pending' && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ fontSize: '12.5px', padding: '5px 14px', backgroundColor: '#16a34a', borderColor: '#16a34a', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                              disabled={acceptingRescheduleId === b.id}
+                              onClick={() => handleAcceptReschedule(b)}
+                            >
+                              <CheckIcon size={13} /> Accept Reschedule
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '12.5px', padding: '5px 12px', color: 'var(--danger, #ef4444)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                              onClick={() => {
+                                setDenyRescheduleBooking(b);
+                                setDenyRescheduleReason('');
+                              }}
+                            >
+                              <XIcon size={13} /> Deny Reschedule
+                            </button>
+                          </>
                         )}
                         <button
                           type="button"
@@ -719,6 +943,66 @@ export default function MentorSessionsPage() {
               </button>
               <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
                 Confirm Reschedule
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      {/* Deny Reschedule Modal */}
+      <Modal
+        isOpen={Boolean(denyRescheduleBooking)}
+        onClose={() => setDenyRescheduleBooking(null)}
+        title="Decline Reschedule Request"
+      >
+        {denyRescheduleBooking && (
+          <form onSubmit={handleDenyRescheduleSubmit}>
+            <p style={{ fontSize: '13.5px', marginBottom: '12px', color: 'var(--ink)' }}>
+              Are you sure you want to decline the reschedule request from <strong>{denyRescheduleBooking.learner_name}</strong>?
+            </p>
+            <div style={{ background: 'var(--panel-bg, #f8fafc)', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '14px', fontSize: '12.5px' }}>
+              <div style={{ marginBottom: '4px' }}>
+                <strong style={{ color: 'var(--ink-muted)' }}>Requested Time: </strong>
+                <span style={{ fontWeight: 600 }}>{denyRescheduleBooking.reschedule_requested_at ? new Date(denyRescheduleBooking.reschedule_requested_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Flexible'}</span>
+              </div>
+              <div style={{ marginBottom: '4px' }}>
+                <strong style={{ color: 'var(--ink-muted)' }}>Current Scheduled Time: </strong>
+                <span>{denyRescheduleBooking.scheduled_at ? new Date(denyRescheduleBooking.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Unscheduled'}</span>
+              </div>
+              {denyRescheduleBooking.reschedule_note && (
+                <div style={{ marginTop: '4px' }}>
+                  <strong style={{ color: 'var(--ink-muted)' }}>Learner's Note: </strong>
+                  <em>"{denyRescheduleBooking.reschedule_note}"</em>
+                </div>
+              )}
+            </div>
+
+            <div className="field">
+              <label>Reason for Declining (Optional)</label>
+              <textarea
+                rows={3}
+                placeholder="Let the learner know why (e.g., conflicting commitment, please suggest another day)..."
+                value={denyRescheduleReason}
+                onChange={(e) => setDenyRescheduleReason(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ flex: 1 }}
+                onClick={() => setDenyRescheduleBooking(null)}
+              >
+                Keep Request Pending
+              </button>
+              <button
+                type="submit"
+                className="btn btn-secondary"
+                disabled={submittingDenyReschedule}
+                style={{ flex: 1, color: 'var(--danger, #ef4444)', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+              >
+                {submittingDenyReschedule ? 'Declining...' : 'Decline Request'}
               </button>
             </div>
           </form>

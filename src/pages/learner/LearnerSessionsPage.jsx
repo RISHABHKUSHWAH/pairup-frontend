@@ -8,6 +8,7 @@ import {
   SearchIcon,
   VideoIcon,
   CheckIcon,
+  XIcon,
   CreditCardIcon,
   CalendarIcon,
   StarIcon,
@@ -16,9 +17,10 @@ import {
   MessageIcon,
   ShieldIcon,
 } from '../../components/Icons';
-import { useConfirm, useToast } from '../../context';
+import { useConfirm, useToast, useAuth } from '../../context';
 
 export default function LearnerSessionsPage() {
+  const { user } = useAuth();
   const { confirm } = useConfirm();
   const { toast } = useToast();
   const [bookings, setBookings] = useState([]);
@@ -83,8 +85,10 @@ export default function LearnerSessionsPage() {
     try {
       await api.payBooking(booking.id);
       toast.success('Escrow secured! Session is confirmed.');
-      await loadBookings();
-      setPaidSuccessBooking(booking);
+      const data = await api.getBookings();
+      setBookings(data);
+      const updated = data.find((b) => b.id === booking.id);
+      setPaidSuccessBooking(updated || { ...booking, status: 'paid' });
     } catch (err) {
       toast.error('Payment failed: ' + err.message);
     } finally {
@@ -145,10 +149,21 @@ export default function LearnerSessionsPage() {
     }
   };
 
-  const handleReschedule = (e) => {
+  const handleReschedule = async (e) => {
     e.preventDefault();
-    toast.info(`Reschedule request sent to ${rescheduleModalBooking.mentor_name} for ${rescheduleDate}. You will be notified upon confirmation.`);
-    setRescheduleModalBooking(null);
+    if (!rescheduleModalBooking || !rescheduleDate) return;
+    setSubmittingAction(true);
+    try {
+      const res = await api.rescheduleBooking(rescheduleModalBooking.id, rescheduleDate, rescheduleNote.trim());
+      toast.success(res?.message || `Session rescheduled to ${new Date(rescheduleDate).toLocaleString()}`);
+      setRescheduleModalBooking(null);
+      setRescheduleNote('');
+      loadBookings();
+    } catch (err) {
+      toast.error('Could not reschedule: ' + err.message);
+    } finally {
+      setSubmittingAction(false);
+    }
   };
 
   const handleCancel = async (e) => {
@@ -200,9 +215,36 @@ export default function LearnerSessionsPage() {
     }
   };
 
+  // Check session timing relative to right now
+  const isSessionLiveNow = (b) => {
+    if (b.status !== 'paid') return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return true; // flexible unscheduled sessions are accessible anytime
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return true;
+    const durationMs = (b.duration_minutes || 60) * 60 * 1000;
+    const startMs = date.getTime();
+    const endMs = startMs + durationMs;
+    const now = Date.now();
+    return now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
+  };
+
+  const isSessionUpcoming = (b) => {
+    if (['pending', 'accepted'].includes(b.status)) return true;
+    if (b.status === 'paid') {
+      const raw = b.scheduled_at || b.scheduled_time;
+      if (!raw) return true; // keep available in upcoming as well
+      const date = new Date(raw);
+      if (isNaN(date.getTime())) return true;
+      const now = Date.now();
+      return now < (date.getTime() - 15 * 60 * 1000);
+    }
+    return false;
+  };
+
   // Filter sessions by tabs
-  const upcomingList = bookings.filter((b) => ['pending', 'accepted'].includes(b.status));
-  const liveList = bookings.filter((b) => b.status === 'paid');
+  const upcomingList = bookings.filter(isSessionUpcoming);
+  const liveList = bookings.filter(isSessionLiveNow);
   const pastList = bookings.filter((b) => ['completed', 'cancelled', 'disputed'].includes(b.status));
 
   let currentList = upcomingList;
@@ -286,7 +328,7 @@ export default function LearnerSessionsPage() {
                   <span
                     className={`status-badge ${
                       b.status === 'paid'
-                        ? 'badge-completed'
+                        ? (isSessionLiveNow(b) ? 'badge-completed' : 'badge-accepted')
                         : b.status === 'accepted'
                         ? 'badge-accepted'
                         : b.status === 'completed'
@@ -294,7 +336,9 @@ export default function LearnerSessionsPage() {
                         : 'badge-pending'
                     } mono`}
                   >
-                    {b.status === 'paid' ? 'Paid & Live' : b.status}
+                    {b.status === 'paid'
+                      ? (isSessionLiveNow(b) ? '🔴 Paid & Live Now' : 'Confirmed & Paid')
+                      : b.status}
                   </span>
                   <div className="mono" style={{ fontWeight: 700, fontSize: '14px', marginTop: '6px' }}>
                     ₹{b.price}
@@ -329,6 +373,89 @@ export default function LearnerSessionsPage() {
               {b.status === 'paid' && (
                 <div
                   style={{
+                    background: isSessionLiveNow(b) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.08)',
+                    border: `1px solid ${isSessionLiveNow(b) ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.25)'}`,
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    color: 'var(--ink)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <ShieldIcon size={14} style={{ color: isSessionLiveNow(b) ? '#10b981' : '#3b82f6', flexShrink: 0 }} />
+                  <div>
+                    <strong>{isSessionLiveNow(b) ? '🔴 Active Call Room:' : '🛡️ Escrow Protected & Confirmed:'}</strong> ₹{b.price} is secured in PairUp escrow.
+                    {isSessionLiveNow(b)
+                      ? ' The session time is now active! Click below to enter the live room and pair.'
+                      : ` Scheduled for ${b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'your scheduled time'}. The live video room activates 15 minutes before your session begins.`}
+                  </div>
+                </div>
+              )}
+
+              {/* Reschedule status alerts */}
+              {b.reschedule_status === 'pending' && (
+                <div
+                  style={{
+                    background: 'rgba(234, 88, 12, 0.08)',
+                    border: '1.5px solid rgba(234, 88, 12, 0.35)',
+                    borderRadius: '8px',
+                    padding: '10px 14px',
+                    fontSize: '12.5px',
+                    color: 'var(--ink)',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                  }}
+                >
+                  <CalendarIcon size={16} style={{ color: '#ea580c', marginTop: '2px', flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                      <strong style={{ color: '#c2410c' }}>Reschedule Request Pending:</strong>
+                      <span className="badge badge-warning" style={{ fontSize: '10.5px' }}>Awaiting Mentor</span>
+                    </div>
+                    <div>
+                      You requested to change this session to{' '}
+                      <strong>{b.reschedule_requested_at ? new Date(b.reschedule_requested_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'a new time'}</strong>.
+                    </div>
+                    {b.reschedule_note && (
+                      <div style={{ marginTop: '2px', fontSize: '12px', color: 'var(--ink-muted)' }}>
+                        Note: <em>"{b.reschedule_note}"</em>
+                      </div>
+                    )}
+                    <div style={{ marginTop: '3px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+                      Awaiting response from {b.mentor_name}. The session remains at its current scheduled time until approved.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {b.reschedule_status === 'declined' && (
+                <div
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    borderRadius: '8px',
+                    padding: '9px 13px',
+                    fontSize: '12px',
+                    color: 'var(--ink)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <XIcon size={14} style={{ color: '#ef4444', flexShrink: 0 }} />
+                  <div>
+                    <strong style={{ color: '#dc2626' }}>Reschedule Request Declined:</strong> Your mentor was unable to accommodate the requested time. The session remains scheduled for{' '}
+                    <strong>{b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'its scheduled time'}</strong>.
+                  </div>
+                </div>
+              )}
+
+              {b.reschedule_status === 'accepted' && (
+                <div
+                  style={{
                     background: 'rgba(16, 185, 129, 0.08)',
                     border: '1px solid rgba(16, 185, 129, 0.25)',
                     borderRadius: '8px',
@@ -340,9 +467,10 @@ export default function LearnerSessionsPage() {
                     gap: '8px',
                   }}
                 >
-                  <ShieldIcon size={14} style={{ color: '#10b981', flexShrink: 0 }} />
+                  <CheckIcon size={14} style={{ color: '#16a34a', flexShrink: 0 }} />
                   <div>
-                    <strong>Escrow Protected:</strong> ₹{b.price} is secured in PairUp escrow. You can join the live room now or at your scheduled session time. Funds are only released after session completion.
+                    <strong style={{ color: '#16a34a' }}>Reschedule Confirmed:</strong> Session successfully updated to{' '}
+                    <strong>{b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'new date'}</strong>.
                   </div>
                 </div>
               )}
@@ -361,20 +489,57 @@ export default function LearnerSessionsPage() {
                 {/* When Live/Paid */}
                 {b.status === 'paid' && (
                   <>
-                    <Link
-                      to={`/session?booking_id=${b.id}`}
-                      className="btn btn-primary"
-                      style={{ fontSize: '12.5px', padding: '7px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                    >
-                      <VideoIcon size={14} /> Join Live Session Room
-                    </Link>
+                    {isSessionLiveNow(b) ? (
+                      <Link
+                        to={`/session?booking_id=${b.id}`}
+                        className="btn btn-primary"
+                        style={{ fontSize: '12.5px', padding: '7px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <VideoIcon size={14} /> Join Live Session Room
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="btn btn-secondary"
+                        title="The live video room activates 15 minutes before your scheduled session time."
+                        style={{
+                          fontSize: '12.5px',
+                          padding: '7px 16px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          opacity: 0.65,
+                          cursor: 'not-allowed',
+                        }}
+                      >
+                        <VideoIcon size={14} /> Join Live (Opens 15m before)
+                      </button>
+                    )}
                     <button
                       type="button"
-                      className="btn btn-success"
-                      style={{ fontSize: '12.5px', padding: '7px 14px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      onClick={() => handleComplete(b.id)}
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                      onClick={() => {
+                        setRescheduleModalBooking(b);
+                        const existing = b.scheduled_at || b.scheduled_time;
+                        if (existing && !isNaN(new Date(existing).getTime())) {
+                          setRescheduleDate(new Date(existing).toISOString().slice(0, 16));
+                        } else {
+                          setRescheduleDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
+                        }
+                        setRescheduleNote('');
+                      }}
                     >
-                      <CheckIcon size={14} /> Mark Completed
+                      <CalendarIcon size={13} /> Reschedule
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                      onClick={() => setPaidSuccessBooking(b)}
+                    >
+                      <DocumentIcon size={13} /> Receipt
                     </button>
                     <button
                       type="button"
@@ -803,79 +968,127 @@ export default function LearnerSessionsPage() {
         )}
       </Modal>
 
-      {/* Escrow Payment Secured Confirmation Modal */}
+      {/* Session Payment Receipt & Confirmation Modal */}
       <Modal
         isOpen={!!paidSuccessBooking}
         onClose={() => setPaidSuccessBooking(null)}
-        title="Escrow Payment Secured 🛡️"
+        title="Session Payment Receipt 🧾"
       >
         {paidSuccessBooking && (
-          <div style={{ textAlign: 'center', padding: '10px 4px 6px' }}>
-            <div
-              style={{
-                width: '60px',
-                height: '60px',
-                borderRadius: '50%',
-                background: 'rgba(16, 185, 129, 0.12)',
-                border: '2px solid #10b981',
-                color: '#10b981',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 14px',
-              }}
-            >
-              <ShieldIcon size={30} />
+          <div className="printable-receipt-wrap" style={{ padding: '6px 2px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <div
+                style={{
+                  width: '54px',
+                  height: '54px',
+                  borderRadius: '50%',
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  border: '2px solid #10b981',
+                  color: '#10b981',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 12px',
+                }}
+              >
+                <CheckIcon size={28} />
+              </div>
+
+              <h3 style={{ margin: '0 0 6px', fontSize: '18px', fontWeight: 700 }}>
+                Payment Secured &amp; Confirmed!
+              </h3>
+
+              <p style={{ fontSize: '13px', color: 'var(--ink-muted)', margin: 0 }}>
+                ₹{paidSuccessBooking.price} deposited into PairUp platform escrow • Session confirmed
+              </p>
             </div>
 
-            <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 700 }}>
-              Payment Secured in Escrow!
-            </h3>
-
-            <p style={{ fontSize: '13.5px', color: 'var(--ink)', lineHeight: 1.6, margin: '0 0 16px' }}>
-              <strong>₹{paidSuccessBooking.price}</strong> has been safely deposited into PairUp platform escrow.
-              Funds are protected and will only release to <strong>{paidSuccessBooking.mentor_name}</strong> after the session is completed.
-            </p>
-
+            {/* Official Receipt Card */}
             <div
               style={{
-                background: 'var(--bg)',
+                background: 'var(--bg, #f8fafc)',
                 border: '1px solid var(--grid)',
                 borderRadius: '10px',
-                padding: '14px',
-                textAlign: 'left',
-                marginBottom: '18px',
+                padding: '16px',
+                marginBottom: '16px',
                 fontSize: '13px',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: 'var(--ink-muted)' }}>Mentor:</span>
-                <span style={{ fontWeight: 600 }}>{paidSuccessBooking.mentor_name}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px dashed var(--border)', paddingBottom: '10px', marginBottom: '12px' }}>
+                <div>
+                  <strong style={{ fontSize: '14px', color: 'var(--ink)' }}>PairUp Mentorship Receipt</strong>
+                  <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>Official Escrow Confirmation</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span className="mono" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--brand)' }}>
+                    REC-{String(paidSuccessBooking.id).padStart(6, '0')}
+                  </span>
+                  <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                    {new Date().toLocaleDateString([], { dateStyle: 'medium' })}
+                  </div>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: 'var(--ink-muted)' }}>Topic:</span>
-                <span style={{ fontWeight: 600 }}>{paidSuccessBooking.topic || 'Pair Programming'}</span>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: 'var(--ink-muted)', display: 'block' }}>Learner:</span>
+                  <strong style={{ color: 'var(--ink)' }}>{user?.name || paidSuccessBooking.learner_name || 'Learner'}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: 'var(--ink-muted)', display: 'block' }}>Mentor:</span>
+                  <strong style={{ color: 'var(--ink)' }}>{paidSuccessBooking.mentor_name}</strong>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ color: 'var(--ink-muted)' }}>Scheduled Time:</span>
-                <span style={{ fontWeight: 600, color: 'var(--brand)' }}>
-                  {paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time
-                    ? new Date(paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-                    : 'Flexible / As agreed'}
-                </span>
+
+              <div style={{ marginBottom: '12px' }}>
+                <span style={{ fontSize: '11px', color: 'var(--ink-muted)', display: 'block' }}>Topic:</span>
+                <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{paidSuccessBooking.topic || 'Pair Programming & Mentorship'}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--ink-muted)' }}>Live Call Room:</span>
-                <span style={{ fontWeight: 600, color: '#10b981' }}>● Unlocked &amp; Ready</span>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: 'var(--ink-muted)', display: 'block' }}>Scheduled Session Time:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--brand)' }}>
+                    {paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time
+                      ? new Date(paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                      : 'Flexible / As agreed'}
+                  </span>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: 'var(--ink-muted)', display: 'block' }}>Live Video Room:</span>
+                  <span style={{ fontWeight: 600, color: '#f59e0b', fontSize: '12px' }}>
+                    Opens 15m before session
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '10px', marginTop: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--ink-muted)' }}>Session Fee:</span>
+                  <span className="mono" style={{ fontWeight: 600 }}>₹{paidSuccessBooking.price}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--ink-muted)' }}>Platform Escrow Protection:</span>
+                  <span style={{ color: '#10b981', fontWeight: 600 }}>100% Protected</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                  <span style={{ color: 'var(--ink-muted)' }}>Payment Status:</span>
+                  <span style={{ color: '#10b981', fontWeight: 600 }}>● Paid &amp; Held in Escrow</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700, marginTop: '8px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+                  <span>Total Paid:</span>
+                  <span className="mono" style={{ color: 'var(--brand)' }}>₹{paidSuccessBooking.price}</span>
+                </div>
               </div>
             </div>
 
+            {/* Timing Guidance notice */}
             <div
               style={{
                 background: 'rgba(59, 130, 246, 0.08)',
                 border: '1px solid rgba(59, 130, 246, 0.25)',
                 borderRadius: '8px',
-                padding: '10px 12px',
+                padding: '10px 14px',
                 fontSize: '12px',
                 color: 'var(--ink)',
                 marginBottom: '18px',
@@ -883,29 +1096,26 @@ export default function LearnerSessionsPage() {
                 lineHeight: 1.5,
               }}
             >
-              💡 <strong>When will the call start?</strong> Both you and your mentor can enter the room at the scheduled time. The session timer will only start ticking once you and your mentor are connected on video!
+              💡 <strong>When will the live room open?</strong> The live video room activates automatically <strong>15 minutes before</strong> your scheduled start time ({paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time ? new Date(paidSuccessBooking.scheduled_at || paidSuccessBooking.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'scheduled time'}). You can join directly from your Upcoming Sessions tab when the call window opens.
             </div>
 
+            {/* Action Buttons: Print Receipt & Back to Sessions */}
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 type="button"
-                className="btn btn-ghost"
-                onClick={() => setPaidSuccessBooking(null)}
-                style={{ flex: 1 }}
+                className="btn btn-secondary"
+                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                onClick={() => window.print()}
               >
-                Back to Sessions
+                <DocumentIcon size={14} /> Print / Save Receipt
               </button>
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => {
-                  const bId = paidSuccessBooking.id;
-                  setPaidSuccessBooking(null);
-                  navigate(`/session?booking_id=${bId}`);
-                }}
-                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                onClick={() => setPaidSuccessBooking(null)}
+                style={{ flex: 1 }}
               >
-                <VideoIcon size={15} /> Enter Live Room Now
+                Back to Sessions
               </button>
             </div>
           </div>

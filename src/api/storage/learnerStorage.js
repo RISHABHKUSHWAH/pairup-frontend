@@ -99,7 +99,7 @@ export const learnerNotifications = {
       id: 1,
       type: 'proposal',
       title: 'New proposal received',
-      body: 'Alex Rivera submitted a proposal for "Django migration failing with IntegrityError" ($35 / 45 mins)',
+      body: 'Alex Rivera submitted a proposal for "Django migration failing with IntegrityError" (₹1,500 / 45 mins)',
       time: '15 minutes ago',
       read: false,
       link: '/learner/my-problems',

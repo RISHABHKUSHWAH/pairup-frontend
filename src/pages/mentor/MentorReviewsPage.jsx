@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import PortalLayout from '../../components/PortalLayout';
+import Pagination from '../../components/Pagination';
 import { api, stars, initials } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { MessageIcon, StarIcon } from '../../components/Icons';
@@ -10,6 +11,8 @@ export default function MentorReviewsPage() {
   const [mentorStats, setMentorStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [starFilter, setStarFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
 
   const defaultReviews = [
     {
@@ -265,7 +268,7 @@ export default function MentorReviewsPage() {
               type="button"
               className={`filter-chip ${starFilter === 'all' ? 'active' : ''}`}
               style={{ fontSize: '12px', padding: '4px 10px' }}
-              onClick={() => setStarFilter('all')}
+              onClick={() => { setStarFilter('all'); setCurrentPage(1); }}
             >
               All
             </button>
@@ -273,7 +276,7 @@ export default function MentorReviewsPage() {
               type="button"
               className={`filter-chip ${starFilter === '5' ? 'active' : ''}`}
               style={{ fontSize: '12px', padding: '4px 10px' }}
-              onClick={() => setStarFilter('5')}
+              onClick={() => { setStarFilter('5'); setCurrentPage(1); }}
             >
               5 Stars Only
             </button>
@@ -281,7 +284,7 @@ export default function MentorReviewsPage() {
               type="button"
               className={`filter-chip ${starFilter === '4' ? 'active' : ''}`}
               style={{ fontSize: '12px', padding: '4px 10px' }}
-              onClick={() => setStarFilter('4')}
+              onClick={() => { setStarFilter('4'); setCurrentPage(1); }}
             >
               4 Stars
             </button>
@@ -305,67 +308,91 @@ export default function MentorReviewsPage() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {filteredReviews.map((r, idx) => (
-              <div
-                key={r.id || idx}
-                style={{
-                  padding: '16px',
-                  background: 'var(--card-bg, #1a1a24)',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          (() => {
+            const totalPages = Math.ceil(filteredReviews.length / pageSize) || 1;
+            const paginatedReviews = filteredReviews.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+            return (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {paginatedReviews.map((r, idx) => (
                     <div
+                      key={r.id || idx}
                       style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '50%',
-                        background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
-                        color: '#fff',
-                        fontSize: '13px',
-                        fontWeight: 'bold',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        padding: '16px',
+                        background: 'var(--card-bg, #1a1a24)',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border)',
                       }}
                     >
-                      {initials(r.learner_name)}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '14px' }}>{r.learner_name}</div>
-                      <div className="sub" style={{ fontSize: '11px', margin: '2px 0 0' }}>
-                        Session: {r.topic || 'Pair Programming'} • {r.date || new Date(r.created_at || Date.now()).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div
+                            style={{
+                              width: '36px',
+                              height: '36px',
+                              borderRadius: '50%',
+                              background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
+                              color: '#fff',
+                              fontSize: '13px',
+                              fontWeight: 'bold',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            {initials(r.learner_name)}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: '14px' }}>{r.learner_name}</div>
+                            <div className="sub" style={{ fontSize: '11px', margin: '2px 0 0' }}>
+                              Session: {r.topic || 'Pair Programming'} • {r.date || new Date(r.created_at || Date.now()).toLocaleDateString()}
+                            </div>
+                          </div>
+                        </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ color: '#f59e0b', fontSize: '14px' }}>{stars(r.rating)}</span>
-                    <span className="mono" style={{ fontWeight: 700, fontSize: '13px' }}>
-                      {r.rating}/5
-                    </span>
-                  </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ color: '#f59e0b', fontSize: '14px' }}>{stars(r.rating)}</span>
+                          <span className="mono" style={{ fontWeight: 700, fontSize: '13px' }}>
+                            {r.rating}/5
+                          </span>
+                        </div>
+                      </div>
+
+                      <p style={{ margin: '6px 0 10px', fontSize: '13.5px', lineHeight: 1.5, color: 'var(--ink)' }}>
+                        "{r.comment || 'Great mentorship session! Highly recommended.'}"
+                      </p>
+
+                      {r.ratings_breakdown && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px dashed var(--border)', paddingTop: '8px' }}>
+                          <span>Technical: ★{r.ratings_breakdown.tech_knowledge}</span>
+                          <span>Problem Solving: ★{r.ratings_breakdown.problem_solving}</span>
+                          <span>Explanation: ★{r.ratings_breakdown.explanation}</span>
+                          <span>Communication: ★{r.ratings_breakdown.communication}</span>
+                          <span>Value: ★{r.ratings_breakdown.value}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
 
-                <p style={{ margin: '6px 0 10px', fontSize: '13.5px', lineHeight: 1.5, color: 'var(--ink)' }}>
-                  "{r.comment || 'Great mentorship session! Highly recommended.'}"
-                </p>
-
-                {r.ratings_breakdown && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px dashed var(--border)', paddingTop: '8px' }}>
-                    <span>Technical: ★{r.ratings_breakdown.tech_knowledge}</span>
-                    <span>Problem Solving: ★{r.ratings_breakdown.problem_solving}</span>
-                    <span>Explanation: ★{r.ratings_breakdown.explanation}</span>
-                    <span>Communication: ★{r.ratings_breakdown.communication}</span>
-                    <span>Value: ★{r.ratings_breakdown.value}</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                  totalItems={filteredReviews.length}
+                  itemsPerPage={pageSize}
+                  itemLabel="reviews"
+                  pageSizeOptions={[5, 10, 20]}
+                  onPageSizeChange={(newSize) => {
+                    setPageSize(newSize);
+                    setCurrentPage(1);
+                  }}
+                  compact={true}
+                />
+              </>
+            );
+          })()
         )}
       </div>
     </PortalLayout>

@@ -306,7 +306,7 @@ export default function ContractDetailPage() {
               Contracts
             </Link>
             <span>/</span>
-            <span className="mono">Contract #{contract.id}</span>
+            <span className="mono">#{contract.id}</span>
           </div>
         </div>
 

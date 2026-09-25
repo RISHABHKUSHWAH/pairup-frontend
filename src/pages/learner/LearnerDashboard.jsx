@@ -37,6 +37,19 @@ export default function LearnerDashboard() {
 
   const navigate = useNavigate();
 
+  const isSessionLive = (s) => {
+    if (s.status !== 'paid') return false;
+    const raw = s.scheduled_at || s.scheduled_time;
+    if (!raw) return true;
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return true;
+    const durationMs = (s.duration_minutes || 60) * 60 * 1000;
+    const startMs = date.getTime();
+    const endMs = startMs + durationMs;
+    const now = Date.now();
+    return now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
+  };
+
   useEffect(() => {
     async function loadData() {
       try {
@@ -277,13 +290,13 @@ export default function LearnerDashboard() {
                     <span className={`status-badge badge-${s.status} mono`} style={{ fontSize: '10px', padding: '3px 8px' }}>
                       {s.status}
                     </span>
-                    {s.status === 'paid' ? (
+                    {s.status === 'paid' && isSessionLive(s) ? (
                       <Link to={`/session?booking_id=${s.id}`} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '11px' }}>
-                        Join
+                        Join Live
                       </Link>
                     ) : (
                       <Link to="/learner/sessions" className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '11px' }}>
-                        Manage
+                        {s.status === 'paid' ? 'View' : 'Manage'}
                       </Link>
                     )}
                   </div>

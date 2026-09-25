@@ -318,10 +318,19 @@ export default function MentorDashboard() {
                             ✓ Escrow Released
                           </span>
                         ) : null}
+                        {b.reschedule_status === 'pending' && (
+                          <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            📅 Reschedule Requested
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td>
-                      {b.status === 'paid' ? (
+                      {b.reschedule_status === 'pending' ? (
+                        <Link to="/mentor/sessions" className="btn btn-warning" style={{ padding: '4px 10px', fontSize: '12px', background: '#ea580c', color: '#fff', borderColor: '#ea580c' }}>
+                          Review
+                        </Link>
+                      ) : b.status === 'paid' ? (
                         <Link to={`/session?booking_id=${b.id}`} className="btn btn-primary" style={{ padding: '4px 10px', fontSize: '12px' }}>
                           Join Call
                         </Link>

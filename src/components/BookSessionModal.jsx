@@ -35,7 +35,37 @@ export default function BookSessionModal({
   const navigate = useNavigate();
 
   const mentorId = mentor ? (mentor.user_id || mentor.id) : null;
-  const hourlyRate = Number(mentor?.hourly_rate || 50);
+  const [liveMentor, setLiveMentor] = useState(mentor);
+
+  useEffect(() => {
+    setLiveMentor(mentor);
+  }, [mentor]);
+
+  useEffect(() => {
+    if (isOpen && mentorId) {
+      api.getMentor(mentorId)
+        .then((data) => {
+          if (data && data.hourly_rate !== undefined && data.hourly_rate !== null) {
+            setLiveMentor((prev) => ({
+              ...prev,
+              ...data,
+              hourly_rate: Number(data.hourly_rate),
+            }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, mentorId]);
+
+  const mentorName = liveMentor?.name || mentor?.name || 'Mentor';
+  const mentorTitle = liveMentor?.title || mentor?.title || 'Technical Mentor';
+  const hourlyRate = Number(
+    liveMentor?.hourly_rate !== undefined && liveMentor?.hourly_rate !== null
+      ? liveMentor.hourly_rate
+      : mentor?.hourly_rate !== undefined && mentor?.hourly_rate !== null
+      ? mentor.hourly_rate
+      : 0
+  );
 
   // Form State
   const [duration, setDuration] = useState(initialDuration || 60);
@@ -58,7 +88,7 @@ export default function BookSessionModal({
 
   // Calculate dynamic price based on duration
   const calculatedPrice = useMemo(() => {
-    if (!hourlyRate || hourlyRate <= 0) return 50;
+    if (!hourlyRate || hourlyRate <= 0) return 0;
     return Math.max(1, Math.round((hourlyRate * duration) / 60));
   }, [hourlyRate, duration]);
 
@@ -144,7 +174,23 @@ export default function BookSessionModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!user) {
-      navigate('/login');
+      const returnUrl = window.location.pathname + (window.location.search || `?bookMentor=${mentorId}`);
+      try {
+        sessionStorage.setItem('pairup_pending_action', JSON.stringify({
+          action: 'book_session',
+          mentorId,
+          mentor,
+          returnUrl,
+        }));
+      } catch (err) {}
+      navigate(`/login?redirect=${encodeURIComponent(returnUrl)}`, {
+        state: {
+          from: { pathname: window.location.pathname, search: window.location.search || `?bookMentor=${mentorId}` },
+          action: 'book_session',
+          mentorId,
+          mentor,
+        },
+      });
       return;
     }
     if (!selectedSlot) {
@@ -197,8 +243,8 @@ export default function BookSessionModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Book Session with ${mentor.name}`}
-      subtitle={`${mentor.title || 'Technical Mentor'} · ₹${hourlyRate.toLocaleString('en-IN')}/hr`}
+      title={`Book Session with ${mentorName}`}
+      subtitle={`${mentorTitle} · ₹${hourlyRate.toLocaleString('en-IN')}/hr`}
       maxWidth="680px"
     >
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -234,10 +280,10 @@ export default function BookSessionModal({
                 fontWeight: 700,
               }}
             >
-              {initials(mentor.name)}
+              {initials(mentorName)}
             </div>
             <div>
-              <div style={{ fontWeight: 700, fontSize: '15px' }}>{mentor.name}</div>
+              <div style={{ fontWeight: 700, fontSize: '15px' }}>{mentorName}</div>
               <div className="sub" style={{ margin: 0, fontSize: '12.5px' }}>
                 ₹{hourlyRate.toLocaleString('en-IN')} / hour rate · Escrow Protected
               </div>

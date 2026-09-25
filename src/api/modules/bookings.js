@@ -38,6 +38,15 @@ export const bookingApi = {
   cancelBooking: (id, reason) =>
     apiFetch(`/api/bookings/${id}/cancel`, { method: 'POST', auth: true, body: { reason } }),
 
+  rescheduleBooking: (id, scheduled_at, note = '') =>
+    apiFetch(`/api/bookings/${id}/reschedule`, { method: 'POST', auth: true, body: { scheduled_at, note } }),
+
+  acceptReschedule: (id) =>
+    apiFetch(`/api/bookings/${id}/reschedule/accept`, { method: 'POST', auth: true }),
+
+  denyReschedule: (id, reason = '') =>
+    apiFetch(`/api/bookings/${id}/reschedule/deny`, { method: 'POST', auth: true, body: { reason } }),
+
   getNotes: (id) =>
     apiFetch(`/api/bookings/${id}/notes`, { auth: true }),
 

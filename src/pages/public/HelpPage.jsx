@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import PairUpLogo from '../../components/PairUpLogo';
+import ScrollToTopButton from '../../components/ScrollToTopButton';
 import {
   SearchIcon,
   ShieldIcon,
@@ -942,6 +943,17 @@ export default function HelpPage() {
                 })}
               </div>
             )}
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '28px' }}>
+              <button
+                type="button"
+                className="inline-back-to-top-btn"
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                title="Scroll back to top"
+              >
+                <span>↑ Back to top</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -997,6 +1009,17 @@ export default function HelpPage() {
                 </tbody>
               </table>
             </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px' }}>
+              <button
+                type="button"
+                className="inline-back-to-top-btn"
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                title="Scroll back to top"
+              >
+                <span>↑ Back to top</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1026,6 +1049,7 @@ export default function HelpPage() {
       </main>
 
       <Footer />
+      <ScrollToTopButton />
     </div>
   );
 }

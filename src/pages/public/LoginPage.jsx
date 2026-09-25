@@ -54,6 +54,21 @@ export default function LoginPage() {
   const [customSocialName, setCustomSocialName] = useState('');
   const [customSocialEmail, setCustomSocialEmail] = useState('');
   const [socialLoading, setSocialLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null);
+
+  useEffect(() => {
+    // Read pending action from location.state or sessionStorage
+    if (location.state?.action || location.state?.mentorId) {
+      setPendingAction(location.state);
+    } else {
+      try {
+        const stored = sessionStorage.getItem('pairup_pending_action');
+        if (stored) {
+          setPendingAction(JSON.parse(stored));
+        }
+      } catch (e) {}
+    }
+  }, [location.state]);
 
   const getSocialAccounts = (provider) => {
     if (provider === 'GitHub') {
@@ -77,6 +92,47 @@ export default function LoginPage() {
     ];
   };
 
+  const getRedirectTarget = (u) => {
+    // 1. Check location.state?.from
+    if (location.state?.from) {
+      const from = location.state.from;
+      if (typeof from === 'string' && from && !from.startsWith('/login')) {
+        return { path: from, state: location.state };
+      }
+      if (from.pathname && !from.pathname.startsWith('/login')) {
+        return {
+          path: `${from.pathname}${from.search || ''}${from.hash || ''}`,
+          state: location.state,
+        };
+      }
+    }
+
+    // 2. Check query params: ?redirect=... or ?next=...
+    const redirectParam = searchParams.get('redirect') || searchParams.get('next');
+    if (redirectParam && !redirectParam.startsWith('/login')) {
+      return { path: redirectParam, state: location.state || pendingAction };
+    }
+
+    // 3. Check pending action returnUrl
+    if (pendingAction?.returnUrl) {
+      return { path: pendingAction.returnUrl, state: pendingAction };
+    }
+    try {
+      const stored = sessionStorage.getItem('pairup_pending_action');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.returnUrl) {
+          return { path: parsed.returnUrl, state: parsed };
+        }
+      }
+    } catch (e) {}
+
+    // 4. Default role dashboard
+    if (u?.role === 'mentor') return { path: '/mentor/dashboard', state: null };
+    if (u?.role === 'admin' || u?.role === 'superadmin') return { path: '/admin', state: null };
+    return { path: '/learner/dashboard', state: null };
+  };
+
   const handleSelectSocialAccount = async (acc) => {
     setSocialLoading(true);
     setError('');
@@ -90,7 +146,8 @@ export default function LoginPage() {
       });
       toast.success(`Welcome to PairUp, ${loggedUser.name}! 🎉`);
       setSocialModalProvider(null);
-      navigate(getRedirectPath(loggedUser), { replace: true });
+      const target = getRedirectTarget(loggedUser);
+      navigate(target.path, { replace: true, state: target.state });
     } catch (err) {
       setError(err.message || 'Social authentication failed');
       toast.error(err.message || 'Social authentication failed');
@@ -99,16 +156,10 @@ export default function LoginPage() {
     }
   };
 
-  const getRedirectPath = (u) => {
-    if (location.state?.from?.pathname) return location.state.from.pathname;
-    if (u.role === 'mentor') return '/mentor/dashboard';
-    if (u.role === 'admin' || u.role === 'superadmin') return '/admin';
-    return '/learner/dashboard';
-  };
-
   useEffect(() => {
     if (user) {
-      navigate(getRedirectPath(user), { replace: true });
+      const target = getRedirectTarget(user);
+      navigate(target.path, { replace: true, state: target.state });
     }
   }, [user, navigate]);
 
@@ -118,7 +169,8 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const loggedUser = await login(email.trim(), password);
-      navigate(getRedirectPath(loggedUser), { replace: true });
+      const target = getRedirectTarget(loggedUser);
+      navigate(target.path, { replace: true, state: target.state });
     } catch (err) {
       setError(err.message);
       toast.error(err.message, {
@@ -147,8 +199,8 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const registeredUser = await register(name.trim(), email.trim(), password, role);
-      if (registeredUser.role === 'mentor') navigate('/mentor/dashboard');
-      else navigate('/learner/dashboard');
+      const target = getRedirectTarget(registeredUser);
+      navigate(target.path, { replace: true, state: target.state });
     } catch (err) {
       setError(err.message);
       toast.error(err.message, { duration: 5000 });
@@ -169,6 +221,65 @@ export default function LoginPage() {
               Get unstuck. Pair with a developer, live.
             </p>
           </div>
+
+          {/* Pending Action Intent Notice */}
+          {pendingAction && (pendingAction.action === 'book_session' || searchParams.get('redirect')?.includes('bookMentor')) && (
+            <div
+              style={{
+                background: 'var(--accent-soft)',
+                border: '1px solid var(--accent)',
+                borderRadius: '12px',
+                padding: '14px 16px',
+                marginBottom: '16px',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                color: 'var(--ink)',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
+              }}
+            >
+              <div style={{ fontSize: '20px', flexShrink: 0 }}>📅</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: '13.5px', color: 'var(--accent-ink)' }}>
+                  Log in to book your session
+                </div>
+                <div style={{ color: 'var(--ink-muted)', fontSize: '12px', marginTop: '2px' }}>
+                  {pendingAction.mentor?.name
+                    ? `With ${pendingAction.mentor.name}. The booking modal will open automatically once you sign in.`
+                    : 'The booking modal will open automatically as soon as you sign in.'}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {pendingAction && pendingAction.action === 'chat' && (
+            <div
+              style={{
+                background: 'var(--accent-soft)',
+                border: '1px solid var(--accent)',
+                borderRadius: '12px',
+                padding: '14px 16px',
+                marginBottom: '16px',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                color: 'var(--ink)',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
+              }}
+            >
+              <div style={{ fontSize: '20px', flexShrink: 0 }}>💬</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: '13.5px', color: 'var(--accent-ink)' }}>
+                  Log in to message your mentor
+                </div>
+                <div style={{ color: 'var(--ink-muted)', fontSize: '12px', marginTop: '2px' }}>
+                  You will be directed straight to your chat room after signing in.
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="auth-card">
             <div className="tabs">

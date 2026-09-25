@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
+import Pagination from '../../components/Pagination';
 import { api, stars } from '../../api/client';
 import { CalendarIcon, FileEditIcon, StarIcon, CheckCircleIcon } from '../../components/Icons';
 import { useToast } from '../../context';
@@ -13,6 +14,9 @@ export default function LearnerReviewsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('given');
+  const [givenPage, setGivenPage] = useState(1);
+  const [pendingPage, setPendingPage] = useState(1);
+  const pageSize = 5;
 
   // Review modal state
   const [reviewModalSession, setReviewModalSession] = useState(null);
@@ -157,44 +161,63 @@ export default function LearnerReviewsPage() {
               </p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {reviews.map((r) => (
-                <div key={r.id} className="card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '15px' }}>{r.mentor_name}</div>
-                      <div className="sub" style={{ margin: '2px 0 0', fontSize: '12.5px' }}>
-                        Session: <strong>{r.topic || 'Technical Pairing Session'}</strong>
+            (() => {
+              const totalPages = Math.ceil(reviews.length / pageSize) || 1;
+              const paginatedReviews = reviews.slice((givenPage - 1) * pageSize, givenPage * pageSize);
+
+              return (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {paginatedReviews.map((r) => (
+                      <div key={r.id} className="card">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '15px' }}>{r.mentor_name}</div>
+                            <div className="sub" style={{ margin: '2px 0 0', fontSize: '12.5px' }}>
+                              Session: <strong>{r.topic || 'Technical Pairing Session'}</strong>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <span className="stars" style={{ fontSize: '15px' }}>
+                              {stars(r.rating)}{' '}
+                              <span className="mono" style={{ color: 'var(--ink)', fontSize: '13px', fontWeight: 700 }}>
+                                {r.rating}/5
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '11.5px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                              onClick={() => openEditReview(r)}
+                            >
+                              <FileEditIcon size={13} /> Edit Review
+                            </button>
+                          </div>
+                        </div>
+
+                        <p className="sub" style={{ margin: '8px 0 10px', fontSize: '13.5px', lineHeight: 1.5 }}>
+                          "{r.comment || 'No written comment left.'}"
+                        </p>
+
+                        <div className="mono" style={{ fontSize: '11px', color: 'var(--ink-faint)' }}>
+                          Submitted on {new Date(r.created_at).toLocaleDateString()}
+                        </div>
                       </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <span className="stars" style={{ fontSize: '15px' }}>
-                        {stars(r.rating)}{' '}
-                        <span className="mono" style={{ color: 'var(--ink)', fontSize: '13px', fontWeight: 700 }}>
-                          {r.rating}/5
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ fontSize: '11.5px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                        onClick={() => openEditReview(r)}
-                      >
-                        <FileEditIcon size={13} /> Edit Review
-                      </button>
-                    </div>
+                    ))}
                   </div>
 
-                  <p className="sub" style={{ margin: '8px 0 10px', fontSize: '13.5px', lineHeight: 1.5 }}>
-                    "{r.comment || 'No written comment left.'}"
-                  </p>
-
-                  <div className="mono" style={{ fontSize: '11px', color: 'var(--ink-faint)' }}>
-                    Submitted on {new Date(r.created_at).toLocaleDateString()}
-                  </div>
-                </div>
-              ))}
-            </div>
+                  <Pagination
+                    currentPage={givenPage}
+                    totalPages={totalPages}
+                    onPageChange={setGivenPage}
+                    totalItems={reviews.length}
+                    itemsPerPage={pageSize}
+                    itemLabel="reviews"
+                    compact={true}
+                  />
+                </>
+              );
+            })()
           )}
         </div>
       )}
@@ -212,30 +235,49 @@ export default function LearnerReviewsPage() {
               <p>All caught up! No pending sessions awaiting review.</p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {pendingSessions.map((b) => (
-                <div
-                  key={b.id}
-                  className="card"
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '15px' }}>{b.mentor_name}</div>
-                    <div className="sub" style={{ margin: '3px 0 0', fontSize: '12.5px' }}>
-                      Topic: <strong>{b.topic || 'Pairing Session'}</strong> • Completed on {new Date(b.created_at).toLocaleDateString()}
-                    </div>
+            (() => {
+              const totalPages = Math.ceil(pendingSessions.length / pageSize) || 1;
+              const paginatedPending = pendingSessions.slice((pendingPage - 1) * pageSize, pendingPage * pageSize);
+
+              return (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {paginatedPending.map((b) => (
+                      <div
+                        key={b.id}
+                        className="card"
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: '15px' }}>{b.mentor_name}</div>
+                          <div className="sub" style={{ margin: '3px 0 0', fontSize: '12.5px' }}>
+                            Topic: <strong>{b.topic || 'Pairing Session'}</strong> • Completed on {new Date(b.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ fontSize: '12.5px', padding: '6px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          onClick={() => openNewReview(b)}
+                        >
+                          <StarIcon size={14} /> Leave Review Now
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    style={{ fontSize: '12.5px', padding: '6px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                    onClick={() => openNewReview(b)}
-                  >
-                    <StarIcon size={14} /> Leave Review Now
-                  </button>
-                </div>
-              ))}
-            </div>
+
+                  <Pagination
+                    currentPage={pendingPage}
+                    totalPages={totalPages}
+                    onPageChange={setPendingPage}
+                    totalItems={pendingSessions.length}
+                    itemsPerPage={pageSize}
+                    itemLabel="pending sessions"
+                    compact={true}
+                  />
+                </>
+              );
+            })()
           )}
         </div>
       )}

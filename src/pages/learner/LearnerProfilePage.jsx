@@ -6,6 +6,31 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
 import { EyeIcon } from '../../components/Icons';
 
+function splitCommaItems(arr) {
+  if (!arr) return [];
+  if (!Array.isArray(arr)) {
+    if (typeof arr === 'string') {
+      arr = [arr];
+    } else {
+      return [];
+    }
+  }
+  const result = [];
+  const seen = new Set();
+  arr.forEach((item) => {
+    if (typeof item === 'string') {
+      item.split(',').forEach((p) => {
+        const trimmed = p.trim();
+        if (trimmed && !seen.has(trimmed.toLowerCase())) {
+          seen.add(trimmed.toLowerCase());
+          result.push(trimmed);
+        }
+      });
+    }
+  });
+  return result;
+}
+
 export default function LearnerProfilePage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -15,6 +40,9 @@ export default function LearnerProfilePage() {
 
   useEffect(() => {
     const data = learnerProfile.getProfile(user);
+    if (data) {
+      data.skillsLearning = splitCommaItems(data.skillsLearning);
+    }
     setProfile(data);
   }, [user]);
 
@@ -25,15 +53,26 @@ export default function LearnerProfilePage() {
   };
 
   const handleAddSkill = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (!skillInput.trim()) return;
-      if (!profile.skillsLearning.includes(skillInput.trim())) {
-        setProfile((prev) => ({
+    if (e && e.preventDefault) e.preventDefault();
+    const val = skillInput.trim();
+    if (!val) return;
+
+    const parts = val
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    if (parts.length > 0) {
+      setProfile((prev) => {
+        const currentSkills = splitCommaItems(prev.skillsLearning);
+        const existingLower = new Set(currentSkills.map((s) => s.toLowerCase()));
+        const toAdd = parts.filter((s) => !existingLower.has(s.toLowerCase()));
+        if (toAdd.length === 0) return { ...prev, skillsLearning: currentSkills };
+        return {
           ...prev,
-          skillsLearning: [...prev.skillsLearning, skillInput.trim()],
-        }));
-      }
+          skillsLearning: [...currentSkills, ...toAdd],
+        };
+      });
       setSkillInput('');
     }
   };
@@ -41,13 +80,22 @@ export default function LearnerProfilePage() {
   const handleRemoveSkill = (skillToRemove) => {
     setProfile((prev) => ({
       ...prev,
-      skillsLearning: prev.skillsLearning.filter((s) => s !== skillToRemove),
+      skillsLearning: splitCommaItems(prev.skillsLearning).filter((s) => s.toLowerCase() !== skillToRemove.toLowerCase()),
     }));
   };
 
   const handleSave = (e) => {
-    e.preventDefault();
-    learnerProfile.saveProfile(profile, user?.id);
+    if (e && e.preventDefault) e.preventDefault();
+    const pendingSkills = skillInput.trim() ? skillInput.trim().split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const finalSkills = splitCommaItems([...(profile.skillsLearning || []), ...pendingSkills]);
+    if (pendingSkills.length > 0) setSkillInput('');
+
+    const updatedProfile = {
+      ...profile,
+      skillsLearning: finalSkills,
+    };
+    setProfile(updatedProfile);
+    learnerProfile.saveProfile(updatedProfile, user?.id);
     toast.success('Profile changes saved successfully!');
   };
 
@@ -200,7 +248,7 @@ export default function LearnerProfilePage() {
           <div className="field">
             <label>Technologies I am Learning</label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
-              {profile.skillsLearning.map((s) => (
+              {splitCommaItems(profile.skillsLearning).map((s) => (
                 <span
                   key={s}
                   className="tag"
@@ -220,9 +268,35 @@ export default function LearnerProfilePage() {
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 type="text"
-                placeholder="Add another tech (e.g. Kubernetes, Redis)"
+                placeholder="Add another tech (e.g. Kubernetes, Redis or comma-separated)"
                 value={skillInput}
-                onChange={(e) => setSkillInput(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val.includes(',')) {
+                    const parts = val.split(',');
+                    const toAdd = parts.slice(0, -1).map((s) => s.trim()).filter(Boolean);
+                    const remainder = parts[parts.length - 1];
+
+                    if (toAdd.length > 0) {
+                      setProfile((prev) => {
+                        const currentSkills = splitCommaItems(prev.skillsLearning);
+                        const existingLower = new Set(currentSkills.map((s) => s.toLowerCase()));
+                        const newUnique = toAdd.filter((s) => !existingLower.has(s.toLowerCase()));
+                        if (newUnique.length === 0) return { ...prev, skillsLearning: currentSkills };
+                        return { ...prev, skillsLearning: [...currentSkills, ...newUnique] };
+                      });
+                    }
+                    setSkillInput(remainder.trimStart());
+                  } else {
+                    setSkillInput(val);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddSkill(e);
+                  }
+                }}
                 style={{ flex: 1 }}
               />
               <button

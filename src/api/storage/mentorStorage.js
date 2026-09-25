@@ -134,6 +134,31 @@ export const mentorPayoutSettings = {
   },
 };
 
+export const mentorPaymentScheduleSettings = {
+  getSchedule: (user) => {
+    const key = user?.id ? `pairup_mentor_payout_schedule_${user.id}` : 'pairup_mentor_payout_schedule';
+    try {
+      const data = localStorage.getItem(key);
+      if (data) return JSON.parse(data);
+    } catch {}
+
+    return {
+      frequency: 'weekly', // 'weekly' | 'biweekly' | 'monthly' | 'manual'
+      dayOfWeek: 'Wednesday', // 'Monday' | 'Wednesday' | 'Friday'
+      dayOfMonth: 1,
+      minThreshold: 100, // INR minimum
+      autoPayout: true,
+      preferredMethod: 'bank', // 'bank' | 'upi'
+      lastDisbursement: '2026-09-16T10:00:00.000Z',
+    };
+  },
+  saveSchedule: (data, userId) => {
+    const key = userId ? `pairup_mentor_payout_schedule_${userId}` : 'pairup_mentor_payout_schedule';
+    localStorage.setItem(key, JSON.stringify(data));
+    return data;
+  },
+};
+
 export const mentorProfileSettings = {
   getDefault: (user) => {
     // Demo account fallback for Alex Rivera

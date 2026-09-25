@@ -7,6 +7,31 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
 import { EyeIcon, ShieldIcon, UsersIcon, ExternalLinkIcon } from '../../components/Icons';
 
+function splitCommaItems(arr) {
+  if (!arr) return [];
+  if (!Array.isArray(arr)) {
+    if (typeof arr === 'string') {
+      arr = [arr];
+    } else {
+      return [];
+    }
+  }
+  const result = [];
+  const seen = new Set();
+  arr.forEach((item) => {
+    if (typeof item === 'string') {
+      item.split(',').forEach((p) => {
+        const trimmed = p.trim();
+        if (trimmed && !seen.has(trimmed.toLowerCase())) {
+          seen.add(trimmed.toLowerCase());
+          result.push(trimmed);
+        }
+      });
+    }
+  });
+  return result;
+}
+
 export default function MentorProfileEditPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -41,8 +66,8 @@ export default function MentorProfileEditPage() {
           company: data.company || local.company || '',
           bio: data.bio || local.bio || '',
           location: data.location || local.location || '',
-          languages: data.languages && data.languages.length ? data.languages : (local.languages || ['English']),
-          skills: data.skills && data.skills.length ? data.skills : (local.skills || []),
+          languages: splitCommaItems(data.languages && data.languages.length ? data.languages : (local.languages || ['English'])),
+          skills: splitCommaItems(data.skills && data.skills.length ? data.skills : (local.skills || [])),
           primaryTech: local.primaryTech || (data.skills?.[0] ? `${data.skills[0]} Architecture` : ''),
           yearsExperience: data.years_experience !== undefined ? data.years_experience : (local.yearsExperience || 0),
           hourlyRate: data.hourly_rate !== undefined ? data.hourly_rate : (local.hourlyRate || 500),
@@ -108,29 +133,67 @@ export default function MentorProfileEditPage() {
   };
 
   const handleAddSkill = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     const val = newSkill.trim();
-    if (val && !profile.skills.includes(val)) {
-      setProfile((prev) => ({ ...prev, skills: [...prev.skills, val] }));
+    if (!val) return;
+
+    const parts = val
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    if (parts.length > 0) {
+      setProfile((prev) => {
+        const currentSkills = splitCommaItems(prev.skills);
+        const existingLower = new Set(currentSkills.map((s) => s.toLowerCase()));
+        const toAdd = parts.filter((s) => !existingLower.has(s.toLowerCase()));
+        if (toAdd.length === 0) return { ...prev, skills: currentSkills };
+        return {
+          ...prev,
+          skills: [...currentSkills, ...toAdd],
+        };
+      });
       setNewSkill('');
     }
   };
 
   const handleRemoveSkill = (skillToRemove) => {
-    setProfile((prev) => ({ ...prev, skills: prev.skills.filter((s) => s !== skillToRemove) }));
+    setProfile((prev) => ({
+      ...prev,
+      skills: splitCommaItems(prev.skills).filter((s) => s.toLowerCase() !== skillToRemove.toLowerCase()),
+    }));
   };
 
   const handleAddLang = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     const val = newLang.trim();
-    if (val && !profile.languages.includes(val)) {
-      setProfile((prev) => ({ ...prev, languages: [...prev.languages, val] }));
+    if (!val) return;
+
+    const parts = val
+      .split(',')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    if (parts.length > 0) {
+      setProfile((prev) => {
+        const currentLangs = splitCommaItems(prev.languages);
+        const existingLower = new Set(currentLangs.map((l) => l.toLowerCase()));
+        const toAdd = parts.filter((l) => !existingLower.has(l.toLowerCase()));
+        if (toAdd.length === 0) return { ...prev, languages: currentLangs };
+        return {
+          ...prev,
+          languages: [...currentLangs, ...toAdd],
+        };
+      });
       setNewLang('');
     }
   };
 
   const handleRemoveLang = (langToRemove) => {
-    setProfile((prev) => ({ ...prev, languages: prev.languages.filter((l) => l !== langToRemove) }));
+    setProfile((prev) => ({
+      ...prev,
+      languages: splitCommaItems(prev.languages).filter((l) => l.toLowerCase() !== langToRemove.toLowerCase()),
+    }));
   };
 
   const handleAddCert = async (e) => {
@@ -245,6 +308,22 @@ export default function MentorProfileEditPage() {
     if (e) e.preventDefault();
     setSaving(true);
     try {
+      // Gather any pending unadded input from newSkill or newLang
+      const pendingSkills = newSkill.trim() ? newSkill.trim().split(',').map((s) => s.trim()).filter(Boolean) : [];
+      const pendingLangs = newLang.trim() ? newLang.trim().split(',').map((l) => l.trim()).filter(Boolean) : [];
+      const finalSkills = splitCommaItems([...(profile.skills || []), ...pendingSkills]);
+      const finalLangs = splitCommaItems([...(profile.languages || []), ...pendingLangs]);
+
+      if (pendingSkills.length > 0) setNewSkill('');
+      if (pendingLangs.length > 0) setNewLang('');
+
+      const updatedProfile = {
+        ...profile,
+        skills: finalSkills,
+        languages: finalLangs,
+      };
+      setProfile(updatedProfile);
+
       // 1. Save directly to Django database via API
       await api.updateMyMentorProfile({
         name: profile.name,
@@ -252,8 +331,8 @@ export default function MentorProfileEditPage() {
         company: profile.company,
         bio: profile.bio,
         location: profile.location,
-        languages: profile.languages,
-        skills: profile.skills,
+        languages: finalLangs,
+        skills: finalSkills,
         hourly_rate: Number(profile.hourlyRate) || 0,
         years_experience: Number(profile.yearsExperience) || 0,
         github_url: profile.githubUrl,
@@ -263,7 +342,7 @@ export default function MentorProfileEditPage() {
       });
 
       // 2. Also save to localStorage fallback
-      mentorProfileSettings.saveProfile(profile, user?.id);
+      mentorProfileSettings.saveProfile(updatedProfile, user?.id);
 
       toast.success('Profile saved to database successfully! Changes are live on learner side.');
     } catch (err) {
@@ -426,8 +505,28 @@ export default function MentorProfileEditPage() {
                   <input
                     type="text"
                     value={newLang}
-                    onChange={(e) => setNewLang(e.target.value)}
-                    placeholder="Add language..."
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes(',')) {
+                        const parts = val.split(',');
+                        const toAdd = parts.slice(0, -1).map((l) => l.trim()).filter(Boolean);
+                        const remainder = parts[parts.length - 1];
+
+                        if (toAdd.length > 0) {
+                          setProfile((prev) => {
+                            const currentLangs = splitCommaItems(prev.languages);
+                            const existingLower = new Set(currentLangs.map((l) => l.toLowerCase()));
+                            const newUnique = toAdd.filter((l) => !existingLower.has(l.toLowerCase()));
+                            if (newUnique.length === 0) return { ...prev, languages: currentLangs };
+                            return { ...prev, languages: [...currentLangs, ...newUnique] };
+                          });
+                        }
+                        setNewLang(remainder.trimStart());
+                      } else {
+                        setNewLang(val);
+                      }
+                    }}
+                    placeholder="Add language (or comma-separated)..."
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -440,7 +539,7 @@ export default function MentorProfileEditPage() {
                   </button>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {profile.languages.map((l) => (
+                  {splitCommaItems(profile.languages).map((l) => (
                     <span
                       key={l}
                       className="badge badge-secondary"
@@ -473,8 +572,28 @@ export default function MentorProfileEditPage() {
                 <input
                   type="text"
                   value={newSkill}
-                  onChange={(e) => setNewSkill(e.target.value)}
-                  placeholder="Type a technology (e.g. Docker, GraphQL, Kubernetes) and press Add..."
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.includes(',')) {
+                      const parts = val.split(',');
+                      const toAdd = parts.slice(0, -1).map((s) => s.trim()).filter(Boolean);
+                      const remainder = parts[parts.length - 1];
+
+                      if (toAdd.length > 0) {
+                        setProfile((prev) => {
+                          const currentSkills = splitCommaItems(prev.skills);
+                          const existingLower = new Set(currentSkills.map((s) => s.toLowerCase()));
+                          const newUnique = toAdd.filter((s) => !existingLower.has(s.toLowerCase()));
+                          if (newUnique.length === 0) return { ...prev, skills: currentSkills };
+                          return { ...prev, skills: [...currentSkills, ...newUnique] };
+                        });
+                      }
+                      setNewSkill(remainder.trimStart());
+                    } else {
+                      setNewSkill(val);
+                    }
+                  }}
+                  placeholder="Type a technology (e.g. Docker, GraphQL, Kubernetes) and press Add or comma..."
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -488,7 +607,7 @@ export default function MentorProfileEditPage() {
               </div>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '10px', background: 'var(--card-bg, #1a1a24)', border: '1px solid var(--border)', borderRadius: '8px' }}>
-                {profile.skills.map((s) => (
+                {splitCommaItems(profile.skills).map((s) => (
                   <span
                     key={s}
                     className="badge badge-primary"

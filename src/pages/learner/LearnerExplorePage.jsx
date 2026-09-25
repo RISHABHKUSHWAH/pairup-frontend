@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
 import { api, initials, stars, learnerFavorites } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
-import { HeartIcon, MessageIcon, CalendarIcon, UserIcon } from '../../components/Icons';
+import { HeartIcon, MessageIcon, CalendarIcon, UserIcon, ChevronLeftIcon, ChevronRightIcon } from '../../components/Icons';
+import { TechIcon } from '../../components/TechIcon';
 import { useToast } from '../../context';
 import PairUpLoader from '../../components/PairUpLoader';
 
@@ -37,6 +38,31 @@ export default function LearnerExplorePage() {
 
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  // Horizontal scroll tracking for skills/topics
+  const scrollTrackRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollTrackRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    setCanScrollLeft(scrollLeft > 4);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
+  }, []);
+
+  const handleScrollLeft = () => {
+    if (scrollTrackRef.current) {
+      scrollTrackRef.current.scrollBy({ left: -220, behavior: 'smooth' });
+    }
+  };
+
+  const handleScrollRight = () => {
+    if (scrollTrackRef.current) {
+      scrollTrackRef.current.scrollBy({ left: 220, behavior: 'smooth' });
+    }
+  };
 
   // Dynamically derive technologies added by mentors in their profiles, sorted by frequency (most used first)
   const techCategories = useMemo(() => {
@@ -78,6 +104,42 @@ export default function LearnerExplorePage() {
       ...sorted,
     ];
   }, [mentors]);
+
+  // Set up listeners and recalculate scroll overflow whenever techCategories or layout changes
+  useEffect(() => {
+    const el = scrollTrackRef.current;
+    if (!el) return;
+
+    updateScrollState();
+    const timer = setTimeout(updateScrollState, 100);
+
+    const handleScroll = () => updateScrollState();
+    el.addEventListener('scroll', handleScroll, { passive: true });
+
+    let ro;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => updateScrollState());
+      ro.observe(el);
+    }
+
+    const handleWheel = (e) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+
+    window.addEventListener('resize', updateScrollState);
+
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener('scroll', handleScroll);
+      el.removeEventListener('wheel', handleWheel);
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', updateScrollState);
+    };
+  }, [updateScrollState, techCategories]);
 
   useEffect(() => {
     setFavorites(learnerFavorites.getFavorites());
@@ -293,93 +355,115 @@ export default function LearnerExplorePage() {
           </button>
         </div>
 
-        {/* Dynamic Mentor Technology Pills - Strict Single Line with Horizontal Scroll */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            overflowX: 'auto',
-            whiteSpace: 'nowrap',
-            flexWrap: 'nowrap',
-            padding: '2px 0 6px',
-            scrollbarWidth: 'none',
-            msOverflowStyle: 'none',
-            WebkitOverflowScrolling: 'touch',
-          }}
-        >
-          {techCategories.map((tech) => {
-            const isAll = !tech.value;
-            const active = isAll
-              ? selectedTechs.length === 0
-              : selectedTechs.includes(tech.value);
-
-            return (
+        {/* Dynamic Mentor Technology Pills - Strict Single Line with Horizontal Scroll & Indicator Icons */}
+        <div className="skills-scroll-wrapper" style={{ margin: '4px 0 8px' }}>
+          {canScrollLeft && (
+            <div className="skills-scroll-edge-left">
               <button
-                key={tech.value || 'all'}
                 type="button"
-                onClick={() => handleToggleTech(tech.value)}
-                title={
-                  isAll
-                    ? 'Show all mentors'
-                    : `${tech.label} (${tech.count} mentor${tech.count === 1 ? '' : 's'}) - Click to toggle filter`
-                }
+                className="skills-scroll-btn"
+                onClick={handleScrollLeft}
+                title="Scroll skills left"
+                aria-label="Scroll skills left"
+              >
+                <ChevronLeftIcon size={16} />
+              </button>
+            </div>
+          )}
+
+          <div
+            ref={scrollTrackRef}
+            className="skills-scroll-track"
+          >
+            {techCategories.map((tech) => {
+              const isAll = !tech.value;
+              const active = isAll
+                ? selectedTechs.length === 0
+                : selectedTechs.includes(tech.value);
+
+              return (
+                <button
+                  key={tech.value || 'all'}
+                  type="button"
+                  className={`chip ${active ? 'active' : ''}`}
+                  onClick={() => handleToggleTech(tech.value)}
+                  title={
+                    isAll
+                      ? 'Show all mentors'
+                      : `${tech.label} (${tech.count} mentor${tech.count === 1 ? '' : 's'}) - Click to toggle filter`
+                  }
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: '20px',
+                    border: active ? '1.5px solid var(--ink)' : '1px solid var(--grid-strong)',
+                    background: active ? 'var(--ink)' : 'var(--surface)',
+                    color: active ? 'var(--bg)' : 'var(--ink)',
+                    fontSize: '12.5px',
+                    fontWeight: active ? 700 : 500,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: active ? '0 2px 5px rgba(0,0,0,0.1)' : 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <TechIcon name={tech.value || 'all'} size={14} />
+                  <span>{tech.label}</span>
+                  {tech.count && !isAll ? (
+                    <span
+                      style={{
+                        fontSize: '10.5px',
+                        padding: '1px 6px',
+                        borderRadius: '10px',
+                        background: active ? 'rgba(var(--bg-rgb), 0.22)' : 'var(--grid-strong)',
+                        color: active ? 'var(--bg)' : 'var(--ink-muted)',
+                        fontWeight: 700,
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      {tech.count}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+            {selectedTechs.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedTechs([])}
                 style={{
-                  padding: '6px 14px',
-                  borderRadius: '20px',
-                  border: active ? '1.5px solid var(--ink)' : '1px solid var(--grid-strong)',
-                  background: active ? 'var(--ink)' : 'var(--surface)',
-                  color: active ? '#ffffff' : 'var(--ink)',
-                  fontSize: '12.5px',
-                  fontWeight: active ? 700 : 500,
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--accent)',
+                  fontSize: '12px',
+                  fontWeight: 600,
                   cursor: 'pointer',
+                  padding: '4px 8px',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  boxShadow: active ? '0 2px 5px rgba(0,0,0,0.1)' : 'none',
-                  transition: 'all 0.15s ease',
+                  textDecoration: 'underline',
                 }}
               >
-                <span>{tech.label}</span>
-                {tech.count && !isAll ? (
-                  <span
-                    style={{
-                      fontSize: '10.5px',
-                      padding: '1px 6px',
-                      borderRadius: '10px',
-                      background: active ? 'rgba(255,255,255,0.22)' : 'var(--grid-strong)',
-                      color: active ? '#ffffff' : 'var(--ink-muted)',
-                      fontWeight: 700,
-                      lineHeight: 1.2,
-                    }}
-                  >
-                    {tech.count}
-                  </span>
-                ) : null}
+                Clear filters ({selectedTechs.length} active)
               </button>
-            );
-          })}
-          {selectedTechs.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedTechs([])}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--accent)',
-                fontSize: '12px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                padding: '4px 8px',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-                textDecoration: 'underline',
-              }}
-            >
-              Clear filters ({selectedTechs.length} active)
-            </button>
+            )}
+          </div>
+
+          {canScrollRight && (
+            <div className="skills-scroll-edge-right">
+              <button
+                type="button"
+                className="skills-scroll-btn"
+                onClick={handleScrollRight}
+                title="Scroll skills right"
+                aria-label="Scroll skills right"
+              >
+                <ChevronRightIcon size={16} />
+              </button>
+            </div>
           )}
         </div>
 

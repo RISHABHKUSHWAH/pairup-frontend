@@ -13,5 +13,7 @@ export { default as PairUpLoader } from './PairUpLoader';
 export { default as Loader } from './PairUpLoader';
 export { default as PairUpLogo } from './PairUpLogo';
 export { default as BookSessionModal } from './BookSessionModal';
+export { default as ScrollToTopButton } from './ScrollToTopButton';
+export { default as Pagination } from './Pagination';
 export * from './Icons';
 

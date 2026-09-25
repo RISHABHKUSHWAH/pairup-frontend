@@ -43,6 +43,10 @@ import {
   MentorSessionsPage,
   MentorCalendarPage,
   MentorEarningsPage,
+  MentorTransactionsPage,
+  MentorBillingsPage,
+  MentorReportsPage,
+  MentorTaxesPage,
   MentorAvailabilityPage,
   MentorReviewsPage,
   MentorProfileEditPage,
@@ -315,6 +319,38 @@ export default function App() {
         element={
           <ProtectedRoute allowedRoles={['mentor', 'admin', 'superadmin']}>
             <MentorEarningsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/mentor/transactions"
+        element={
+          <ProtectedRoute allowedRoles={['mentor', 'admin', 'superadmin']}>
+            <MentorTransactionsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/mentor/billings"
+        element={
+          <ProtectedRoute allowedRoles={['mentor', 'admin', 'superadmin']}>
+            <MentorBillingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/mentor/reports"
+        element={
+          <ProtectedRoute allowedRoles={['mentor', 'admin', 'superadmin']}>
+            <MentorReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/mentor/taxes"
+        element={
+          <ProtectedRoute allowedRoles={['mentor', 'admin', 'superadmin']}>
+            <MentorTaxesPage />
           </ProtectedRoute>
         }
       />

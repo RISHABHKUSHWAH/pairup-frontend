@@ -1003,8 +1003,8 @@ export default function AdminPaymentsPage() {
                     fontSize: '11px',
                     padding: '1px 6px',
                     borderRadius: '10px',
-                    background: isActive ? 'rgba(255, 255, 255, 0.2)' : 'var(--grid)',
-                    color: isActive ? '#fff' : 'var(--ink-muted)',
+                    background: isActive ? 'rgba(var(--bg-rgb), 0.2)' : 'var(--grid)',
+                    color: isActive ? 'var(--bg)' : 'var(--ink-muted)',
                   }}
                 >
                   {count}
