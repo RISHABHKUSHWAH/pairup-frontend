@@ -128,7 +128,13 @@ export default function Navbar() {
             </span>
 
             <Link to={getDashboardPath()} className="nav-user" title="Go to Dashboard">
-              <span className="nav-avatar">{initials(user.name)}</span>
+              <span className="nav-avatar">
+                {user.avatar || user.photo_url ? (
+                  <img src={user.avatar || user.photo_url} alt={user.name} />
+                ) : (
+                  initials(user.name)
+                )}
+              </span>
               <span className="nav-user-name">{user.name}</span>
             </Link>
 

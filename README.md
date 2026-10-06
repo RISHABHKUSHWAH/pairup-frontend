@@ -56,10 +56,11 @@ npm install
 ```
 
 ### 3. Environment Configuration
-Verify `frontend/.env` is configured to point to the Django API:
-```env
-VITE_API_BASE_URL=http://127.0.0.1:8000
-```
+The API client uses `http://127.0.0.1:8000` in development and
+`https://pairup.pythonanywhere.com` in production by default. If you need a
+different API URL, set `VITE_API_BASE_URL` in a mode-specific Vite env file
+(for example, `.env.development.local`); avoid putting a localhost URL in
+`.env`, since Vite also loads that file for production builds.
 
 ### 4. Development Server
 Start the Vite development server:

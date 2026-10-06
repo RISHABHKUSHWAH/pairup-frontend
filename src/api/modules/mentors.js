@@ -23,6 +23,12 @@ export const mentorApi = {
   updateMyMentorProfile: (data) =>
     apiFetch('/api/mentors/me', { method: 'PUT', auth: true, body: data }),
 
+  uploadPhoto: (formData) =>
+    apiFetch('/api/mentors/me/photo', { method: 'POST', auth: true, body: formData }),
+
+  deletePhoto: () =>
+    apiFetch('/api/mentors/me/photo', { method: 'DELETE', auth: true }),
+
   applyMentor: (data) =>
     apiFetch('/api/mentors/apply', { method: 'POST', auth: true, body: data }),
 

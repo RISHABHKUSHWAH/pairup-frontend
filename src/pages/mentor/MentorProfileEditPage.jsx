@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
@@ -33,7 +33,7 @@ function splitCommaItems(arr) {
 }
 
 export default function MentorProfileEditPage() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { toast } = useToast();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -42,6 +42,8 @@ export default function MentorProfileEditPage() {
   const [newSkill, setNewSkill] = useState('');
   const [newLang, setNewLang] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const fileInputRef = useRef(null);
 
   // New Cert modal/inline state
   const [certForm, setCertForm] = useState({ title: '', issuer: '', year: new Date().getFullYear().toString() });
@@ -62,6 +64,7 @@ export default function MentorProfileEditPage() {
         setProfile({
           name: data.name || user?.name || local.name || '',
           email: user?.email || local.email || '',
+          photo_url: data.photo_url || local.photo_url || user?.avatar || user?.photo_url || '',
           headline: data.title || local.headline || '',
           company: data.company || local.company || '',
           bio: data.bio || local.bio || '',
@@ -304,6 +307,74 @@ export default function MentorProfileEditPage() {
     });
   };
 
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file (PNG, JPG, WebP).');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Photo must be less than 2MB.');
+      return;
+    }
+
+    setUploadingPhoto(true);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const previewUrl = reader.result;
+      setProfile((prev) => ({ ...prev, photo_url: previewUrl }));
+
+      try {
+        const formData = new FormData();
+        formData.append('photo', file);
+        const res = await api.uploadPhoto(formData);
+        const serverPhotoUrl = res?.photo_url || previewUrl;
+        setProfile((prev) => ({ ...prev, photo_url: serverPhotoUrl }));
+        mentorProfileSettings.saveProfile({ ...profile, photo_url: serverPhotoUrl }, user?.id);
+        if (updateUser && user) {
+          updateUser({ ...user, photo_url: serverPhotoUrl, avatar: serverPhotoUrl });
+        }
+        toast.success('Profile photo uploaded and saved!');
+      } catch (err) {
+        console.warn('Backend photo upload fallback:', err);
+        setProfile((prev) => ({ ...prev, photo_url: previewUrl }));
+        mentorProfileSettings.saveProfile({ ...profile, photo_url: previewUrl }, user?.id);
+        if (updateUser && user) {
+          updateUser({ ...user, photo_url: previewUrl, avatar: previewUrl });
+        }
+        toast.success('Profile photo updated! Click Save Changes to finalize.');
+      } finally {
+        setUploadingPhoto(false);
+      }
+    };
+    reader.onerror = () => {
+      toast.error('Failed to read image file.');
+      setUploadingPhoto(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemovePhoto = async () => {
+    try {
+      await api.deletePhoto();
+    } catch (err) {
+      console.warn('API delete photo error:', err);
+    }
+
+    setProfile((prev) => ({ ...prev, photo_url: '' }));
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    mentorProfileSettings.saveProfile({ ...profile, photo_url: '' }, user?.id);
+
+    if (updateUser && user) {
+      updateUser({ ...user, photo_url: '', avatar: '' });
+    }
+    toast.success('Profile photo deleted from directory and removed.');
+  };
+
   const handleSave = async (e) => {
     if (e) e.preventDefault();
     setSaving(true);
@@ -327,6 +398,7 @@ export default function MentorProfileEditPage() {
       // 1. Save directly to Django database via API
       await api.updateMyMentorProfile({
         name: profile.name,
+        photo_url: profile.photo_url,
         title: profile.headline,
         company: profile.company,
         bio: profile.bio,
@@ -343,6 +415,16 @@ export default function MentorProfileEditPage() {
 
       // 2. Also save to localStorage fallback
       mentorProfileSettings.saveProfile(updatedProfile, user?.id);
+
+      // 3. Update global user in AuthContext so avatar chips sync immediately
+      if (updateUser && user) {
+        updateUser({
+          ...user,
+          name: profile.name,
+          photo_url: profile.photo_url,
+          avatar: profile.photo_url,
+        });
+      }
 
       toast.success('Profile saved to database successfully! Changes are live on learner side.');
     } catch (err) {
@@ -425,23 +507,56 @@ export default function MentorProfileEditPage() {
         </button>
       </div>
 
-      <div style={{ maxWidth: '800px' }}>
+      <div style={{ maxWidth: '800px', width: '100%', boxSizing: 'border-box' }}>
         {/* PILLAR 1: BASIC PROFILE */}
         {activeTab === 'basic' && (
           <div className="panel" style={{ margin: 0 }}>
             <div className="section-label" style={{ marginTop: 0 }}>Basic Profile Information</div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '18px', marginBottom: '20px' }}>
-              <div className="avatar-lg" style={{ fontSize: '26px', width: '64px', height: '64px', borderRadius: '50%', background: 'linear-gradient(135deg, var(--brand), #8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                {initials(profile.name)}
+            <div className="profile-pic-uploader">
+              <div className="profile-pic-preview">
+                {profile.photo_url ? (
+                  <img src={profile.photo_url} alt={profile.name} />
+                ) : (
+                  <span>{initials(profile.name)}</span>
+                )}
               </div>
-              <div>
+              <div className="profile-pic-actions">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/png, image/jpeg, image/jpg, image/webp"
+                  style={{ display: 'none' }}
+                  onChange={handlePhotoUpload}
+                />
                 <div style={{ fontWeight: 600, fontSize: '15px' }}>{profile.name}</div>
-                <div className="sub" style={{ margin: '2px 0 6px', fontSize: '12px' }}>
-                  {profile.email} • Verified Mentor
+                <div className="sub" style={{ margin: '1px 0 6px', fontSize: '12px' }}>
+                  {profile.email} • Official Mentor Account
                 </div>
-                <span className="badge badge-success" style={{ fontSize: '11px' }}>
-                  Official Mentor Account
+                <div className="profile-pic-btn-group">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '12.5px', padding: '6px 14px' }}
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingPhoto}
+                  >
+                    📷 {uploadingPhoto ? 'Uploading...' : (profile.photo_url ? 'Change photo' : 'Upload photo')}
+                  </button>
+                  {profile.photo_url && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12.5px', padding: '6px 12px', color: '#DC2626' }}
+                      onClick={handleRemovePhoto}
+                      disabled={uploadingPhoto}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <span className="profile-pic-hint">
+                  JPG, PNG or WebP. Max 2MB. Visible to all learners across PairUp.
                 </span>
               </div>
             </div>
@@ -456,7 +571,7 @@ export default function MentorProfileEditPage() {
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="form-row-2col">
               <div className="field">
                 <label>Professional Headline</label>
                 <input
@@ -488,7 +603,7 @@ export default function MentorProfileEditPage() {
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="form-row-2col">
               <div className="field">
                 <label>Location / City</label>
                 <input
@@ -626,7 +741,7 @@ export default function MentorProfileEditPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="form-row-2col">
               <div className="field">
                 <label>Primary Focus Area</label>
                 <input
@@ -649,7 +764,7 @@ export default function MentorProfileEditPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="form-row-2col">
               <div className="field">
                 <label>GitHub Profile Link</label>
                 <input
@@ -687,7 +802,7 @@ export default function MentorProfileEditPage() {
 
               {showCertForm && (
                 <div style={{ padding: '14px', background: 'var(--card-bg, #1a1a24)', border: '1px solid var(--border)', borderRadius: '8px', marginBottom: '14px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 80px', gap: '10px', marginBottom: '10px' }}>
+                  <div className="form-row-3col" style={{ marginBottom: '10px' }}>
                     <input
                       type="text"
                       placeholder="Certificate Name (e.g. AWS Solutions Architect)"
@@ -762,7 +877,7 @@ export default function MentorProfileEditPage() {
 
               {showWorkForm && (
                 <div style={{ padding: '14px', background: 'var(--card-bg, #1a1a24)', border: '1px solid var(--border)', borderRadius: '8px', marginBottom: '14px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
+                  <div className="form-row-2col" style={{ marginBottom: '10px' }}>
                     <input
                       type="text"
                       placeholder="Role (e.g. Senior Engineer)"
@@ -836,7 +951,7 @@ export default function MentorProfileEditPage() {
           <div className="panel" style={{ margin: 0 }}>
             <div className="section-label" style={{ marginTop: 0 }}>Sessions & Pricing Strategy</div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+            <div className="form-row-2col" style={{ marginBottom: '20px' }}>
               <div className="field">
                 <label>Base Hourly Rate (₹ / hour)</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -915,7 +1030,7 @@ export default function MentorProfileEditPage() {
             {/* Duration Options */}
             <div className="field" style={{ marginTop: '20px' }}>
               <label>Allowed Session Durations</label>
-              <div style={{ display: 'flex', gap: '12px', marginTop: '6px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '6px' }}>
                 {[30, 60, 90, 120].map((dur) => (
                   <label
                     key={dur}
@@ -948,7 +1063,7 @@ export default function MentorProfileEditPage() {
           <div className="panel" style={{ margin: 0 }}>
             <div className="section-label" style={{ marginTop: 0 }}>Trust, Credentials & Verification</div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+            <div className="form-row-2col" style={{ marginBottom: '20px' }}>
               <div
                 style={{
                   padding: '16px',
@@ -1000,7 +1115,7 @@ export default function MentorProfileEditPage() {
               </div>
             </div>
 
-            <div className="card-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: '20px' }}>
+            <div className="card-grid" style={{ marginBottom: '20px' }}>
               <div className="metric-card">
                 <div className="metric-label">Average Rating</div>
                 <div className="metric-value" style={{ color: '#f59e0b', fontSize: '22px' }}>
@@ -1043,7 +1158,7 @@ export default function MentorProfileEditPage() {
           </div>
         )}
 
-        <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+        <div className="profile-actions-row" style={{ marginTop: '20px' }}>
           <button type="button" className="btn btn-primary" onClick={handleSave}>
             Save Profile Changes
           </button>
@@ -1061,8 +1176,12 @@ export default function MentorProfileEditPage() {
       >
         <div style={{ padding: '6px' }}>
           <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '14px' }}>
-            <div className="avatar-lg" style={{ width: '56px', height: '56px', fontSize: '22px', background: 'linear-gradient(135deg, var(--brand), #8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontWeight: 'bold' }}>
-              {initials(profile.name)}
+            <div className="avatar-lg" style={{ width: '56px', height: '56px', fontSize: '22px', background: 'linear-gradient(135deg, var(--brand), #8b5cf6)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', fontWeight: 'bold', overflow: 'hidden' }}>
+              {profile.photo_url ? (
+                <img src={profile.photo_url} alt={profile.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                initials(profile.name)
+              )}
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

@@ -15,8 +15,23 @@ export function AuthProvider({ children }) {
       if (storedToken) {
         try {
           const me = await api.me();
-          setUser(me);
-          TokenStorage.setSession(storedToken, me);
+          const prevUser = TokenStorage.getUser();
+          let photo = me.photo_url || me.avatar || '';
+          if (!photo && me.role === 'mentor') {
+            const localMentor = mentorProfileSettings.getProfile(me);
+            photo = localMentor?.photo_url || '';
+          } else if (!photo && me.role === 'learner') {
+            const localLearner = learnerProfile.getProfile(me);
+            photo = localLearner?.avatar || '';
+          }
+          const merged = {
+            ...prevUser,
+            ...me,
+            photo_url: photo,
+            avatar: photo,
+          };
+          setUser(merged);
+          TokenStorage.setSession(storedToken, merged);
 
           if (me.role === 'mentor') {
             try {
@@ -48,9 +63,22 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     const res = await api.login(email, password);
-    TokenStorage.setSession(res.token, res.user);
+    let photo = res.user?.photo_url || res.user?.avatar || '';
+    if (!photo && res.user?.role === 'mentor') {
+      const localMentor = mentorProfileSettings.getProfile(res.user);
+      photo = localMentor?.photo_url || '';
+    } else if (!photo && res.user?.role === 'learner') {
+      const localLearner = learnerProfile.getProfile(res.user);
+      photo = localLearner?.avatar || '';
+    }
+    const fullUser = {
+      ...res.user,
+      photo_url: photo,
+      avatar: photo,
+    };
+    TokenStorage.setSession(res.token, fullUser);
     setToken(res.token);
-    setUser(res.user);
+    setUser(fullUser);
 
     if (res.user.role === 'mentor') {
       try {

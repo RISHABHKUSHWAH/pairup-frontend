@@ -278,9 +278,17 @@ export default function BookSessionModal({
                 background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
                 color: '#fff',
                 fontWeight: 700,
+                overflow: 'hidden',
               }}
             >
-              {initials(mentorName)}
+              {liveMentor?.photo_url || mentor?.photo_url || liveMentor?.avatar || mentor?.avatar ? (
+                <img
+                  src={liveMentor?.photo_url || mentor?.photo_url || liveMentor?.avatar || mentor?.avatar}
+                  alt={mentorName}
+                />
+              ) : (
+                initials(mentorName)
+              )}
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: '15px' }}>{mentorName}</div>

@@ -47,6 +47,8 @@ export default function Sidebar({
   unreadCount = 0,
   collapsed: controlledCollapsed,
   onToggle,
+  mobileOpen = false,
+  onCloseMobile,
 }) {
   const { user, logout, switchRole } = useAuth();
   const { toast } = useToast();
@@ -261,24 +263,35 @@ export default function Sidebar({
       : '/learner/notifications';
 
   return (
-    <aside className={`admin-sidebar admin-sidebar--${portalType} portal-${portalType} ${isCollapsed ? 'collapsed' : ''}`}>
+    <aside className={`admin-sidebar admin-sidebar--${portalType} portal-${portalType} ${isCollapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="admin-sidebar-top">
         <div className="admin-sidebar-header-row">
-          <Link className="logo" to={homeLink} style={{ color: '#fff' }} title="PairUp Home">
+          <Link className="logo" to={homeLink} style={{ color: '#fff' }} title="PairUp Home" onClick={onCloseMobile}>
             <PairUpLogo size={22} className="logo-mark logo-mark-full" variant="mark" />
             <PairUpLogo size={22} className="logo-mark logo-mark-icon" variant="icon" />
             <span className="logo-text">PairUp</span>
           </Link>
-          <button
-            type="button"
-            className="admin-sidebar-toggle-btn"
-            data-tour="sidebar-toggle"
-            onClick={handleToggle}
-            title={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
-            aria-label={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
-          >
-            {isCollapsed ? <PanelLeftOpenIcon size={16} /> : <PanelLeftCloseIcon size={16} />}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button
+              type="button"
+              className="admin-sidebar-toggle-btn hide-mobile"
+              data-tour="sidebar-toggle"
+              onClick={handleToggle}
+              title={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
+              aria-label={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
+            >
+              {isCollapsed ? <PanelLeftOpenIcon size={16} /> : <PanelLeftCloseIcon size={16} />}
+            </button>
+            <button
+              type="button"
+              className="admin-sidebar-mobile-close-btn hide-desktop"
+              onClick={onCloseMobile}
+              title="Close menu"
+              aria-label="Close menu"
+            >
+              <PanelLeftCloseIcon size={16} />
+            </button>
+          </div>
         </div>
         <div className="admin-role-label">{roleLabel}</div>
       </div>
@@ -342,7 +355,10 @@ export default function Sidebar({
                           key={sub.label}
                           to={sub.to}
                           className={`sidebar-flyout-item ${isCurrent ? 'active' : ''}`}
-                          onClick={() => setFinancesFlyoutOpen(false)}
+                          onClick={() => {
+                            setFinancesFlyoutOpen(false);
+                            if (onCloseMobile) onCloseMobile();
+                          }}
                         >
                           <span>{sub.label}</span>
                         </Link>
@@ -362,6 +378,7 @@ export default function Sidebar({
               title={item.label}
               data-tour={item.dataTour}
               className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
+              onClick={onCloseMobile}
             >
               <span className="admin-nav-icon">{item.icon}</span>
               <span className="admin-nav-label">{item.label}</span>
@@ -685,7 +702,11 @@ export default function Sidebar({
           aria-expanded={menuOpen}
         >
           <div className="avatar-sm">
-            {initials(user?.name)}
+            {user?.avatar || user?.photo_url ? (
+              <img src={user.avatar || user.photo_url} alt={user?.name || 'User'} />
+            ) : (
+              initials(user?.name)
+            )}
             {unreadCount > 0 && <span className="admin-user-dot" title={`${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`} />}
           </div>
           <div className="admin-user-info">

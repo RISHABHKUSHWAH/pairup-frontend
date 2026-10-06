@@ -34,6 +34,7 @@ export default function LearnerProfileModal({ isOpen, onClose, learner }) {
     return {
       ...loaded,
       name: learner.name || learner.learner_name || loaded?.name || 'Learner',
+      avatar: learner.avatar || learner.photo_url || loaded?.avatar || loaded?.photo_url || '',
       id: defaultUser.id,
       skillsLearning: skills,
     };
@@ -77,10 +78,15 @@ export default function LearnerProfileModal({ isOpen, onClose, learner }) {
               alignItems: 'center',
               justifyContent: 'center',
               borderRadius: '14px',
+              overflow: 'hidden',
               flexShrink: 0,
             }}
           >
-            {initials(profile.name)}
+            {profile.avatar ? (
+              <img src={profile.avatar} alt={profile.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              initials(profile.name)
+            )}
           </div>
 
           <div style={{ flex: 1, minWidth: 0 }}>

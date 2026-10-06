@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useTheme } from '../context/ThemeContext';
-import { BellIcon, SunIcon, MoonIcon, ArrowLeftIcon } from './Icons';
+import { BellIcon, SunIcon, MoonIcon, ArrowLeftIcon, MenuIcon } from './Icons';
 import { notificationsApi, learnerNotifications, mentorNotifications } from '../api/client';
 export default function PortalLayout({
   title,
@@ -23,8 +23,13 @@ export default function PortalLayout({
       return false;
     }
   });
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname]);
 
   const toggleSidebar = () => {
     setSidebarCollapsed((prev) => {
@@ -132,15 +137,34 @@ export default function PortalLayout({
 
   return (
     <div className={`admin-shell ${fullHeight ? 'admin-shell--full-height' : ''}`}>
+      {/* Mobile Drawer Backdrop */}
+      {mobileSidebarOpen && (
+        <div
+          className="admin-sidebar-backdrop"
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-label="Close navigation menu"
+        />
+      )}
       <Sidebar
         portalType={portalType}
         unreadCount={unreadCount}
         collapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
       />
       <main className={`admin-content ${fullHeight ? 'admin-content--full-height' : ''}`}>
         <div className="admin-topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <button
+              type="button"
+              className="admin-mobile-menu-btn hide-desktop"
+              onClick={() => setMobileSidebarOpen((prev) => !prev)}
+              title="Toggle navigation menu"
+              aria-label="Toggle navigation menu"
+            >
+              <MenuIcon size={18} />
+            </button>
             {shouldShowBack && (
               <button
                 type="button"

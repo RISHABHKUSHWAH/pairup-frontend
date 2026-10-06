@@ -581,7 +581,13 @@ export default function LearnerExplorePage() {
                   </div>
 
                   <div className="card-top">
-                    <div className="avatar">{initials(m.name)}</div>
+                    <div className="avatar">
+                      {m.photo_url || m.avatar ? (
+                        <img src={m.photo_url || m.avatar} alt={m.name} />
+                      ) : (
+                        initials(m.name)
+                      )}
+                    </div>
                     <div>
                       <div className="card-name">{m.name}</div>
                       <div className="card-title">{m.title || 'Technical Specialist'}</div>
@@ -665,7 +671,13 @@ export default function LearnerExplorePage() {
               <div key={id} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div className="card-top" style={{ flex: 1 }}>
-                    <div className="avatar">{initials(m.name)}</div>
+                    <div className="avatar">
+                      {m.photo_url || m.avatar ? (
+                        <img src={m.photo_url || m.avatar} alt={m.name} />
+                      ) : (
+                        initials(m.name)
+                      )}
+                    </div>
                     <div>
                       <Link
                         to={`/mentor/${id}`}
@@ -763,7 +775,13 @@ export default function LearnerExplorePage() {
         {previewMentor && (
           <div>
             <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '16px' }}>
-              <div className="avatar-lg">{initials(previewMentor.name)}</div>
+              <div className="avatar-lg">
+                {previewMentor.photo_url || previewMentor.avatar ? (
+                  <img src={previewMentor.photo_url || previewMentor.avatar} alt={previewMentor.name} />
+                ) : (
+                  initials(previewMentor.name)
+                )}
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                   <h4 style={{ margin: 0, fontSize: '18px' }}>{previewMentor.name}</h4>

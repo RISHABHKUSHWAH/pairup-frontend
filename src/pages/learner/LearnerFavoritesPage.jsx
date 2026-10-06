@@ -72,7 +72,13 @@ export default function LearnerFavoritesPage() {
               <div key={id} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div className="card-top" style={{ flex: 1 }}>
-                    <div className="avatar">{initials(m.name)}</div>
+                    <div className="avatar">
+                      {m.photo_url || m.avatar ? (
+                        <img src={m.photo_url || m.avatar} alt={m.name} />
+                      ) : (
+                        initials(m.name)
+                      )}
+                    </div>
                     <div>
                       <Link
                         to={`/mentor/${id}`}

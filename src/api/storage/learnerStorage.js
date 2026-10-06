@@ -36,6 +36,7 @@ export const learnerProfile = {
       if (saved) {
         if (defaultUser?.name && (!saved.name || saved.name === 'Jane Doe')) saved.name = defaultUser.name;
         if (defaultUser?.email && (!saved.email || saved.email === 'learner@example.com')) saved.email = defaultUser.email;
+        if (saved.avatar === undefined && defaultUser?.avatar) saved.avatar = defaultUser.avatar;
         return saved;
       }
     } catch {}
@@ -50,6 +51,7 @@ export const learnerProfile = {
     if (isSarah || !defaultUser?.name) {
       return {
         name: defaultUser?.name || 'Sarah Connor',
+        avatar: defaultUser?.avatar || '',
         headline: 'Full-Stack Developer learning Python & Cloud Architecture',
         email: defaultUser?.email || 'sarah@example.com',
         phone: '+91 98765 43210',
@@ -73,6 +75,7 @@ export const learnerProfile = {
     // Fresh profile for newly registered learners
     return {
       name: defaultUser?.name || '',
+      avatar: defaultUser?.avatar || '',
       headline: '',
       email: defaultUser?.email || '',
       phone: '',

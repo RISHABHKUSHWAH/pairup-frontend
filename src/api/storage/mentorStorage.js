@@ -181,6 +181,7 @@ export const mentorProfileSettings = {
       return {
         name: user?.name || 'Alex Rivera',
         email: user?.email || 'alex@example.com',
+        photo_url: user?.photo_url || user?.avatar || '',
         headline: 'Senior Full-Stack & Cloud Architect | Ex-Staff Engineer',
         bio: 'Passionate about distributed systems, Python microservices, and React performance. Helped 50+ engineers level up and debug complex production bottlenecks.',
         location: 'Bengaluru, India',
@@ -220,6 +221,7 @@ export const mentorProfileSettings = {
     return {
       name: user?.name || '',
       email: user?.email || '',
+      photo_url: user?.photo_url || user?.avatar || '',
       headline: '',
       bio: '',
       location: '',
@@ -256,6 +258,7 @@ export const mentorProfileSettings = {
         const parsed = JSON.parse(stored);
         if (user?.name && (!parsed.name || parsed.name === 'Alex Rivera')) parsed.name = user.name;
         if (user?.email && (!parsed.email || parsed.email === 'alex.mentor@pairup.dev')) parsed.email = user.email;
+        if (parsed.photo_url === undefined && (user?.photo_url || user?.avatar)) parsed.photo_url = user.photo_url || user.avatar;
         return parsed;
       }
     } catch {}
