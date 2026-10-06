@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Modal from './Modal';
 import { useToast } from '../context';
+import { useAuth } from '../context/AuthContext';
 import { adminSupport } from '../api/storage/adminStorage';
 import {
   HelpCircleIcon,
@@ -19,6 +20,7 @@ import {
 } from './Icons';
 
 export function HelpCenterModal({ isOpen, onClose, onOpenSupport }) {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [openFaq, setOpenFaq] = useState(null);
@@ -107,22 +109,26 @@ export function HelpCenterModal({ isOpen, onClose, onOpenSupport }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            <Link
-              to="/help?category=learner"
-              onClick={onClose}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '12px', padding: '5px 12px', textDecoration: 'none' }}
-            >
-              🎓 Learner Guide
-            </Link>
-            <Link
-              to="/help?category=mentor"
-              onClick={onClose}
-              className="btn btn-primary btn-sm"
-              style={{ fontSize: '12px', padding: '5px 12px', textDecoration: 'none' }}
-            >
-              💻 Mentor Guide
-            </Link>
+            {(!user || user.role === 'learner' || user.role === 'admin' || user.role === 'superadmin') && (
+              <Link
+                to="/help?category=learner"
+                onClick={onClose}
+                className="btn btn-secondary btn-sm"
+                style={{ fontSize: '12px', padding: '5px 12px', textDecoration: 'none' }}
+              >
+                🎓 Learner Guide
+              </Link>
+            )}
+            {(!user || user.role === 'mentor' || user.role === 'admin' || user.role === 'superadmin') && (
+              <Link
+                to="/help?category=mentor"
+                onClick={onClose}
+                className="btn btn-primary btn-sm"
+                style={{ fontSize: '12px', padding: '5px 12px', textDecoration: 'none' }}
+              >
+                💻 Mentor Guide
+              </Link>
+            )}
           </div>
         </div>
 

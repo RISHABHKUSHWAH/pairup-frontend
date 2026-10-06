@@ -684,6 +684,52 @@ textarea.input{min-height:90px;resize:vertical;}
   padding:0 12px;
 }
 
+/* Password Visibility Toggle */
+.password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-input-wrap input {
+  width: 100%;
+  padding-right: 44px !important;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 6px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  line-height: 1;
+}
+
+.password-toggle-btn:hover {
+  color: var(--ink);
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+}
+
+[data-theme="dark"] .password-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.password-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* OAuth Modal */
 .oauth-modal-backdrop{
   position:fixed;
@@ -2107,13 +2153,16 @@ textarea.input{min-height:90px;resize:vertical;}
   transform: translateX(-1px) scale(0.98);
 }
 .admin-topbar-actions{margin-left:auto;display:flex;gap:8px;align-items:center;}
-.admin-body{
-  padding:24px 32px 60px;flex:1;
+.admin-body,
+.portal-page-grid {
   background-color:var(--bg);
   background-image:
     linear-gradient(var(--grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid) 1px, transparent 1px);
   background-size:32px 32px; background-position:-1px -1px;
+}
+.admin-body {
+  padding:24px 32px 60px;flex:1;
 }
 
 /* Full height portal layout (e.g. Chat/Messages) */
@@ -7085,6 +7134,46 @@ input:checked + .schedule-slider:before {
   gap: 5px;
   white-space: nowrap;
 }
+
+.notification-remove-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.notification-remove-btn:hover {
+  color: var(--warn, #ef4444) !important;
+  background-color: rgba(239, 68, 68, 0.12) !important;
+  transform: scale(1.08);
+}
+
+.user-profile-trigger {
+  cursor: pointer;
+  border-radius: 8px;
+  transition: transform 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+  user-select: none;
+}
+
+.user-profile-trigger:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.user-profile-trigger:hover b,
+.user-profile-trigger:hover .user-profile-name {
+  color: var(--accent, #2563eb) !important;
+  text-decoration: underline;
+}
+
+
 
 
 

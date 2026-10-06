@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import { learnerNotifications, notificationsApi } from '../../api/client';
 import { resolveNotificationLink } from '../../utils';
-import { DocumentIcon, ClockIcon, MessageIcon, CreditCardIcon, StarIcon, ScaleIcon, BellIcon, CheckIcon, SettingsIcon, MailIcon } from '../../components/Icons';
+import { DocumentIcon, ClockIcon, MessageIcon, CreditCardIcon, StarIcon, ScaleIcon, BellIcon, CheckIcon, SettingsIcon, MailIcon, XIcon } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
 
 export default function LearnerNotificationsPage() {
@@ -71,8 +71,9 @@ export default function LearnerNotificationsPage() {
     try {
       await notificationsApi.markRead(id);
     } catch (_) {}
-    const updated = learnerNotifications.markRead(id);
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    learnerNotifications.markRead(id);
+    setNotifications((prev) => prev.filter((n) => String(n.id) !== String(id)));
+    toast.success('Notification marked as read and removed');
   };
 
   const handleViewDetail = async (item) => {
@@ -94,7 +95,18 @@ export default function LearnerNotificationsPage() {
       await notificationsApi.markAllRead();
     } catch (_) {}
     learnerNotifications.markAllRead();
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    setNotifications([]);
+    toast.success('All notifications marked as read and removed');
+  };
+
+  const handleDeleteNotification = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      await notificationsApi.delete(id);
+    } catch (_) {}
+    learnerNotifications.deleteNotification(id);
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    toast.success('Notification removed');
   };
 
   const handleClearAll = async () => {
@@ -304,9 +316,20 @@ export default function LearnerNotificationsPage() {
                       {getTypeLabel(item.type)}
                     </span>
                   </div>
-                  <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
-                    {item.time}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                      {item.time}
+                    </span>
+                    <button
+                      type="button"
+                      className="notification-remove-btn"
+                      onClick={(e) => handleDeleteNotification(item.id, e)}
+                      title="Remove notification from list"
+                      aria-label="Remove notification from list"
+                    >
+                      <XIcon size={14} />
+                    </button>
+                  </div>
                 </div>
 
                 <p className="sub" style={{ margin: '4px 0 10px', fontSize: '13px', lineHeight: 1.5 }}>
@@ -322,16 +345,15 @@ export default function LearnerNotificationsPage() {
                   >
                     View Details →
                   </button>
-                  {!item.read && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '11.5px', padding: '5px 10px' }}
-                      onClick={() => handleMarkRead(item.id)}
-                    >
-                      Mark as read
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '11.5px', padding: '5px 10px' }}
+                    onClick={() => handleMarkRead(item.id)}
+                    title="Mark as read and remove from system"
+                  >
+                    Mark as read
+                  </button>
                 </div>
               </div>
             </div>

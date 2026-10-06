@@ -3,7 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useTheme } from '../context/ThemeContext';
 import { BellIcon, SunIcon, MoonIcon, ArrowLeftIcon } from './Icons';
-
+import { notificationsApi, learnerNotifications, mentorNotifications } from '../api/client';
 export default function PortalLayout({
   title,
   portalType = 'learner',

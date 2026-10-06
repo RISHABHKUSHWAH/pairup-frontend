@@ -62,9 +62,13 @@ export default function Navbar() {
     };
 
     fetchUnread();
+    window.addEventListener('pairup_notifications_updated', fetchUnread);
+    window.addEventListener('storage', fetchUnread);
     const interval = setInterval(fetchUnread, 10000);
     return () => {
       active = false;
+      window.removeEventListener('pairup_notifications_updated', fetchUnread);
+      window.removeEventListener('storage', fetchUnread);
       clearInterval(interval);
     };
   }, [user]);

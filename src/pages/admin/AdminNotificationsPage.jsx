@@ -65,11 +65,36 @@ export default function AdminNotificationsPage() {
     setActiveTab('history');
   };
 
-  const systemAlerts = [
-    { id: 'al_1', title: 'High Database Load (> 85%)', severity: 'warning', time: '1 hour ago', desc: 'Read replicas auto-scaled to handle spike during peak evening hours.' },
-    { id: 'al_2', title: 'Payment Gateway Webhook Delay', severity: 'info', time: '3 hours ago', desc: 'Webhook queue cleared after 12 retries; 0 payments lost.' },
-    { id: 'al_3', title: 'SSL Certificate Auto-Renewed', severity: 'success', time: 'Yesterday', desc: 'Let\'s Encrypt wildcard certificate renewed for pairup.dev.' },
-  ];
+  const [systemAlerts, setSystemAlerts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pairup_admin_system_alerts');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      { id: 'al_1', title: 'High Database Load (> 85%)', severity: 'warning', time: '1 hour ago', desc: 'Read replicas auto-scaled to handle spike during peak evening hours.' },
+      { id: 'al_2', title: 'Payment Gateway Webhook Delay', severity: 'info', time: '3 hours ago', desc: 'Webhook queue cleared after 12 retries; 0 payments lost.' },
+      { id: 'al_3', title: 'SSL Certificate Auto-Renewed', severity: 'success', time: 'Yesterday', desc: 'Let\'s Encrypt wildcard certificate renewed for pairup.dev.' },
+    ];
+  });
+
+  const handleMarkAlertRead = (alertId) => {
+    setSystemAlerts((prev) => {
+      const updated = prev.filter((a) => a.id !== alertId);
+      try {
+        localStorage.setItem('pairup_admin_system_alerts', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    toast.success('Alert marked as read and removed from system');
+  };
+
+  const handleMarkAllAlertsRead = () => {
+    setSystemAlerts([]);
+    try {
+      localStorage.setItem('pairup_admin_system_alerts', JSON.stringify([]));
+    } catch {}
+    toast.success('All system alerts marked as read and removed');
+  };
 
   return (
     <PortalLayout
@@ -307,29 +332,58 @@ export default function AdminNotificationsPage() {
         {/* TAB 4: SYSTEM ALERTS */}
         {activeTab === 'alerts' && (
           <div className="panel" style={{ margin: 0 }}>
-            <div className="section-label" style={{ marginTop: 0 }}>System Alerts &amp; Health Monitoring</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
-              {systemAlerts.map((al) => (
-                <div
-                  key={al.id}
-                  style={{
-                    padding: '12px 14px',
-                    background: 'var(--card-bg, #1a1a24)',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border)',
-                  }}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div className="section-label" style={{ margin: 0 }}>System Alerts &amp; Health Monitoring</div>
+              {systemAlerts.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: '12px', padding: '4px 10px' }}
+                  onClick={handleMarkAllAlertsRead}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontWeight: 600, fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {al.severity === 'warning' ? <AlertTriangleIcon size={14} /> : al.severity === 'success' ? <CheckCircleIcon size={14} /> : null}
-                      <span>{al.title}</span>
-                    </div>
-                    <span className="sub" style={{ fontSize: '11px' }}>{al.time}</span>
-                  </div>
-                  <p className="sub" style={{ fontSize: '12px', margin: '4px 0 0' }}>{al.desc}</p>
-                </div>
-              ))}
+                  Mark All Read
+                </button>
+              )}
             </div>
+            {systemAlerts.length === 0 ? (
+              <div className="empty" style={{ padding: '24px 0' }}>
+                <p>All system alerts have been marked as read and removed.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {systemAlerts.map((al) => (
+                  <div
+                    key={al.id}
+                    style={{
+                      padding: '12px 14px',
+                      background: 'var(--card-bg, #1a1a24)',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontWeight: 600, fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {al.severity === 'warning' ? <AlertTriangleIcon size={14} /> : al.severity === 'success' ? <CheckCircleIcon size={14} /> : null}
+                        <span>{al.title}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span className="sub" style={{ fontSize: '11px' }}>{al.time}</span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '11px', padding: '2px 8px' }}
+                          onClick={() => handleMarkAlertRead(al.id)}
+                          title="Mark alert as read and remove from system"
+                        >
+                          Mark read
+                        </button>
+                      </div>
+                    </div>
+                    <p className="sub" style={{ fontSize: '12px', margin: '4px 0 0' }}>{al.desc}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

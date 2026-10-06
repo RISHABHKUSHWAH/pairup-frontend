@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
+import Pagination from '../../components/Pagination';
 import { api, learnerBilling } from '../../api/client';
 import { CreditCardIcon, DocumentIcon, FileEditIcon, DownloadIcon, PlusIcon } from '../../components/Icons';
 import { useToast } from '../../context';
@@ -25,6 +26,12 @@ export default function LearnerPaymentsPage() {
   const [editBillingOpen, setEditBillingOpen] = useState(false);
   const [billingForm, setBillingForm] = useState(null);
   const [filterType, setFilterType] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterType]);
 
   useEffect(() => {
     loadData();
@@ -105,6 +112,13 @@ export default function LearnerPaymentsPage() {
     if (filterType === 'refunded') return p.status === 'refunded';
     return true;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filteredPayments.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedPayments = filteredPayments.slice(
+    (validCurrentPage - 1) * pageSize,
+    validCurrentPage * pageSize
+  );
 
   return (
     <PortalLayout title="Payments &amp; Billing" portalType="learner">
@@ -224,28 +238,40 @@ export default function LearnerPaymentsPage() {
           <button
             type="button"
             className={`admin-filter-tab ${filterType === 'all' ? 'active' : ''}`}
-            onClick={() => setFilterType('all')}
+            onClick={() => {
+              setFilterType('all');
+              setCurrentPage(1);
+            }}
           >
             All Transactions ({payments.length})
           </button>
           <button
             type="button"
             className={`admin-filter-tab ${filterType === 'held' ? 'active' : ''}`}
-            onClick={() => setFilterType('held')}
+            onClick={() => {
+              setFilterType('held');
+              setCurrentPage(1);
+            }}
           >
             In Escrow
           </button>
           <button
             type="button"
             className={`admin-filter-tab ${filterType === 'released' ? 'active' : ''}`}
-            onClick={() => setFilterType('released')}
+            onClick={() => {
+              setFilterType('released');
+              setCurrentPage(1);
+            }}
           >
             Released
           </button>
           <button
             type="button"
             className={`admin-filter-tab ${filterType === 'refunded' ? 'active' : ''}`}
-            onClick={() => setFilterType('refunded')}
+            onClick={() => {
+              setFilterType('refunded');
+              setCurrentPage(1);
+            }}
           >
             Refunds
           </button>
@@ -256,72 +282,94 @@ export default function LearnerPaymentsPage() {
         ) : filteredPayments.length === 0 ? (
           <p className="sub">No transactions recorded for this filter.</p>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Mentor &amp; Session</th>
-                  <th>Amount</th>
-                  <th>Status</th>
-                  <th>Date</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredPayments.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{p.mentor_name}</div>
-                      <div className="sub" style={{ margin: 0, fontSize: '11.5px' }}>
-                        {p.topic || 'Pairing Session'}
-                      </div>
-                    </td>
-                    <td className="mono" style={{ fontWeight: 700, fontSize: '13px' }}>
-                      ₹{Number(p.amount).toLocaleString('en-IN')}
-                    </td>
-                    <td>
-                      <span
-                        className={`status-badge ${
-                          p.status === 'held'
-                            ? 'badge-pending'
-                            : p.status === 'refunded'
-                            ? 'badge-cancelled'
-                            : 'badge-completed'
-                        } mono`}
-                      >
-                        {p.status}
-                      </span>
-                    </td>
-                    <td className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-                      {new Date(p.created_at).toLocaleDateString()}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '11.5px', padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                          onClick={() => setInvoiceModalTx(p)}
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Mentor &amp; Session</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedPayments.map((p) => (
+                    <tr key={p.id}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{p.mentor_name}</div>
+                        <div className="sub" style={{ margin: 0, fontSize: '11.5px' }}>
+                          {p.topic || 'Pairing Session'}
+                        </div>
+                      </td>
+                      <td className="mono" style={{ fontWeight: 700, fontSize: '13px' }}>
+                        ₹{Number(p.amount).toLocaleString('en-IN')}
+                      </td>
+                      <td>
+                        <span
+                          className={`status-badge ${
+                            p.status === 'held'
+                              ? 'badge-pending'
+                              : p.status === 'refunded'
+                              ? 'badge-cancelled'
+                              : 'badge-completed'
+                          } mono`}
                         >
-                          <DocumentIcon size={13} /> Invoice
-                        </button>
-                        {p.status === 'held' && (
+                          {p.status}
+                        </span>
+                      </td>
+                      <td className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+                        {new Date(p.created_at).toLocaleDateString()}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '6px' }}>
                           <button
                             type="button"
                             className="btn btn-ghost"
-                            style={{ fontSize: '11.5px', padding: '4px 8px', color: 'var(--warn)' }}
-                            onClick={() => setRefundModalTx(p)}
+                            style={{ fontSize: '11.5px', padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                            onClick={() => setInvoiceModalTx(p)}
                           >
-                            Refund
+                            <DocumentIcon size={13} /> Invoice
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                          {p.status === 'held' && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '11.5px', padding: '4px 8px', color: 'var(--warn)' }}
+                              onClick={() => setRefundModalTx(p)}
+                            >
+                              Refund
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <Pagination
+              currentPage={validCurrentPage}
+              totalPages={totalPages}
+              onPageChange={(page) => setCurrentPage(page)}
+              totalItems={filteredPayments.length}
+              itemsPerPage={pageSize}
+              itemLabel="transactions"
+              pageSizeOptions={[5, 10, 20]}
+              onPageSizeChange={(newSize) => {
+                setPageSize(newSize);
+                setCurrentPage(1);
+              }}
+              style={{
+                padding: '14px 4px 4px',
+                background: 'transparent',
+                borderTop: '1px solid var(--grid-strong)',
+                marginTop: '12px',
+              }}
+            />
+          </>
         )}
       </div>
 

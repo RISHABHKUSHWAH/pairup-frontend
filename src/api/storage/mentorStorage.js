@@ -5,25 +5,40 @@
 export const mentorSavedProblems = {
   getSaved: () => {
     try {
-      return JSON.parse(localStorage.getItem('pairup_mentor_saved_problems') || '[]');
+      const data = JSON.parse(localStorage.getItem('pairup_mentor_saved_problems') || '[]');
+      if (Array.isArray(data)) {
+        return data.map((item) => (typeof item === 'object' && item !== null ? item.id : item));
+      }
+      return [];
     } catch {
       return [];
     }
   },
   isSaved: (problemId) => {
+    if (problemId === undefined || problemId === null) return false;
     const list = mentorSavedProblems.getSaved();
-    return list.some((p) => p.id === problemId);
+    return list.some((id) => String(id) === String(problemId));
   },
-  toggleSaved: (problem) => {
+  toggleSave: (problemOrId) => {
+    const id = typeof problemOrId === 'object' && problemOrId !== null ? problemOrId.id : problemOrId;
+    if (id === undefined || id === null) return mentorSavedProblems.getSaved();
+
     let list = mentorSavedProblems.getSaved();
-    const exists = list.some((p) => p.id === problem.id);
+    const exists = list.some((item) => String(item) === String(id));
     if (exists) {
-      list = list.filter((p) => p.id !== problem.id);
+      list = list.filter((item) => String(item) !== String(id));
     } else {
-      list.push(problem);
+      list = [...list, id];
     }
-    localStorage.setItem('pairup_mentor_saved_problems', JSON.stringify(list));
+    try {
+      localStorage.setItem('pairup_mentor_saved_problems', JSON.stringify(list));
+    } catch (e) {
+      console.error('Failed to update saved problems in localStorage:', e);
+    }
     return list;
+  },
+  toggleSaved: (problemOrId) => {
+    return mentorSavedProblems.toggleSave(problemOrId);
   },
 };
 
@@ -304,18 +319,25 @@ export const mentorNotifications = {
     return defaults;
   },
   markRead: (id) => {
-    const list = mentorNotifications.getNotifications().map((n) => (n.id === id ? { ...n, read: true } : n));
+    const list = mentorNotifications.getNotifications().filter((n) => String(n.id) !== String(id));
     localStorage.setItem('pairup_mentor_notifications', JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
     return list;
   },
   markAllRead: () => {
-    const list = mentorNotifications.getNotifications().map((n) => ({ ...n, read: true }));
-    localStorage.setItem('pairup_mentor_notifications', JSON.stringify(list));
-    return list;
+    localStorage.setItem('pairup_mentor_notifications', JSON.stringify([]));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
+    return [];
   },
   clearAll: () => {
     localStorage.setItem('pairup_mentor_notifications', JSON.stringify([]));
     return [];
+  },
+  deleteNotification: (id) => {
+    const list = mentorNotifications.getNotifications().filter((n) => String(n.id) !== String(id));
+    localStorage.setItem('pairup_mentor_notifications', JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
+    return list;
   },
   addNotification: (item) => {
     const list = mentorNotifications.getNotifications();

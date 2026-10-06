@@ -5,7 +5,7 @@ import Footer from '../../components/Footer';
 import Alert from '../../components/Alert';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { CheckIcon, XIcon } from '../../components/Icons';
+import { CheckIcon, XIcon, EyeIcon, EyeOffIcon } from '../../components/Icons';
 
 function GoogleLogo({ size = 18 }) {
   return (
@@ -46,6 +46,7 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -93,13 +94,22 @@ export default function LoginPage() {
   };
 
   const getRedirectTarget = (u) => {
+    const isPathAllowed = (path) => {
+      if (!path || typeof path !== 'string') return false;
+      if (path.startsWith('/login') || path.startsWith('/register')) return false;
+      if (path.startsWith('/learner') && u?.role !== 'learner') return false;
+      if (path.startsWith('/mentor') && u?.role !== 'mentor') return false;
+      if (path.startsWith('/admin') && u?.role !== 'admin' && u?.role !== 'superadmin') return false;
+      return true;
+    };
+
     // 1. Check location.state?.from
     if (location.state?.from) {
       const from = location.state.from;
-      if (typeof from === 'string' && from && !from.startsWith('/login')) {
+      if (typeof from === 'string' && isPathAllowed(from)) {
         return { path: from, state: location.state };
       }
-      if (from.pathname && !from.pathname.startsWith('/login')) {
+      if (from?.pathname && isPathAllowed(from.pathname)) {
         return {
           path: `${from.pathname}${from.search || ''}${from.hash || ''}`,
           state: location.state,
@@ -109,19 +119,19 @@ export default function LoginPage() {
 
     // 2. Check query params: ?redirect=... or ?next=...
     const redirectParam = searchParams.get('redirect') || searchParams.get('next');
-    if (redirectParam && !redirectParam.startsWith('/login')) {
+    if (redirectParam && isPathAllowed(redirectParam)) {
       return { path: redirectParam, state: location.state || pendingAction };
     }
 
     // 3. Check pending action returnUrl
-    if (pendingAction?.returnUrl) {
+    if (pendingAction?.returnUrl && isPathAllowed(pendingAction.returnUrl)) {
       return { path: pendingAction.returnUrl, state: pendingAction };
     }
     try {
       const stored = sessionStorage.getItem('pairup_pending_action');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed?.returnUrl) {
+        if (parsed?.returnUrl && isPathAllowed(parsed.returnUrl)) {
           return { path: parsed.returnUrl, state: parsed };
         }
       }
@@ -289,6 +299,7 @@ export default function LoginPage() {
                 onClick={() => {
                   setMode('login');
                   setError('');
+                  setShowPassword(false);
                 }}
               >
                 Log in
@@ -299,6 +310,7 @@ export default function LoginPage() {
                 onClick={() => {
                   setMode('register');
                   setError('');
+                  setShowPassword(false);
                 }}
               >
                 Sign up
@@ -319,6 +331,7 @@ export default function LoginPage() {
                       onClick={() => {
                         setMode('register');
                         setError('');
+                        setShowPassword(false);
                       }}
                     >
                       Create account →
@@ -383,14 +396,25 @@ export default function LoginPage() {
                 </div>
                 <div className="field">
                   <label>Password</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    autoComplete="current-password"
-                  />
+                  <div className="password-input-wrap">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle-btn"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
+                    </button>
+                  </div>
                 </div>
                 <button type="submit" className="btn btn-primary btn-block btn-auth-submit" disabled={loading}>
                   {loading ? 'Logging in...' : 'Log in'}
@@ -421,15 +445,26 @@ export default function LoginPage() {
                 </div>
                 <div className="field">
                   <label>Password (min 6 characters)</label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    minLength={6}
-                    required
-                    autoComplete="new-password"
-                  />
+                  <div className="password-input-wrap">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      minLength={6}
+                      required
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle-btn"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="role-selector-label">I want to join as</div>

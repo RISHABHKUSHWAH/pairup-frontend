@@ -317,7 +317,7 @@ export default function MyProblemsPage() {
                       )}
                     </div>
                     <div className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '4px' }}>
-                      Budget: <strong>{p.budget ? `₹${p.budget}` : 'Flexible'}</strong> • Posted on {new Date(p.created_at).toLocaleDateString()}
+                      Budget: <strong>{p.budget ? `₹${p.budget}` : 'Flexible'}</strong> • Posted on {p.created_at ? `${new Date(p.created_at).toLocaleDateString()} at ${new Date(p.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Recent'}
                     </div>
                   </div>
 

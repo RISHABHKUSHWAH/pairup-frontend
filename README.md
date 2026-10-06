@@ -58,7 +58,7 @@ npm install
 ### 3. Environment Configuration
 Verify `frontend/.env` is configured to point to the Django API:
 ```env
-VITE_API_BASE_URL=http://127.0.0.1:8080
+VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 ### 4. Development Server
@@ -66,7 +66,7 @@ Start the Vite development server:
 ```bash
 npm run dev
 ```
-The React frontend will be accessible at `http://localhost:5173`.
+The React frontend will be accessible at `http://localhost:3000` (configured in `vite.config.js` to proxy `/api` and `/uploads` directly to `http://127.0.0.1:8000`).
 
 ### 5. Production Build
 ```bash

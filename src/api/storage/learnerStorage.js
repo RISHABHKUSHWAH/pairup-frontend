@@ -41,7 +41,13 @@ export const learnerProfile = {
     } catch {}
 
     // Demo account profile for seeded learner
-    if (defaultUser?.email === 'sarah@example.com') {
+    const isSarah =
+      defaultUser?.email === 'sarah@example.com' ||
+      (defaultUser?.name && defaultUser.name.toLowerCase().includes('sarah')) ||
+      String(defaultUser?.id) === '1' ||
+      String(defaultUser?.id) === '2';
+
+    if (isSarah || !defaultUser?.name) {
       return {
         name: defaultUser?.name || 'Sarah Connor',
         headline: 'Full-Stack Developer learning Python & Cloud Architecture',
@@ -56,9 +62,9 @@ export const learnerProfile = {
         learningGoals: 'Master building scalable distributed backends with Python & Django. Prepare for senior developer technical interviews.',
         currentRole: 'Software Engineer',
         organization: 'TechFlow Inc.',
-        githubUrl: 'https://github.com',
-        linkedinUrl: 'https://linkedin.com',
-        portfolioUrl: 'https://github.com',
+        githubUrl: 'https://github.com/sarahconnor',
+        linkedinUrl: 'https://linkedin.com/in/sarahconnor',
+        portfolioUrl: 'https://github.com/sarahconnor',
         learningStyle: 'Hands-on Coding & Pair Programming',
         preferredLanguage: 'English',
       };
@@ -160,18 +166,25 @@ export const learnerNotifications = {
     return defaults;
   },
   markRead: (id) => {
-    const list = learnerNotifications.getNotifications().map((n) => (n.id === id ? { ...n, read: true } : n));
+    const list = learnerNotifications.getNotifications().filter((n) => String(n.id) !== String(id));
     localStorage.setItem('pairup_learner_notifications', JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
     return list;
   },
   markAllRead: () => {
-    const list = learnerNotifications.getNotifications().map((n) => ({ ...n, read: true }));
-    localStorage.setItem('pairup_learner_notifications', JSON.stringify(list));
-    return list;
+    localStorage.setItem('pairup_learner_notifications', JSON.stringify([]));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
+    return [];
   },
   clearAll: () => {
     localStorage.setItem('pairup_learner_notifications', JSON.stringify([]));
     return [];
+  },
+  deleteNotification: (id) => {
+    const list = learnerNotifications.getNotifications().filter((n) => String(n.id) !== String(id));
+    localStorage.setItem('pairup_learner_notifications', JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
+    return list;
   },
   addNotification: (item) => {
     const list = learnerNotifications.getNotifications();

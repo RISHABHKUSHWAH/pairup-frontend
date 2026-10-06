@@ -20,7 +20,6 @@ export default function LearnerReviewsPage() {
 
   // Review modal state
   const [reviewModalSession, setReviewModalSession] = useState(null);
-  const [editReviewItem, setEditReviewItem] = useState(null);
   const [overallRating, setOverallRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [criteriaRatings, setCriteriaRatings] = useState({
@@ -60,7 +59,6 @@ export default function LearnerReviewsPage() {
 
   const openNewReview = (session) => {
     setReviewModalSession(session);
-    setEditReviewItem(null);
     setOverallRating(5);
     setReviewComment('');
     setCriteriaRatings({
@@ -71,24 +69,6 @@ export default function LearnerReviewsPage() {
       valueForMoney: 5,
     });
     setWouldRecommend(true);
-  };
-
-  const openEditReview = (rev) => {
-    setEditReviewItem(rev);
-    setReviewModalSession({
-      id: rev.booking_id,
-      mentor_name: rev.mentor_name,
-      topic: rev.topic || 'Pairing Session',
-    });
-    setOverallRating(rev.rating || 5);
-    setReviewComment(rev.comment || '');
-    setCriteriaRatings({
-      techKnowledge: 5,
-      problemSolving: 5,
-      explanation: 5,
-      communication: 5,
-      valueForMoney: 5,
-    });
   };
 
   const handleSubmitReview = async (e) => {
@@ -104,7 +84,6 @@ export default function LearnerReviewsPage() {
 
       toast.success('Thank you! Review recorded.');
       setReviewModalSession(null);
-      setEditReviewItem(null);
       loadData();
     } catch (err) {
       toast.error('Error submitting review: ' + err.message);
@@ -184,14 +163,13 @@ export default function LearnerReviewsPage() {
                                 {r.rating}/5
                               </span>
                             </span>
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              style={{ fontSize: '11.5px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                              onClick={() => openEditReview(r)}
+                            <span
+                              className="badge badge-subtle mono"
+                              style={{ fontSize: '11.5px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--ink-muted)' }}
+                              title="Submitted reviews are permanent and cannot be modified"
                             >
-                              <FileEditIcon size={13} /> Edit Review
-                            </button>
+                              <CheckCircleIcon size={12} style={{ color: 'var(--add)' }} /> Submitted (Locked)
+                            </span>
                           </div>
                         </div>
 
@@ -286,12 +264,28 @@ export default function LearnerReviewsPage() {
       <Modal
         isOpen={!!reviewModalSession}
         onClose={() => setReviewModalSession(null)}
-        title={editReviewItem ? 'Edit Review' : `Review Session with ${reviewModalSession?.mentor_name || ''}`}
+        title={`Review Session with ${reviewModalSession?.mentor_name || ''}`}
       >
         {reviewModalSession && (
           <form onSubmit={handleSubmitReview}>
-            <div className="sub" style={{ fontSize: '12.5px', marginBottom: '14px' }}>
+            <div className="sub" style={{ fontSize: '12.5px', marginBottom: '12px' }}>
               Session: <strong>{reviewModalSession.topic}</strong>
+            </div>
+
+            <div style={{
+              background: 'var(--bg-subtle, rgba(0,0,0,0.03))',
+              border: '1px solid var(--grid-strong)',
+              borderRadius: '6px',
+              padding: '9px 12px',
+              marginBottom: '14px',
+              fontSize: '12px',
+              color: 'var(--ink-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <span>ℹ️</span>
+              <span><strong>Note:</strong> Once submitted, your review is permanent and cannot be edited.</span>
             </div>
 
             {/* Overall Star Rating */}
@@ -437,7 +431,7 @@ export default function LearnerReviewsPage() {
                 disabled={submitting}
                 style={{ flex: 1 }}
               >
-                {submitting ? 'Submitting...' : editReviewItem ? 'Update Review' : 'Submit Review'}
+                {submitting ? 'Submitting...' : 'Submit Review'}
               </button>
             </div>
           </form>

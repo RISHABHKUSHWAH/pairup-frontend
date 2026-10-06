@@ -584,25 +584,29 @@ export default function Sidebar({
                   </span>
                 </Link>
 
-                <Link
-                  to="/help?category=learner"
-                  className="admin-help-flyout-item"
-                  onClick={() => setHelpOpen(false)}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <UsersIcon size={15} /> Learner Guide
-                  </span>
-                </Link>
+                {(portalType === 'learner' || (!portalType && user?.role === 'learner')) && (
+                  <Link
+                    to="/help?category=learner"
+                    className="admin-help-flyout-item"
+                    onClick={() => setHelpOpen(false)}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <UsersIcon size={15} /> Learner Guide
+                    </span>
+                  </Link>
+                )}
 
-                <Link
-                  to="/help?category=mentor"
-                  className="admin-help-flyout-item"
-                  onClick={() => setHelpOpen(false)}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <MentorIcon size={15} /> Mentor Guide
-                  </span>
-                </Link>
+                {(portalType === 'mentor' || (!portalType && user?.role === 'mentor')) && (
+                  <Link
+                    to="/help?category=mentor"
+                    className="admin-help-flyout-item"
+                    onClick={() => setHelpOpen(false)}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <MentorIcon size={15} /> Mentor Guide
+                    </span>
+                  </Link>
+                )}
 
                 <div className="admin-user-menu-divider" style={{ margin: '3px 0' }} />
 

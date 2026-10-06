@@ -16,6 +16,7 @@ import {
   RefreshIcon,
   MessageIcon,
   ShieldIcon,
+  CheckCircleIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast, useAuth } from '../../context';
 
@@ -30,6 +31,7 @@ export default function LearnerSessionsPage() {
 
   // Modals state
   const [reviewModalBooking, setReviewModalBooking] = useState(null);
+  const [viewReviewBooking, setViewReviewBooking] = useState(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewCriteria, setReviewCriteria] = useState({
@@ -615,14 +617,33 @@ export default function LearnerSessionsPage() {
                 {/* When Completed */}
                 {b.status === 'completed' && (
                   <>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      onClick={() => setReviewModalBooking(b)}
-                    >
-                      <StarIcon size={13} /> Leave Review
-                    </button>
+                    {(b.has_review || b.review) ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 12px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          border: '1px solid var(--grid-strong)',
+                        }}
+                        onClick={() => setViewReviewBooking(b)}
+                        title="View submitted review (Permanent)"
+                      >
+                        <CheckCircleIcon size={13} style={{ color: 'var(--gold)' }} /> Reviewed ({b.review?.rating || 5}★)
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                        onClick={() => setReviewModalBooking(b)}
+                      >
+                        <StarIcon size={13} /> Leave Review
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn btn-ghost"
@@ -680,6 +701,22 @@ export default function LearnerSessionsPage() {
       >
         {reviewModalBooking && (
           <form onSubmit={handleSubmitReview}>
+            <div style={{
+              background: 'var(--bg-subtle, rgba(0,0,0,0.03))',
+              border: '1px solid var(--grid-strong)',
+              borderRadius: '6px',
+              padding: '9px 12px',
+              marginBottom: '14px',
+              fontSize: '12px',
+              color: 'var(--ink-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <span>ℹ️</span>
+              <span><strong>Note:</strong> Once submitted, your review is permanent and cannot be edited.</span>
+            </div>
+
             <div className="field">
               <label>Overall Star Rating</label>
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -786,6 +823,69 @@ export default function LearnerSessionsPage() {
               </button>
             </div>
           </form>
+        )}
+      </Modal>
+
+      {/* Read-Only Submitted Review Modal */}
+      <Modal
+        isOpen={!!viewReviewBooking}
+        onClose={() => setViewReviewBooking(null)}
+        title={`Your Review for ${viewReviewBooking?.mentor_name || 'Mentor'}`}
+      >
+        {viewReviewBooking && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <div style={{ fontSize: '12.5px', color: 'var(--ink-muted)' }}>Session Topic</div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>{viewReviewBooking.topic || 'Mentoring Session'}</div>
+              </div>
+              <span className="badge badge-subtle mono" style={{ fontSize: '11.5px', padding: '4px 8px', color: 'var(--ink-muted)' }}>
+                🔒 Submitted &amp; Permanent
+              </span>
+            </div>
+
+            <div style={{ background: 'var(--bg)', border: '1px solid var(--grid)', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <span className="stars" style={{ fontSize: '18px' }}>
+                  {stars(viewReviewBooking.review?.rating || 5)}
+                </span>
+                <span className="mono" style={{ fontWeight: 700, fontSize: '15px', color: 'var(--ink)' }}>
+                  {viewReviewBooking.review?.rating || 5} / 5
+                </span>
+              </div>
+              <p style={{ margin: '0 0 10px', fontSize: '13.5px', lineHeight: 1.5, color: 'var(--ink)' }}>
+                "{viewReviewBooking.review?.comment || 'No written comment left.'}"
+              </p>
+              {viewReviewBooking.review?.created_at && (
+                <div className="mono" style={{ fontSize: '11px', color: 'var(--ink-faint)' }}>
+                  Submitted on {new Date(viewReviewBooking.review.created_at).toLocaleDateString()}
+                </div>
+              )}
+            </div>
+
+            <div style={{
+              background: 'var(--bg-subtle, rgba(0,0,0,0.03))',
+              border: '1px solid var(--grid-strong)',
+              borderRadius: '6px',
+              padding: '10px 12px',
+              marginBottom: '16px',
+              fontSize: '12px',
+              color: 'var(--ink-muted)',
+              lineHeight: 1.4,
+            }}>
+              ℹ️ <strong>Submitted reviews are permanent and non-editable.</strong> This guarantees authentic, verified feedback for our mentor community.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setViewReviewBooking(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
         )}
       </Modal>
 

@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Modal from '../../components/Modal';
+import LearnerProfileModal from '../../components/LearnerProfileModal';
 import { api, initials, formatCurrency, formatDateTime } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -29,6 +30,7 @@ export default function ContractDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [selectedLearner, setSelectedLearner] = useState(null);
 
   // Modals
   const [payModalOpen, setPayModalOpen] = useState(false);
@@ -229,7 +231,7 @@ export default function ContractDetailPage() {
   if (loading) {
 
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div className="portal-page-grid" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         <Navbar />
         <main className="container" style={{ flex: 1, padding: '60px 0', textAlign: 'center' }}>
           <div className="spinner-sm" style={{ margin: '0 auto 16px' }}></div>
@@ -242,7 +244,7 @@ export default function ContractDetailPage() {
 
   if (error && !contract) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div className="portal-page-grid" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         <Navbar />
         <main className="container" style={{ flex: 1, padding: '60px 0', textAlign: 'center' }}>
           <div className="error-box" style={{ maxWidth: '500px', margin: '0 auto 20px' }}>
@@ -279,7 +281,7 @@ export default function ContractDetailPage() {
   const otherPersonId = isLearner ? contract.mentor_id : contract.learner_id;
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+    <div className="portal-page-grid" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar />
 
       <main className="container" style={{ flex: 1, paddingTop: '28px', paddingBottom: '60px' }}>
@@ -399,13 +401,24 @@ export default function ContractDetailPage() {
             }}
           >
             {/* Learner */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div
+              className="user-profile-trigger"
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 8px', borderRadius: '8px' }}
+              onClick={() => setSelectedLearner({
+                id: contract.learner_id,
+                name: contract.learner_name,
+                email: contract.learner_email,
+              })}
+              title="Click to view learner profile"
+            >
               <div className="avatar" style={{ width: '38px', height: '38px', fontSize: '13px' }}>
                 {initials(contract.learner_name)}
               </div>
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--ink-muted)', textTransform: 'uppercase' }}>Learner</div>
-                <div style={{ fontWeight: 600, fontSize: '14px' }}>{contract.learner_name}</div>
+                <div className="user-profile-name" style={{ fontWeight: 600, fontSize: '14px' }}>
+                  {contract.learner_name}
+                </div>
               </div>
             </div>
 
@@ -1207,6 +1220,12 @@ export default function ContractDetailPage() {
           </div>
         )}
       </Modal>
+
+      <LearnerProfileModal
+        isOpen={Boolean(selectedLearner)}
+        onClose={() => setSelectedLearner(null)}
+        learner={selectedLearner}
+      />
 
       <Footer />
 

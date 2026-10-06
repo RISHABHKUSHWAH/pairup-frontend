@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
+import LearnerProfileModal from '../../components/LearnerProfileModal';
 import { api, formatCurrency, formatDateTime, initials } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { DocumentIcon, ClockIcon, ShieldIcon, CheckCircleIcon } from '../../components/Icons';
@@ -10,6 +11,7 @@ export default function ContractsListPage() {
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [selectedLearner, setSelectedLearner] = useState(null);
 
   const portalType = user?.role === 'mentor' ? 'mentor' : 'learner';
 
@@ -54,21 +56,24 @@ export default function ContractsListPage() {
   };
 
   return (
-    <PortalLayout portalType={portalType}>
+    <PortalLayout
+      title="Mentorship Contracts"
+      portalType={portalType}
+      actions={
+        <Link
+          to="/chat"
+          className="btn btn-primary"
+          style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <DocumentIcon size={16} />
+          Propose Contract via Chat
+        </Link>
+      }
+    >
       <div style={{ paddingBottom: '40px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', margin: 0 }}>Mentorship Contracts</h1>
-            <p className="sub" style={{ margin: '4px 0 0' }}>
-              Multi-session structured curricula protected by 100% platform escrow.
-            </p>
-          </div>
-
-          <Link to="/chat" className="btn btn-primary" style={{ fontSize: '13px' }}>
-            <DocumentIcon size={16} />
-            Propose Contract via Chat
-          </Link>
-        </div>
+        <p className="sub" style={{ marginBottom: '20px' }}>
+          Multi-session structured curricula protected by 100% platform escrow.
+        </p>
 
         {/* Filter Tabs */}
         <div className="filters" style={{ margin: '0 0 24px 0' }}>
@@ -143,13 +148,36 @@ export default function ContractsListPage() {
                       </Link>
                     </h3>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--ink-muted)', marginBottom: '14px' }}>
+                    <div
+                      className={portalType === 'mentor' ? 'user-profile-trigger' : ''}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '13px',
+                        color: 'var(--ink-muted)',
+                        marginBottom: '14px',
+                        padding: portalType === 'mentor' ? '2px 6px' : '0',
+                        borderRadius: '6px',
+                        cursor: portalType === 'mentor' ? 'pointer' : 'default',
+                      }}
+                      onClick={(e) => {
+                        if (portalType === 'mentor') {
+                          e.stopPropagation();
+                          setSelectedLearner({
+                            id: c.learner_id,
+                            name: otherName,
+                          });
+                        }
+                      }}
+                      title={portalType === 'mentor' ? 'Click to view learner profile' : undefined}
+                    >
                       <div className="avatar" style={{ width: '24px', height: '24px', fontSize: '10px' }}>
                         {initials(otherName)}
                       </div>
                       <span>
                         {portalType === 'mentor' ? 'Learner: ' : 'Mentor: '}
-                        <b>{otherName}</b>
+                        <b className="user-profile-name">{otherName}</b>
                       </span>
                     </div>
 
@@ -190,6 +218,12 @@ export default function ContractsListPage() {
           </div>
         )}
       </div>
+
+      <LearnerProfileModal
+        isOpen={Boolean(selectedLearner)}
+        onClose={() => setSelectedLearner(null)}
+        learner={selectedLearner}
+      />
     </PortalLayout>
   );
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
+import LearnerProfileModal from '../../components/LearnerProfileModal';
 import { api, initials, stars } from '../../api/client';
 import {
   SearchIcon,
@@ -25,6 +26,7 @@ export default function MentorSessionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('upcoming'); // 'upcoming' | 'live' | 'past'
+  const [selectedLearner, setSelectedLearner] = useState(null);
 
   // Modals state
   const [rescheduleBooking, setRescheduleBooking] = useState(null);
@@ -461,32 +463,50 @@ export default function MentorSessionsPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <div
+                      className="user-profile-trigger"
                       style={{
-                        width: '42px',
-                        height: '42px',
-                        borderRadius: '50%',
-                        background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
-                        color: '#fff',
-                        fontSize: '15px',
-                        fontWeight: 'bold',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
+                        gap: '12px',
+                        cursor: 'pointer',
+                        padding: '4px 6px',
+                        borderRadius: '8px',
                       }}
+                      onClick={() => setSelectedLearner({
+                        id: b.learner_id,
+                        name: b.learner_name,
+                      })}
+                      title="Click to view learner profile"
                     >
-                      {initials(b.learner_name)}
-                    </div>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontWeight: 700, fontSize: '15px' }}>{b.learner_name}</span>
-                        <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '11px' }}>
-                          {b.status}
-                        </span>
-                        {getPaymentStatusBadge(b)}
-                        {getSessionTypeBadge(b.topic)}
+                      <div
+                        style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
+                          color: '#fff',
+                          fontSize: '15px',
+                          fontWeight: 'bold',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {initials(b.learner_name)}
                       </div>
-                      <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 500 }}>
-                        {b.topic || 'Pair Programming & Debugging Session'}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span className="user-profile-name" style={{ fontWeight: 700, fontSize: '15px' }}>{b.learner_name}</span>
+                          <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '11px' }}>
+                            {b.status}
+                          </span>
+                          {getPaymentStatusBadge(b)}
+                          {getSessionTypeBadge(b.topic)}
+                        </div>
+                        <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 500 }}>
+                          {b.topic || 'Pair Programming & Debugging Session'}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1088,6 +1108,12 @@ export default function MentorSessionsPage() {
           </form>
         )}
       </Modal>
+
+      <LearnerProfileModal
+        isOpen={Boolean(selectedLearner)}
+        onClose={() => setSelectedLearner(null)}
+        learner={selectedLearner}
+      />
     </PortalLayout>
   );
 }

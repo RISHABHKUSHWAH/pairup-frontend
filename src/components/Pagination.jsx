@@ -43,7 +43,8 @@ export default function Pagination({
   className = '',
   style = {},
 }) {
-  if (totalPages <= 1 && (!totalItems || totalItems <= (itemsPerPage || 0))) {
+  const minPageSize = pageSizeOptions && pageSizeOptions.length > 0 ? Math.min(...pageSizeOptions) : (itemsPerPage || 0);
+  if (totalPages <= 1 && (!totalItems || totalItems <= minPageSize)) {
     return null;
   }
 

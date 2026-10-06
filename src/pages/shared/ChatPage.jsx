@@ -3,7 +3,7 @@ import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
-import { api, initials } from '../../api/client';
+import { api, initials, API_BASE } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import {
   CalendarIcon,
@@ -233,7 +233,8 @@ export default function ChatPage() {
 
   const handleViewAttachment = (fileName, fileUrl) => {
     const isImage = /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(fileName);
-    const resolvedUrl = fileUrl || `/api/messages/attachment/view?name=${encodeURIComponent(fileName)}`;
+    const base = (API_BASE || '').replace(/\/+$/, '');
+    const resolvedUrl = fileUrl || `${base}/api/messages/attachment/view?name=${encodeURIComponent(fileName)}`;
     setPreviewAttachment({
       name: fileName,
       url: resolvedUrl,
@@ -244,7 +245,8 @@ export default function ChatPage() {
   const handleDownloadAttachment = async (fileName, fileUrl) => {
     try {
       toast.info(`Preparing download for ${fileName}...`);
-      const targetUrl = `/api/messages/attachment/download?name=${encodeURIComponent(fileName)}` + (fileUrl ? `&url=${encodeURIComponent(fileUrl)}` : '');
+      const base = (API_BASE || '').replace(/\/+$/, '');
+      const targetUrl = `${base}/api/messages/attachment/download?name=${encodeURIComponent(fileName)}` + (fileUrl ? `&url=${encodeURIComponent(fileUrl)}` : '');
       const token = localStorage.getItem('token') || localStorage.getItem('pairup_token');
       const res = await fetch(targetUrl, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -262,7 +264,8 @@ export default function ChatPage() {
       toast.success(`Downloaded ${fileName}`);
     } catch (err) {
       // Fallback direct browser download
-      window.open(`/api/messages/attachment/download?name=${encodeURIComponent(fileName)}` + (fileUrl ? `&url=${encodeURIComponent(fileUrl)}` : ''), '_blank');
+      const base = (API_BASE || '').replace(/\/+$/, '');
+      window.open(`${base}/api/messages/attachment/download?name=${encodeURIComponent(fileName)}` + (fileUrl ? `&url=${encodeURIComponent(fileUrl)}` : ''), '_blank');
     }
   };
 

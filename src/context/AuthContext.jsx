@@ -10,12 +10,13 @@ export function AuthProvider({ children }) {
   const [isOnline, setIsOnline] = useState(false);
 
   useEffect(() => {
-    async function verifyAuth() {
-      if (token) {
+    async function verifyInitialSession() {
+      const storedToken = TokenStorage.getToken();
+      if (storedToken) {
         try {
           const me = await api.me();
           setUser(me);
-          TokenStorage.setSession(token, me);
+          TokenStorage.setSession(storedToken, me);
 
           if (me.role === 'mentor') {
             try {
@@ -25,15 +26,25 @@ export function AuthProvider({ children }) {
               // Ignore mentor profile lookup error
             }
           }
-        } catch {
-          // Token expired or invalid
-          logout();
+        } catch (err) {
+          const msg = (err?.message || '').toLowerCase();
+          // Only clear session if explicitly rejected as unauthorized/expired
+          if (
+            msg.includes('401') ||
+            msg.includes('unauthorized') ||
+            msg.includes('expired') ||
+            msg.includes('invalid') ||
+            msg.includes('not provided') ||
+            msg.includes('authentication')
+          ) {
+            logout();
+          }
         }
       }
       setLoading(false);
     }
-    verifyAuth();
-  }, [token]);
+    verifyInitialSession();
+  }, []);
 
   const login = async (email, password) => {
     const res = await api.login(email, password);

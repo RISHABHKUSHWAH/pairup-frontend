@@ -397,7 +397,7 @@ export default function MentorDashboard() {
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--ink)' }}>{prob.title}</div>
                         <div className="sub" style={{ fontSize: '11.5px', marginTop: '2px' }}>
-                          Posted by <strong style={{ color: 'var(--ink)' }}>{prob.learner_name || 'Learner'}</strong> • {prob.created_at ? new Date(prob.created_at).toLocaleDateString() : 'Recently'}
+                          Posted by <strong style={{ color: 'var(--ink)' }}>{prob.learner_name || 'Learner'}</strong> • {prob.created_at ? `${new Date(prob.created_at).toLocaleDateString()} at ${new Date(prob.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Recently'}
                         </div>
                       </div>
                       <span className="badge badge-primary" style={{ fontSize: '11px', flexShrink: 0 }}>

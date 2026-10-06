@@ -5,4 +5,5 @@ export const notificationsApi = {
   markRead: (id) => apiFetch(`/api/notifications/${id}/read`, { method: 'POST', auth: true }),
   markAllRead: () => apiFetch('/api/notifications/mark-all-read', { method: 'POST', auth: true }),
   clearAll: () => apiFetch('/api/notifications/clear', { method: 'DELETE', auth: true }),
+  delete: (id) => apiFetch(`/api/notifications/${id}`, { method: 'DELETE', auth: true }),
 };
