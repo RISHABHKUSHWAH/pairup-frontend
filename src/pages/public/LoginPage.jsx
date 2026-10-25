@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Alert from '../../components/Alert';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { api } from '../../api/client';
 import { CheckIcon, XIcon, EyeIcon, EyeOffIcon } from '../../components/Icons';
 
 function GoogleLogo({ size = 18 }) {
@@ -18,31 +19,35 @@ function GoogleLogo({ size = 18 }) {
   );
 }
 
-function GitHubLogo({ size = 18 }) {
-  return (
-    <svg className="social-icon" width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
-      <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-    </svg>
-  );
-}
-
-function LinkedInLogo({ size = 18 }) {
-  return (
-    <svg className="social-icon" width={size} height={size} viewBox="0 0 24 24" fill="#0A66C2">
-      <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9v7.6h2.8v-7.6h-2.8M7.86 6.4a1.63 1.63 0 1 0 0 3.26 1.63 1.63 0 0 0 0-3.26z" />
-    </svg>
-  );
-}
-
 export default function LoginPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, register, socialLogin, user } = useAuth();
+  const { login, register, logout, googleLogin, resendVerification, forgotPassword, resetPassword, user } = useAuth();
   const { toast } = useToast();
 
-  const [mode, setMode] = useState(searchParams.get('mode') === 'register' ? 'register' : 'login');
+  const initialMode = (() => {
+    if (location.pathname === '/forgot-password' || searchParams.get('mode') === 'forgot-password' || searchParams.get('mode') === 'forgot') {
+      return 'forgot-password';
+    }
+    if (location.pathname === '/reset-password' || searchParams.get('mode') === 'reset-password' || searchParams.get('token')) {
+      return 'reset-password';
+    }
+    if (searchParams.get('mode') === 'register') {
+      return 'register';
+    }
+    return 'login';
+  })();
+
+  const [mode, setMode] = useState(initialMode);
   const [role, setRole] = useState(searchParams.get('role') === 'mentor' ? 'mentor' : 'learner');
+
+  const roleRef = useRef(role);
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+
+  const googleBtnRef = useRef(null);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -51,11 +56,97 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const [socialModalProvider, setSocialModalProvider] = useState(null);
-  const [customSocialName, setCustomSocialName] = useState('');
-  const [customSocialEmail, setCustomSocialEmail] = useState('');
+  const [resetToken, setResetToken] = useState(searchParams.get('token') || '');
+  const [resetEmail, setResetEmail] = useState(searchParams.get('email') || '');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [forgotSent, setForgotSent] = useState(null);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+
+  const [verificationSent, setVerificationSent] = useState(null);
+  const [resendingEmail, setResendingEmail] = useState(false);
+
   const [socialLoading, setSocialLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState(null);
+  const [googleConfig, setGoogleConfig] = useState({ enabled: false, clientId: '' });
+
+  const renderGoogleButton = () => {
+    if (!window.google?.accounts?.id || !googleBtnRef.current) return;
+    try {
+      googleBtnRef.current.innerHTML = '';
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        type: 'standard',
+        theme: 'outline',
+        size: 'large',
+        text: mode === 'register' ? 'signup_with' : 'continue_with',
+        shape: 'rectangular',
+        width: 360,
+        logo_alignment: 'left',
+      });
+    } catch (e) {
+      console.warn('Google renderButton error:', e);
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    api.getPlatformConfig().then((cfg) => {
+      if (!mounted || !cfg) return;
+      const enabled = cfg.google_auth_enabled === true || cfg.google_auth_enabled === 'true';
+      const clientId = cfg.google_client_id || '';
+      setGoogleConfig({ enabled, clientId });
+
+      if (clientId) {
+        const initGoogle = () => {
+          if (!window.google?.accounts?.id) return;
+          try {
+            window.google.accounts.id.initialize({
+              client_id: clientId,
+              callback: async (response) => {
+                if (!response?.credential) return;
+                setSocialLoading(true);
+                try {
+                  const targetRole = roleRef.current || 'learner';
+                  const loggedUser = await googleLogin(response.credential, targetRole);
+                  toast.success(`Welcome to PairUp, ${loggedUser.name || 'User'}! 🎉`);
+                  const target = getRedirectTarget(loggedUser);
+                  navigate(target.path, { replace: true, state: target.state });
+                } catch (err) {
+                  toast.error(err.message || 'Google sign-in failed');
+                } finally {
+                  setSocialLoading(false);
+                }
+              },
+            });
+            renderGoogleButton();
+          } catch (e) {
+            console.warn('GIS init error:', e);
+          }
+        };
+
+        if (!document.getElementById('google-gsi-client')) {
+          const script = document.createElement('script');
+          script.id = 'google-gsi-client';
+          script.src = 'https://accounts.google.com/gsi/client';
+          script.async = true;
+          script.defer = true;
+          script.onload = initGoogle;
+          document.body.appendChild(script);
+        } else {
+          initGoogle();
+        }
+      }
+    }).catch(() => {});
+    return () => { mounted = false; };
+  }, [mode]);
+
+  useEffect(() => {
+    if (googleConfig.clientId && window.google?.accounts?.id) {
+      renderGoogleButton();
+    }
+  }, [googleConfig.clientId, mode]);
 
   useEffect(() => {
     // Read pending action from location.state or sessionStorage
@@ -71,27 +162,35 @@ export default function LoginPage() {
     }
   }, [location.state]);
 
-  const getSocialAccounts = (provider) => {
-    if (provider === 'GitHub') {
-      return [
-        { name: 'Alex Rivera', email: 'alex.rivera@github.com', role: 'mentor', avatarColor: '#24292F' },
-        { name: 'Sarah Connor', email: 'sarah.connor@github.com', role: 'learner', avatarColor: '#6e40c9' },
-        { name: 'David Chen', email: 'david.chen@github.com', role: 'mentor', avatarColor: '#0969da' },
-      ];
+  useEffect(() => {
+    const token = searchParams.get('token');
+    const paramEmail = searchParams.get('email');
+    const notice = searchParams.get('notice');
+    if (token) setResetToken(token);
+    if (paramEmail) {
+      setResetEmail(paramEmail);
+      if (!email) setEmail(paramEmail);
     }
-    if (provider === 'LinkedIn') {
-      return [
-        { name: 'Alex Rivera', email: 'alex.rivera@linkedin.com', role: 'mentor', avatarColor: '#0A66C2' },
-        { name: 'Sarah Connor', email: 'sarah.connor@linkedin.com', role: 'learner', avatarColor: '#0077B5' },
-        { name: 'David Chen', email: 'david.chen@linkedin.com', role: 'mentor', avatarColor: '#004182' },
-      ];
+    if (notice) {
+      setError(notice);
     }
-    return [
-      { name: 'Sarah Connor', email: 'sarah.connor@gmail.com', role: 'learner', avatarColor: '#4285F4' },
-      { name: 'Alex Rivera', email: 'alex.rivera@gmail.com', role: 'mentor', avatarColor: '#34A853' },
-      { name: 'Priya Sharma', email: 'priya.sharma@gmail.com', role: 'mentor', avatarColor: '#EA4335' },
-    ];
-  };
+
+    if (
+      location.pathname === '/forgot-password' ||
+      searchParams.get('mode') === 'forgot-password' ||
+      searchParams.get('mode') === 'forgot'
+    ) {
+      setMode('forgot-password');
+      setError('');
+    } else if (
+      location.pathname === '/reset-password' ||
+      searchParams.get('mode') === 'reset-password' ||
+      token
+    ) {
+      setMode('reset-password');
+      setError('');
+    }
+  }, [location.pathname, searchParams]);
 
   const getRedirectTarget = (u) => {
     const isPathAllowed = (path) => {
@@ -143,35 +242,45 @@ export default function LoginPage() {
     return { path: '/learner/dashboard', state: null };
   };
 
-  const handleSelectSocialAccount = async (acc) => {
-    setSocialLoading(true);
-    setError('');
-    const chosenRole = mode === 'register' ? role : (acc.role || role);
-    try {
-      const loggedUser = await socialLogin({
-        name: acc.name,
-        email: acc.email,
-        role: chosenRole,
-        provider: socialModalProvider,
-      });
-      toast.success(`Welcome to PairUp, ${loggedUser.name}! 🎉`);
-      setSocialModalProvider(null);
-      const target = getRedirectTarget(loggedUser);
-      navigate(target.path, { replace: true, state: target.state });
-    } catch (err) {
-      setError(err.message || 'Social authentication failed');
-      toast.error(err.message || 'Social authentication failed');
-    } finally {
-      setSocialLoading(false);
-    }
-  };
-
   useEffect(() => {
-    if (user) {
+    const isReset =
+      location.pathname === '/reset-password' ||
+      searchParams.get('mode') === 'reset-password' ||
+      Boolean(searchParams.get('token')) ||
+      mode === 'reset-password';
+
+    const isForgot =
+      location.pathname === '/forgot-password' ||
+      searchParams.get('mode') === 'forgot-password' ||
+      mode === 'forgot-password';
+
+    if (user && !isReset && !isForgot) {
       const target = getRedirectTarget(user);
       navigate(target.path, { replace: true, state: target.state });
     }
-  }, [user, navigate]);
+  }, [user, navigate, location.pathname, searchParams, mode]);
+
+  const handleResendVerification = async (targetEmail) => {
+    const emailToUse = (targetEmail || email || '').trim();
+    if (!emailToUse) {
+      toast.error('Please enter your email to resend the activation link');
+      return;
+    }
+    setResendingEmail(true);
+    try {
+      const res = await resendVerification(emailToUse);
+      toast.success(res.message || 'Activation email resent! Check your inbox.');
+      setVerificationSent(prev => ({
+        ...(prev || {}),
+        email: emailToUse,
+        activation_url: res.web_activation_url || res.activation_url || prev?.activation_url,
+      }));
+    } catch (err) {
+      toast.error(err.message || 'Failed to resend activation link');
+    } finally {
+      setResendingEmail(false);
+    }
+  };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
@@ -182,10 +291,24 @@ export default function LoginPage() {
       const target = getRedirectTarget(loggedUser);
       navigate(target.path, { replace: true, state: target.state });
     } catch (err) {
+      const isUnverified = err.data?.requires_verification || err.message?.toLowerCase().includes('verify your email');
       setError(err.message);
+      if (isUnverified) {
+        setVerificationSent({
+          email: email.trim(),
+        });
+      }
       toast.error(err.message, {
-        duration: 5000,
-        action: mode === 'login' && err.message.toLowerCase().includes('not registered') ? (
+        duration: 6000,
+        action: isUnverified ? (
+          <button
+            type="button"
+            className="alert-action-btn"
+            onClick={() => handleResendVerification(email.trim())}
+          >
+            Resend link →
+          </button>
+        ) : mode === 'login' && err.message.toLowerCase().includes('not registered') ? (
           <button
             type="button"
             className="alert-action-btn"
@@ -208,14 +331,90 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      const registeredUser = await register(name.trim(), email.trim(), password, role);
-      const target = getRedirectTarget(registeredUser);
+      const res = await register(name.trim(), email.trim(), password, role);
+      if (res?.requires_verification) {
+        setVerificationSent({
+          email: res.email || email.trim(),
+          activation_url: res.web_activation_url || res.activation_url,
+        });
+        toast.success('Registration successful! Please check your email to activate.');
+        return;
+      }
+      const target = getRedirectTarget(res);
       navigate(target.path, { replace: true, state: target.state });
     } catch (err) {
       setError(err.message);
       toast.error(err.message, { duration: 5000 });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e) => {
+    e.preventDefault();
+    const targetEmail = (email || resetEmail).trim();
+    if (!targetEmail) {
+      setError('Please enter your email address.');
+      return;
+    }
+    setError('');
+    setForgotLoading(true);
+    try {
+      const res = await (forgotPassword ? forgotPassword(targetEmail) : api.forgotPassword(targetEmail));
+      setForgotSent({
+        email: targetEmail,
+        reset_url: res?.reset_url || '',
+        token: res?.token || '',
+      });
+      toast.success(res?.message || 'Password reset link sent to your email.');
+    } catch (err) {
+      setError(err.message || 'Failed to send password reset email.');
+      toast.error(err.message || 'Failed to send password reset email.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    const tokenToUse = (resetToken || searchParams.get('token') || '').trim();
+    if (!tokenToUse) {
+      setError('Reset token is missing. Please check your reset link or request a new one.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match. Please re-enter.');
+      return;
+    }
+    setError('');
+    setResetLoading(true);
+    try {
+      const res = await (resetPassword
+        ? resetPassword(tokenToUse, newPassword, resetEmail || email)
+        : api.resetPassword(tokenToUse, newPassword, resetEmail || email));
+      toast.success(res?.message || 'Password reset successfully! Please log in.');
+      if (logout) {
+        try {
+          await logout();
+        } catch (e) {}
+      }
+      if (resetEmail) setEmail(resetEmail);
+      setPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setResetToken('');
+      setForgotSent(null);
+      setMode('login');
+      navigate('/login', { replace: true });
+    } catch (err) {
+      setError(err.message || 'Failed to reset password. The link may have expired.');
+      toast.error(err.message || 'Failed to reset password.');
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -292,89 +491,533 @@ export default function LoginPage() {
           )}
 
           <div className="auth-card">
-            <div className="tabs">
-              <button
-                type="button"
-                className={mode === 'login' ? 'active' : ''}
-                onClick={() => {
-                  setMode('login');
-                  setError('');
-                  setShowPassword(false);
-                }}
-              >
-                Log in
-              </button>
-              <button
-                type="button"
-                className={mode === 'register' ? 'active' : ''}
-                onClick={() => {
-                  setMode('register');
-                  setError('');
-                  setShowPassword(false);
-                }}
-              >
-                Sign up
-              </button>
-            </div>
+            {verificationSent ? (
+              <div style={{ textAlign: 'center', padding: '16px 8px' }}>
+                <div
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '50%',
+                    background: 'rgba(91, 124, 255, 0.12)',
+                    border: '1px solid rgba(91, 124, 255, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '28px',
+                    margin: '0 auto 18px',
+                  }}
+                >
+                  ✉️
+                </div>
+                <h3 style={{ fontSize: '20px', fontWeight: 800, margin: '0 0 10px 0', color: 'var(--ink)' }}>
+                  Verify Your Email
+                </h3>
+                <p style={{ color: 'var(--ink-muted)', fontSize: '14.5px', lineHeight: 1.6, margin: '0 0 20px 0' }}>
+                  We sent an activation link to <strong style={{ color: 'var(--ink)' }}>{verificationSent.email}</strong>.<br />
+                  Please click the link in your email to activate your account before logging in.
+                </p>
 
-            {error && (
-              <Alert
-                type="error"
-                autoDismiss={6000}
-                dismissible
-                onDismiss={() => setError('')}
-                action={
-                  mode === 'login' && error.toLowerCase().includes('not registered') ? (
-                    <button
-                      type="button"
-                      className="alert-action-btn"
-                      onClick={() => {
-                        setMode('register');
-                        setError('');
-                        setShowPassword(false);
+                {verificationSent.activation_url && (
+                  <div
+                    style={{
+                      background: 'var(--surface-raised, rgba(255,255,255,0.03))',
+                      border: '1px solid var(--border)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      marginBottom: '20px',
+                      fontSize: '12px',
+                      textAlign: 'left',
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    <span style={{ color: 'var(--ink-muted)', display: 'block', marginBottom: '6px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Direct Activation Link:
+                    </span>
+                    <a
+                      href={verificationSent.activation_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: 'var(--accent)', fontWeight: 600, textDecoration: 'underline' }}
+                    >
+                      {verificationSent.activation_url}
+                    </a>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleResendVerification(verificationSent.email)}
+                    disabled={resendingEmail}
+                    style={{ width: '100%', padding: '11px' }}
+                  >
+                    {resendingEmail ? 'Resending...' : 'Resend Activation Email'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      setVerificationSent(null);
+                      setMode('login');
+                      setError('');
+                    }}
+                    style={{ width: '100%', padding: '11px' }}
+                  >
+                    I've Activated, Log In Now →
+                  </button>
+                </div>
+              </div>
+            ) : mode === 'forgot-password' ? (
+              <div className="auth-forgot-section">
+                {forgotSent ? (
+                  <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                    <div
+                      style={{
+                        width: '64px',
+                        height: '64px',
+                        borderRadius: '50%',
+                        background: 'var(--brand-soft, rgba(99, 102, 241, 0.12))',
+                        color: 'var(--brand)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '30px',
+                        margin: '0 auto 16px',
                       }}
                     >
-                      Create account →
-                    </button>
-                  ) : null
-                }
-              >
-                {error}
-              </Alert>
-            )}
+                      ✉️
+                    </div>
+                    <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px', color: 'var(--ink)' }}>
+                      Check your email
+                    </h2>
+                    <p style={{ color: 'var(--ink-muted)', fontSize: '14px', lineHeight: 1.5, marginBottom: '20px' }}>
+                      We sent a password reset link to <strong>{forgotSent.email}</strong>. Follow the instructions in the email to reset your password.
+                    </p>
+
+                    {forgotSent.reset_url && (
+                      <div
+                        style={{
+                          background: 'var(--surface-sunken)',
+                          border: '1px dashed var(--brand)',
+                          borderRadius: '10px',
+                          padding: '12px',
+                          marginBottom: '20px',
+                          textAlign: 'left',
+                          fontSize: '12px',
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, color: 'var(--brand)', marginBottom: '4px' }}>
+                          ⚡ Direct Reset Link (Ready to use)
+                        </div>
+                        <div style={{ color: 'var(--ink-muted)', wordBreak: 'break-all', marginBottom: '8px' }}>
+                          {forgotSent.reset_url}
+                        </div>
+                        <a
+                          href={forgotSent.reset_url}
+                          className="btn btn-secondary"
+                          style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-block' }}
+                        >
+                          Open Reset Link Directly →
+                        </a>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={handleForgotPasswordSubmit}
+                        disabled={forgotLoading}
+                        style={{ width: '100%', padding: '11px' }}
+                      >
+                        {forgotLoading ? 'Resending...' : 'Resend Reset Email'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => {
+                          setForgotSent(null);
+                          setMode('login');
+                          setError('');
+                          navigate('/login');
+                        }}
+                        style={{ width: '100%', padding: '11px' }}
+                      >
+                        ← Back to Log in
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ marginBottom: '20px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('login');
+                          setError('');
+                          navigate('/login');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          color: 'var(--brand)',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          marginBottom: '12px',
+                        }}
+                      >
+                        ← Back to Log in
+                      </button>
+                      <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '6px', color: 'var(--ink)' }}>
+                        Forgot your password?
+                      </h2>
+                      <p style={{ color: 'var(--ink-muted)', fontSize: '13.5px', margin: 0, lineHeight: 1.45 }}>
+                        Enter the email associated with your PairUp account and we'll send you a password reset link.
+                      </p>
+                    </div>
+
+                    {error && (
+                      <Alert
+                        type="error"
+                        autoDismiss={6000}
+                        dismissible
+                        onDismiss={() => setError('')}
+                      >
+                        {error}
+                      </Alert>
+                    )}
+
+                    <form onSubmit={handleForgotPasswordSubmit} className="auth-form" style={{ marginTop: '16px' }}>
+                      <div className="field">
+                        <label>Email address</label>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="you@example.com"
+                          required
+                          autoComplete="email"
+                          autoFocus
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-block btn-auth-submit"
+                        disabled={forgotLoading}
+                        style={{ marginTop: '14px' }}
+                      >
+                        {forgotLoading ? 'Sending reset link...' : 'Send reset link'}
+                      </button>
+                    </form>
+
+                    <div style={{ textAlign: 'center', marginTop: '18px', fontSize: '13px', color: 'var(--ink-muted)' }}>
+                      Remember your password?{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('login');
+                          setError('');
+                          navigate('/login');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          color: 'var(--brand)',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Log in
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : mode === 'reset-password' ? (
+              <div className="auth-reset-section">
+                <div style={{ marginBottom: '20px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                      navigate('/login');
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'var(--brand)',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      marginBottom: '12px',
+                    }}
+                  >
+                    ← Back to Log in
+                  </button>
+                  <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '6px', color: 'var(--ink)' }}>
+                    Reset your password
+                  </h2>
+                  <p style={{ color: 'var(--ink-muted)', fontSize: '13.5px', margin: 0, lineHeight: 1.45 }}>
+                    {resetEmail
+                      ? `Create a new password for ${resetEmail}.`
+                      : 'Choose a strong new password with at least 6 characters.'}
+                  </p>
+                </div>
+
+                {error && (
+                  <Alert
+                    type="error"
+                    autoDismiss={6000}
+                    dismissible
+                    onDismiss={() => setError('')}
+                  >
+                    {error}
+                  </Alert>
+                )}
+
+                <form onSubmit={handleResetPasswordSubmit} className="auth-form" style={{ marginTop: '16px' }}>
+                  {!searchParams.get('token') && !resetToken && (
+                    <div className="field">
+                      <label>Reset Token</label>
+                      <input
+                        type="text"
+                        value={resetToken}
+                        onChange={(e) => setResetToken(e.target.value)}
+                        placeholder="Paste reset token here"
+                        required
+                      />
+                    </div>
+                  )}
+
+                  <div className="field">
+                    <label>New Password</label>
+                    <div className="password-input-wrap">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="At least 6 characters"
+                        required
+                        minLength={6}
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle-btn"
+                        onClick={() => setShowNewPassword((prev) => !prev)}
+                        aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                        title={showNewPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showNewPassword ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <label>Confirm New Password</label>
+                    <div className="password-input-wrap">
+                      <input
+                        type={showNewPassword ? 'text' : 'password'}
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Re-enter new password"
+                        required
+                        minLength={6}
+                        autoComplete="new-password"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-block btn-auth-submit"
+                    disabled={resetLoading}
+                    style={{ marginTop: '14px' }}
+                  >
+                    {resetLoading ? 'Resetting password...' : 'Update Password'}
+                  </button>
+                </form>
+
+                <div style={{ textAlign: 'center', marginTop: '18px', fontSize: '13px', color: 'var(--ink-muted)' }}>
+                  Remember your password?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                      navigate('/login');
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'var(--brand)',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Log in
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="tabs">
+                  <button
+                    type="button"
+                    className={mode === 'login' ? 'active' : ''}
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                      setShowPassword(false);
+                    }}
+                  >
+                    Log in
+                  </button>
+                  <button
+                    type="button"
+                    className={mode === 'register' ? 'active' : ''}
+                    onClick={() => {
+                      setMode('register');
+                      setError('');
+                      setShowPassword(false);
+                    }}
+                  >
+                    Sign up
+                  </button>
+                </div>
+
+                {mode === 'register' && (
+                  <div className="signup-role-section" style={{ marginTop: '16px', marginBottom: '16px' }}>
+                    <div className="role-selector-label" style={{ marginBottom: '8px', fontWeight: 600 }}>
+                      I want to join as:
+                    </div>
+                    <div className="role-selector-grid" role="radiogroup" aria-label="Select account type">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={role === 'learner'}
+                        className={`role-card role-card-learner ${role === 'learner' ? 'active' : ''}`}
+                        onClick={() => setRole('learner')}
+                      >
+                        <div className="role-card-header">
+                          <div className="role-icon-box learner">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+                              <path d="M6 12v5c3 3 9 3 12 0v-5" />
+                            </svg>
+                          </div>
+                          <span className={`role-check-indicator ${role === 'learner' ? 'active' : ''}`}>
+                            {role === 'learner' && <CheckIcon size={11} />}
+                          </span>
+                        </div>
+                        <div className="role-card-text">
+                          <div className="role-card-title">I want to learn</div>
+                          <div className="role-card-subtitle">Pair with experts live</div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={role === 'mentor'}
+                        className={`role-card role-card-mentor ${role === 'mentor' ? 'active' : ''}`}
+                        onClick={() => setRole('mentor')}
+                      >
+                        <div className="role-card-header">
+                          <div className="role-icon-box mentor">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="16 18 22 12 16 6" />
+                              <polyline points="8 6 2 12 8 18" />
+                            </svg>
+                          </div>
+                          <span className={`role-check-indicator ${role === 'mentor' ? 'active' : ''}`}>
+                            {role === 'mentor' && <CheckIcon size={11} />}
+                          </span>
+                        </div>
+                        <div className="role-card-text">
+                          <div className="role-card-title">I'm a mentor</div>
+                          <div className="role-card-subtitle">Offer sessions & earn</div>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {error && (
+                  <Alert
+                    type="error"
+                    autoDismiss={6000}
+                    dismissible
+                    onDismiss={() => setError('')}
+                    action={
+                      error.toLowerCase().includes('verify your email') ? (
+                        <button
+                          type="button"
+                          className="alert-action-btn"
+                          onClick={() => handleResendVerification(email.trim())}
+                        >
+                          Resend link →
+                        </button>
+                      ) : mode === 'login' && error.toLowerCase().includes('not registered') ? (
+                        <button
+                          type="button"
+                          className="alert-action-btn"
+                          onClick={() => {
+                            setMode('register');
+                            setError('');
+                            setShowPassword(false);
+                          }}
+                        >
+                          Create account →
+                        </button>
+                      ) : null
+                    }
+                  >
+                    {error}
+                  </Alert>
+                )}
 
             {/* Social Logins */}
             <div className="social-auth-section">
-              <button
-                type="button"
-                className="social-btn social-btn-google"
-                onClick={() => setSocialModalProvider('Google')}
-                disabled={loading || socialLoading}
-              >
-                <GoogleLogo />
-                <span>{mode === 'register' ? 'Sign up with Google' : 'Continue with Google'}</span>
-              </button>
-
-              <div className="social-sub-row">
+              {googleConfig.clientId ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '8px' }}>
+                  <div
+                    ref={googleBtnRef}
+                    style={{ minHeight: '44px', width: '100%', display: 'flex', justifyContent: 'center' }}
+                  />
+                  {mode === 'register' && (
+                    <span style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
+                      Signing up with Google as <strong>{role === 'mentor' ? '👨‍💻 Mentor' : '🎓 Learner'}</strong>
+                    </span>
+                  )}
+                </div>
+              ) : (
                 <button
                   type="button"
-                  className="social-btn social-btn-secondary"
-                  onClick={() => setSocialModalProvider('GitHub')}
+                  className="social-btn social-btn-google"
+                  onClick={() => {
+                    toast.error('Google Sign-In is not configured yet. Admin can set it up in Settings > Security & Auth.');
+                  }}
                   disabled={loading || socialLoading}
                 >
-                  <GitHubLogo />
-                  <span>GitHub</span>
+                  <GoogleLogo />
+                  <span>{mode === 'register' ? `Sign up with Google as ${role === 'mentor' ? 'Mentor' : 'Learner'}` : 'Continue with Google'}</span>
                 </button>
-                <button
-                  type="button"
-                  className="social-btn social-btn-secondary"
-                  onClick={() => setSocialModalProvider('LinkedIn')}
-                  disabled={loading || socialLoading}
-                >
-                  <LinkedInLogo />
-                  <span>LinkedIn</span>
-                </button>
-              </div>
+              )}
             </div>
 
             <div className="auth-divider">
@@ -395,7 +1038,30 @@ export default function LoginPage() {
                   />
                 </div>
                 <div className="field">
-                  <label>Password</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ margin: 0 }}>Password</label>
+                    <button
+                      type="button"
+                      className="forgot-password-link"
+                      onClick={() => {
+                        setMode('forgot-password');
+                        setError('');
+                        setForgotSent(null);
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        color: 'var(--brand)',
+                        fontSize: '12.5px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        textDecoration: 'none',
+                      }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
                   <div className="password-input-wrap">
                     <input
                       type={showPassword ? 'text' : 'password'}
@@ -467,174 +1133,20 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                <div className="role-selector-label">I want to join as</div>
-                <div className="role-selector-grid" role="radiogroup" aria-label="Select account type">
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={role === 'learner'}
-                    className={`role-card role-card-learner ${role === 'learner' ? 'active' : ''}`}
-                    onClick={() => setRole('learner')}
-                  >
-                    <div className="role-card-header">
-                      <div className="role-icon-box learner">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                          <path d="M6 12v5c3 3 9 3 12 0v-5" />
-                        </svg>
-                      </div>
-                      <span className={`role-check-indicator ${role === 'learner' ? 'active' : ''}`}>
-                        {role === 'learner' && <CheckIcon size={11} />}
-                      </span>
-                    </div>
-                    <div className="role-card-text">
-                      <div className="role-card-title">I want to learn</div>
-                      <div className="role-card-subtitle">Pair with experts live</div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={role === 'mentor'}
-                    className={`role-card role-card-mentor ${role === 'mentor' ? 'active' : ''}`}
-                    onClick={() => setRole('mentor')}
-                  >
-                    <div className="role-card-header">
-                      <div className="role-icon-box mentor">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="16 18 22 12 16 6" />
-                          <polyline points="8 6 2 12 8 18" />
-                        </svg>
-                      </div>
-                      <span className={`role-check-indicator ${role === 'mentor' ? 'active' : ''}`}>
-                        {role === 'mentor' && <CheckIcon size={11} />}
-                      </span>
-                    </div>
-                    <div className="role-card-text">
-                      <div className="role-card-title">I'm a mentor</div>
-                      <div className="role-card-subtitle">Offer sessions & earn</div>
-                    </div>
-                  </button>
-                </div>
-
                 <button
                   type="submit"
                   className="btn btn-primary btn-block btn-auth-submit"
                   disabled={loading}
                 >
-                  {loading ? 'Creating account...' : 'Create account'}
+                  {loading ? 'Creating account...' : `Create ${role === 'mentor' ? 'mentor' : 'learner'} account`}
                 </button>
               </form>
+            )}
+              </>
             )}
           </div>
         </div>
       </main>
-
-      {socialModalProvider && (
-        <div className="oauth-modal-backdrop" onClick={() => !socialLoading && setSocialModalProvider(null)}>
-          <div className="oauth-modal-card" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="oauth-modal-close"
-              onClick={() => setSocialModalProvider(null)}
-              disabled={socialLoading}
-              title="Close modal"
-            >
-              <XIcon size={16} />
-            </button>
-
-            <div className="oauth-header">
-              <div className="oauth-provider-logo">
-                {socialModalProvider === 'Google' && <GoogleLogo size={24} />}
-                {socialModalProvider === 'GitHub' && <GitHubLogo size={24} />}
-                {socialModalProvider === 'LinkedIn' && <LinkedInLogo size={24} />}
-              </div>
-              <h3 className="oauth-title">
-                {mode === 'register' ? `Sign up with ${socialModalProvider}` : `Sign in with ${socialModalProvider}`}
-              </h3>
-              <p className="oauth-subtitle">Select an account to proceed to PairUp</p>
-              {mode === 'register' && (
-                <div className={`oauth-role-pill ${role === 'mentor' ? 'mentor' : 'learner'}`}>
-                  Role: {role === 'mentor' ? '👨‍💻 Mentor' : '🎓 Learner'}
-                </div>
-              )}
-            </div>
-
-            <div className="oauth-accounts-list">
-              {getSocialAccounts(socialModalProvider).map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  className="oauth-account-item"
-                  onClick={() => handleSelectSocialAccount(acc)}
-                  disabled={socialLoading}
-                >
-                  <div className="oauth-avatar" style={{ background: acc.avatarColor }}>
-                    {acc.name.charAt(0)}
-                  </div>
-                  <div className="oauth-account-details">
-                    <div className="oauth-account-name">{acc.name}</div>
-                    <div className="oauth-account-email">{acc.email}</div>
-                  </div>
-                  <span
-                    className="oauth-account-badge"
-                    style={{
-                      background: acc.role === 'mentor' ? 'var(--add-bg)' : 'var(--accent-soft)',
-                      color: acc.role === 'mentor' ? 'var(--add)' : 'var(--accent)',
-                    }}
-                  >
-                    {acc.role}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <form
-              className="oauth-custom-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (customSocialEmail.trim()) {
-                  handleSelectSocialAccount({
-                    name: customSocialName.trim() || `${socialModalProvider} User`,
-                    email: customSocialEmail.trim(),
-                    role: mode === 'register' ? role : 'learner',
-                  });
-                }
-              }}
-            >
-              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--ink-muted)', marginBottom: '8px' }}>
-                Or use your custom {socialModalProvider} account:
-              </div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                <input
-                  type="text"
-                  placeholder="Your Name"
-                  value={customSocialName}
-                  onChange={(e) => setCustomSocialName(e.target.value)}
-                  style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--grid-strong)', fontSize: '13px', background: 'var(--surface)' }}
-                />
-                <input
-                  type="email"
-                  placeholder="email@example.com"
-                  value={customSocialEmail}
-                  onChange={(e) => setCustomSocialEmail(e.target.value)}
-                  required
-                  style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--grid-strong)', fontSize: '13px', background: 'var(--surface)' }}
-                />
-              </div>
-              <button
-                type="submit"
-                className="btn btn-primary btn-block"
-                style={{ padding: '9px', fontSize: '13px', borderRadius: '8px' }}
-                disabled={socialLoading || !customSocialEmail.trim()}
-              >
-                {socialLoading ? 'Connecting...' : `Sign in with this ${socialModalProvider} account`}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
 
       <Footer />
     </div>

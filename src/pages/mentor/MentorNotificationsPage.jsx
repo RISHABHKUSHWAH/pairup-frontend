@@ -40,11 +40,10 @@ export default function MentorNotificationsPage() {
 
   const loadNotifications = async () => {
     setLoading(true);
-    let remote = [];
     try {
       const data = await notificationsApi.list();
       if (Array.isArray(data)) {
-        remote = data.map((n) => ({
+        const remote = data.map((n) => ({
           id: n.id,
           type: n.type || 'system',
           title: n.title,
@@ -53,19 +52,16 @@ export default function MentorNotificationsPage() {
           read: n.is_read,
           link: n.link,
         }));
+        setNotifications(remote);
+        setLoading(false);
+        return;
       }
     } catch (_) {
       // fallback to mentor local storage if backend offline
     }
 
     const localData = mentorNotifications.getNotifications();
-    if (remote.length > 0) {
-      const remoteIds = new Set(remote.map((r) => String(r.id)));
-      const combined = [...remote, ...localData.filter((l) => !remoteIds.has(String(l.id)))];
-      setNotifications(combined);
-    } else {
-      setNotifications(localData);
-    }
+    setNotifications(localData);
     setLoading(false);
   };
 

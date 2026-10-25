@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
 import { adminSupport } from '../../api/storage/adminStorage';
 import { initials } from '../../api/client';
@@ -715,6 +716,7 @@ export default function AdminSupportRequestsPage() {
 
   return (
     <PortalLayout title="Support Requests & Inquiries" portalType="admin">
+      <AdminCategoryNav category="communications" />
       {/* Header Banner */}
       <div
         style={{

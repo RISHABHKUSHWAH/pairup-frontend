@@ -5,9 +5,11 @@ import Pagination from '../../components/Pagination';
 import { api, learnerBilling } from '../../api/client';
 import { CreditCardIcon, DocumentIcon, FileEditIcon, DownloadIcon, PlusIcon } from '../../components/Icons';
 import { useToast } from '../../context';
+import { usePlatformCommission } from '../../utils';
 
 export default function LearnerPaymentsPage() {
   const { toast } = useToast();
+  const { effectiveLearnerFeePercent, learnerTaxPercent: defaultLearnerTax } = usePlatformCommission();
   const [payments, setPayments] = useState([]);
   const [walletBalance, setWalletBalance] = useState(3200);
   const [savedCards, setSavedCards] = useState([]);
@@ -102,8 +104,306 @@ export default function LearnerPaymentsPage() {
     setRefundReason('');
   };
 
-  const total = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  const held = payments.filter((p) => p.status === 'held').reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const handlePrintInvoice = (tx) => {
+    if (!tx) return;
+    const invoiceNumber = `INV-${String(tx.id || '1').padStart(6, '0')}`;
+    const desc = tx.topic || '1-on-1 Mentoring Session';
+    const mentorName = tx.mentor_name || 'Mentor';
+    const learnerName = billingInfo?.fullName || user?.name || 'Learner';
+
+    const basePrice = Number(
+      tx.gross_amount !== undefined
+        ? tx.gross_amount
+        : (tx.base_amount || tx.session_price || tx.price || 800)
+    ) || 800;
+
+    const commPercent = Number(
+      tx.learner_commission_percent !== undefined && tx.learner_commission_percent !== null
+        ? tx.learner_commission_percent
+        : effectiveLearnerFeePercent
+    );
+
+    const taxPercent = Number(
+      tx.learner_tax_percent !== undefined && tx.learner_tax_percent !== null
+        ? tx.learner_tax_percent
+        : defaultLearnerTax
+    );
+
+    const platformFee = Number(
+      tx.learner_fee !== undefined && tx.learner_fee !== null && Number(tx.learner_fee) > 0
+        ? tx.learner_fee
+        : Math.round(basePrice * (commPercent / 100) * 100) / 100
+    );
+
+    const gstOnCommission = Number(
+      tx.learner_tax !== undefined && tx.learner_tax !== null && Number(tx.learner_tax) > 0
+        ? tx.learner_tax
+        : Math.round(platformFee * (taxPercent / 100) * 100) / 100
+    );
+
+    const totalAmount = Number(
+      tx.total_learner_paid !== undefined && Number(tx.total_learner_paid) > 0
+        ? tx.total_learner_paid
+        : Math.round((basePrice + platformFee + gstOnCommission) * 100) / 100
+    );
+
+    const dateStr = tx.created_at
+      ? new Date(tx.created_at).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })
+      : new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>PairUp_${invoiceNumber}</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 14mm 16mm;
+            }
+            * {
+              box-sizing: border-box;
+              margin: 0;
+              padding: 0;
+            }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+              color: #111827;
+              background: #ffffff;
+              padding: 20px 24px;
+              font-size: 13px;
+              line-height: 1.5;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              border-bottom: 2px solid #2563eb;
+              padding-bottom: 14px;
+              margin-bottom: 18px;
+            }
+            .brand-name {
+              font-size: 22px;
+              font-weight: 800;
+              color: #2563eb;
+              letter-spacing: -0.02em;
+            }
+            .brand-sub {
+              font-size: 11px;
+              color: #6b7280;
+              margin-top: 3px;
+            }
+            .badge-invoice {
+              background: #eff6ff;
+              color: #1d4ed8;
+              border: 1px solid #bfdbfe;
+              font-size: 11px;
+              font-weight: 700;
+              padding: 4px 10px;
+              border-radius: 999px;
+              display: inline-block;
+              margin-bottom: 6px;
+            }
+            .meta-grid {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 16px;
+              margin-bottom: 20px;
+              padding-bottom: 16px;
+              border-bottom: 1px solid #e5e7eb;
+            }
+            .meta-title {
+              font-size: 10.5px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+              color: #6b7280;
+              margin-bottom: 4px;
+            }
+            .meta-val {
+              font-size: 13px;
+              font-weight: 600;
+              color: #111827;
+            }
+            .table-wrap {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 20px;
+            }
+            .table-wrap th {
+              background: #f8fafc;
+              color: #475569;
+              font-size: 11px;
+              font-weight: 700;
+              text-transform: uppercase;
+              letter-spacing: 0.03em;
+              padding: 10px 12px;
+              border-bottom: 1px solid #e2e8f0;
+              text-align: left;
+            }
+            .table-wrap th.right, .table-wrap td.right {
+              text-align: right;
+            }
+            .table-wrap td {
+              padding: 11px 12px;
+              border-bottom: 1px solid #f1f5f9;
+              vertical-align: top;
+            }
+            .total-row td {
+              border-top: 2px solid #1e293b;
+              border-bottom: 2px solid #1e293b;
+              font-weight: 800;
+              font-size: 14px;
+              color: #0f172a;
+              padding: 12px;
+            }
+            .footer-box {
+              margin-top: 28px;
+              padding: 14px 16px;
+              background: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 8px;
+              font-size: 11.5px;
+              color: #64748b;
+              line-height: 1.5;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="brand-name">PairUp Technologies Inc.</div>
+              <div class="brand-sub">Official Mentorship Platform • Escrow Secured</div>
+              <div class="brand-sub">GSTIN: 29PAIRUP1234F1Z0 • Karnataka, India</div>
+            </div>
+            <div style="text-align: right;">
+              <span class="badge-invoice">PAYMENT RECEIPT</span>
+              <div style="font-family: monospace; font-size: 12px; font-weight: 600; color: #374151;">
+                ${invoiceNumber}
+              </div>
+              <div style="font-size: 11.5px; color: #6b7280; margin-top: 2px;">
+                Date: ${dateStr}
+              </div>
+            </div>
+          </div>
+
+          <div class="meta-grid">
+            <div>
+              <div class="meta-title">Billed To (Learner)</div>
+              <div class="meta-val">${learnerName}</div>
+              <div style="font-size: 11.5px; color: #6b7280; margin-top: 2px;">
+                ${billingInfo?.address || 'India'}, ${billingInfo?.city || ''}
+              </div>
+              ${billingInfo?.taxId ? `<div style="font-size: 11px; color: #6b7280; font-family: monospace; margin-top: 2px;">GSTIN: ${billingInfo.taxId}</div>` : ''}
+            </div>
+            <div style="text-align: right;">
+              <div class="meta-title">Mentor &amp; Session</div>
+              <div class="meta-val">${mentorName}</div>
+              <div style="font-size: 11.5px; color: #6b7280; margin-top: 2px;">
+                ${desc}
+              </div>
+              <div style="margin-top: 4px; font-size: 11px; color: #16a34a; font-weight: 600;">
+                ● Payment Status: Held in Platform Escrow
+              </div>
+            </div>
+          </div>
+
+          <table class="table-wrap">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th class="right">Amount (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <strong>1-on-1 Mentoring Session: ${desc}</strong>
+                  <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+                    Mentor: ${mentorName} (Base Session Share)
+                  </div>
+                </td>
+                <td class="right" style="font-family: monospace; font-weight: 600;">
+                  ₹${basePrice.toFixed(2)}
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>Platform Service Fee / Commission (${commPercent}%)</strong>
+                  <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+                    ₹${basePrice.toFixed(2)} × ${commPercent}% marketplace facilitation fee
+                  </div>
+                </td>
+                <td class="right" style="font-family: monospace; font-weight: 600;">
+                  ₹${platformFee.toFixed(2)}
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <strong>GST (${taxPercent}% Integrated Goods &amp; Services Tax on Commission)</strong>
+                  <div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+                    ₹${platformFee.toFixed(2)} × ${taxPercent}% tax levied on platform commission
+                  </div>
+                </td>
+                <td class="right" style="font-family: monospace; font-weight: 600;">
+                  ₹${gstOnCommission.toFixed(2)}
+                </td>
+              </tr>
+              <tr class="total-row">
+                <td>Total Amount Paid (Escrow Held)</td>
+                <td class="right" style="font-family: monospace; color: #2563eb; font-size: 15px;">
+                  ₹${totalAmount.toFixed(2)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="footer-box">
+            <div style="font-weight: 700; color: #334155; margin-bottom: 4px;">Escrow Payment Security</div>
+            <div>This receipt certifies that ₹${totalAmount.toFixed(2)} was successfully deposited into the PairUp platform escrow for session "${desc}". Funds are held securely and will only be disbursed to the mentor upon satisfactory completion of the session.</div>
+            <div style="margin-top: 8px; font-size: 10.5px; color: #94a3b8;">
+              PairUp Technologies Inc. • Electronic Tax Invoice • Computer-generated receipt, no signature required.
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(htmlContent);
+    doc.close();
+
+    iframe.contentWindow.focus();
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.print();
+      } catch (e) {
+        console.error('Print failed:', e);
+      } finally {
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 1000);
+      }
+    }, 250);
+  };
+
+  const total = payments.reduce((sum, p) => sum + Number(p.total_learner_paid || p.amount || 0), 0);
+  const held = payments.filter((p) => p.status === 'held').reduce((sum, p) => sum + Number(p.total_learner_paid || p.amount || 0), 0);
 
   const filteredPayments = payments.filter((p) => {
     if (filterType === 'all') return true;
@@ -304,7 +604,7 @@ export default function LearnerPaymentsPage() {
                         </div>
                       </td>
                       <td className="mono" style={{ fontWeight: 700, fontSize: '13px' }}>
-                        ₹{Number(p.amount).toLocaleString('en-IN')}
+                        ₹{Number(p.total_learner_paid || p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td>
                         <span
@@ -541,33 +841,89 @@ export default function LearnerPaymentsPage() {
               </div>
             </div>
 
-            <table className="admin-table" style={{ marginBottom: '16px' }}>
-              <thead>
-                <tr>
-                  <th>Description</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>
-                    1-on-1 Mentoring Session: {invoiceModalTx.topic || 'Pairing'}
-                    <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
-                      Mentor: {invoiceModalTx.mentor_name}
-                    </div>
-                  </td>
-                  <td className="mono">₹{(Number(invoiceModalTx.amount) / 1.18).toFixed(2)}</td>
-                </tr>
-                <tr>
-                  <td>GST (18% Integrated Goods &amp; Services Tax)</td>
-                  <td className="mono">₹{(Number(invoiceModalTx.amount) - Number(invoiceModalTx.amount) / 1.18).toFixed(2)}</td>
-                </tr>
-                <tr style={{ fontWeight: 700 }}>
-                  <td>Total Paid (Escrow Held)</td>
-                  <td className="mono">₹{Number(invoiceModalTx.amount).toLocaleString('en-IN')}</td>
-                </tr>
-              </tbody>
-            </table>
+            {(() => {
+              const basePrice = Number(
+                invoiceModalTx.gross_amount !== undefined
+                  ? invoiceModalTx.gross_amount
+                  : (invoiceModalTx.base_amount || invoiceModalTx.session_price || invoiceModalTx.price || 800)
+              ) || 800;
+
+              const commPercent = Number(
+                invoiceModalTx.learner_commission_percent !== undefined && invoiceModalTx.learner_commission_percent !== null
+                  ? invoiceModalTx.learner_commission_percent
+                  : effectiveLearnerFeePercent
+              );
+
+              const taxPercent = Number(
+                invoiceModalTx.learner_tax_percent !== undefined && invoiceModalTx.learner_tax_percent !== null
+                  ? invoiceModalTx.learner_tax_percent
+                  : defaultLearnerTax
+              );
+
+              const platformFee = Number(
+                invoiceModalTx.learner_fee !== undefined && invoiceModalTx.learner_fee !== null && Number(invoiceModalTx.learner_fee) > 0
+                  ? invoiceModalTx.learner_fee
+                  : Math.round(basePrice * (commPercent / 100) * 100) / 100
+              );
+
+              const gstOnCommission = Number(
+                invoiceModalTx.learner_tax !== undefined && invoiceModalTx.learner_tax !== null && Number(invoiceModalTx.learner_tax) > 0
+                  ? invoiceModalTx.learner_tax
+                  : Math.round(platformFee * (taxPercent / 100) * 100) / 100
+              );
+
+              const totalAmount = Number(
+                invoiceModalTx.total_learner_paid !== undefined && Number(invoiceModalTx.total_learner_paid) > 0
+                  ? invoiceModalTx.total_learner_paid
+                  : Math.round((basePrice + platformFee + gstOnCommission) * 100) / 100
+              );
+
+              return (
+                <table className="admin-table" style={{ marginBottom: '16px' }}>
+                  <thead>
+                    <tr>
+                      <th>Description</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>
+                        1-on-1 Mentoring Session: {invoiceModalTx.topic || 'Pairing'}
+                        <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                          Mentor: {invoiceModalTx.mentor_name} (Base Session Share)
+                        </div>
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>₹{basePrice.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        Platform Service Fee / Commission ({commPercent}%)
+                        <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                          ₹{basePrice.toFixed(2)} × {commPercent}% marketplace facilitation fee
+                        </div>
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>₹{platformFee.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                      <td>
+                        GST ({taxPercent}% Integrated Goods &amp; Services Tax on Commission)
+                        <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                          ₹{platformFee.toFixed(2)} × {taxPercent}% tax levied on platform commission
+                        </div>
+                      </td>
+                      <td className="mono" style={{ textAlign: 'right' }}>₹{gstOnCommission.toFixed(2)}</td>
+                    </tr>
+                    <tr style={{ fontWeight: 700, borderTop: '2px solid var(--grid-strong)' }}>
+                      <td>Total Paid (Escrow Held)</td>
+                      <td className="mono" style={{ textAlign: 'right', fontSize: '14px', color: 'var(--accent)' }}>
+                        ₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              );
+            })()}
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button
@@ -581,7 +937,7 @@ export default function LearnerPaymentsPage() {
                 type="button"
                 className="btn btn-primary"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                onClick={() => window.print()}
+                onClick={() => handlePrintInvoice(invoiceModalTx)}
               >
                 <DownloadIcon size={14} /> Print / Download PDF
               </button>

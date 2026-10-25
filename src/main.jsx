@@ -8,6 +8,7 @@ import { ToastProvider } from './context/ToastContext';
 import { ConfirmProvider } from './context/ConfirmContext';
 import { TourProvider } from './context/TourContext';
 import PlatformTour from './components/PlatformTour';
+import GlobalTooltip from './components/GlobalTooltip';
 import './styles/main.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -20,6 +21,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
               <TourProvider>
                 <App />
                 <PlatformTour />
+                <GlobalTooltip />
               </TourProvider>
             </ConfirmProvider>
           </ToastProvider>

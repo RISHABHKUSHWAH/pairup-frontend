@@ -72,7 +72,13 @@ export default function LearnerFavoritesPage() {
               <div key={id} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div className="card-top" style={{ flex: 1 }}>
-                    <div className="avatar">{initials(m.name)}</div>
+                    <div className="avatar">
+                      {m.photo_url || m.avatar ? (
+                        <img src={m.photo_url || m.avatar} alt={m.name} />
+                      ) : (
+                        initials(m.name)
+                      )}
+                    </div>
                     <div>
                       <Link
                         to={`/mentor/${id}`}
@@ -107,9 +113,9 @@ export default function LearnerFavoritesPage() {
                 </div>
 
                 <div style={{ margin: '12px 0 6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span className={`status ${m.online_status ? 'online' : 'away'}`}>
+                  <span className={`status ${(m.online || m.online_status || m.is_online) ? 'online' : 'away'}`}>
                     <span className="led"></span>
-                    {m.online_status ? 'Available Now (Online)' : 'Next Available Tomorrow'}
+                    {(m.online || m.online_status || m.is_online) ? 'Available Now (Online)' : 'Next Available Tomorrow'}
                   </span>
                 </div>
 

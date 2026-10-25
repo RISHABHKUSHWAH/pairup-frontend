@@ -181,6 +181,7 @@ export const mentorProfileSettings = {
       return {
         name: user?.name || 'Alex Rivera',
         email: user?.email || 'alex@example.com',
+        photo_url: user?.photo_url || user?.avatar || '',
         headline: 'Senior Full-Stack & Cloud Architect | Ex-Staff Engineer',
         bio: 'Passionate about distributed systems, Python microservices, and React performance. Helped 50+ engineers level up and debug complex production bottlenecks.',
         location: 'Bengaluru, India',
@@ -220,6 +221,7 @@ export const mentorProfileSettings = {
     return {
       name: user?.name || '',
       email: user?.email || '',
+      photo_url: user?.photo_url || user?.avatar || '',
       headline: '',
       bio: '',
       location: '',
@@ -256,6 +258,7 @@ export const mentorProfileSettings = {
         const parsed = JSON.parse(stored);
         if (user?.name && (!parsed.name || parsed.name === 'Alex Rivera')) parsed.name = user.name;
         if (user?.email && (!parsed.email || parsed.email === 'alex.mentor@pairup.dev')) parsed.email = user.email;
+        if (parsed.photo_url === undefined && (user?.photo_url || user?.avatar)) parsed.photo_url = user.photo_url || user.avatar;
         return parsed;
       }
     } catch {}
@@ -271,52 +274,19 @@ export const mentorProfileSettings = {
 };
 
 export const mentorNotifications = {
-  getDefaults: () => [
-    {
-      id: 1,
-      type: 'problem',
-      title: 'New Problem Matching Your Skills',
-      body: 'A learner posted: Django REST Framework JWT authentication blocker. Budget: ₹1,200.',
-      time: '15m ago',
-      read: false,
-      link: '/mentor/explore-problems',
-    },
-    {
-      id: 2,
-      type: 'proposal',
-      title: 'Proposal Accepted! 🎉',
-      body: "Your proposal for 'React state synchronization bug' was accepted. Booking created in Sessions.",
-      time: '2h ago',
-      read: false,
-      link: '/mentor/sessions',
-    },
-    {
-      id: 3,
-      type: 'payment',
-      title: 'Payment Released to Your Balance',
-      body: '₹1,500 has been released from escrow for completed session with Sarah Connor.',
-      time: '1d ago',
-      read: true,
-      link: '/mentor/earnings',
-    },
-    {
-      id: 4,
-      type: 'review',
-      title: 'New 5★ Rating Received!',
-      body: "Sarah Connor left a 5-star review: 'Outstanding mentor! Fixed our backend query issue in under 30 mins.'",
-      time: '2d ago',
-      read: true,
-      link: '/mentor/reviews',
-    },
-  ],
+  getDefaults: () => [],
   getNotifications: () => {
     try {
       const stored = localStorage.getItem('pairup_mentor_notifications');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          // Remove legacy dummy notifications (ids 1..10)
+          return parsed.filter((n) => Number(n.id) > 10 || typeof n.id === 'string');
+        }
+      }
     } catch {}
-    const defaults = mentorNotifications.getDefaults();
-    localStorage.setItem('pairup_mentor_notifications', JSON.stringify(defaults));
-    return defaults;
+    return [];
   },
   markRead: (id) => {
     const list = mentorNotifications.getNotifications().filter((n) => String(n.id) !== String(id));

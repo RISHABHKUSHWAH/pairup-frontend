@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
 import { api, initials } from '../../api/client';
 import { CheckIcon, MessageIcon } from '../../components/Icons';
@@ -153,6 +154,7 @@ export default function AdminVerificationPage() {
 
   return (
     <PortalLayout title="Mentor Verification Console" portalType="admin">
+      <AdminCategoryNav category="users" />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
         <div>
           <p className="sub" style={{ margin: 0 }}>

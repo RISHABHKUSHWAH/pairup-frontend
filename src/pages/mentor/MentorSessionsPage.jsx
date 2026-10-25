@@ -60,7 +60,9 @@ export default function MentorSessionsPage() {
       const data = await api.getBookings();
       setBookings(data);
     } catch (err) {
-      setError(err.message || 'Failed to load sessions');
+      if (err?.status !== 401) {
+        setError(err.message || 'Failed to load sessions');
+      }
     } finally {
       setLoading(false);
     }

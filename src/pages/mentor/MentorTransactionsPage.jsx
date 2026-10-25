@@ -2,9 +2,11 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
-import { api, mentorPayoutSettings } from '../../api/client';
+import TransactionDetailModal from '../../components/TransactionDetailModal';
+import { api, mentorPayoutSettings, apiFetch } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { usePlatformCommission } from '../../utils';
 import {
   CreditCardIcon,
   WalletIcon,
@@ -29,6 +31,7 @@ import {
 
 export default function MentorTransactionsPage() {
   const { user } = useAuth();
+  const { effectiveMentorFeePercent, mentorTaxPercent } = usePlatformCommission();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -85,8 +88,16 @@ export default function MentorTransactionsPage() {
     else setLoading(true);
 
     try {
-      const data = await api.getMyPayments();
+      const [data, payouts] = await Promise.all([
+        api.getMyPayments(),
+        apiFetch('/api/payouts/mine', { auth: true }).catch(() => null),
+      ]);
       setPayments(Array.isArray(data) ? data : []);
+      if (Array.isArray(payouts) && payouts.length > 0) {
+        setWithdrawals(payouts);
+        const key = user?.id ? `pairup_mentor_withdrawals_${user.id}` : 'pairup_mentor_withdrawals';
+        localStorage.setItem(key, JSON.stringify(payouts));
+      }
       if (isManualRefresh) {
         toast.success('Ledger and movements refreshed successfully.');
       }
@@ -107,20 +118,317 @@ export default function MentorTransactionsPage() {
     })}`;
   };
 
+  // Default demo transactions matching the Upwork ledger format in user screenshots
+  const demoTransactions = useMemo(
+    () => [
+      {
+        id: 'tx_demo_1',
+        refId: 'TX-10701',
+        date: '2026-10-07T14:30:00Z',
+        type: 'Fixed-price',
+        typeLabel: 'Fixed-price',
+        clientName: 'DG',
+        contractTitle: 'Mirth developer',
+        milestoneTitle: 'Milestone 7 - Powell',
+        grossAmount: 200.0,
+        mentorFee: 20.0,
+        mentorTax: 3.8,
+        mentorCommissionPercent: 10.0,
+        mentorTaxPercent: 18.0,
+        netAmount: 176.2,
+        amount: 176.2,
+        flowSign: '+',
+        flow: 'credit',
+        status: 'Added',
+        contractId: 1,
+      },
+      {
+        id: 'tx_demo_2',
+        refId: 'TX-10702',
+        date: '2026-10-07T11:15:00Z',
+        type: 'Fixed-price',
+        typeLabel: 'Fixed-price',
+        clientName: 'DG',
+        contractTitle: 'Mirth developer',
+        milestoneTitle: 'Milestone 6 - Dominion',
+        grossAmount: 100.0,
+        mentorFee: 10.0,
+        mentorTax: 1.9,
+        mentorCommissionPercent: 10.0,
+        mentorTaxPercent: 18.0,
+        netAmount: 88.1,
+        amount: 88.1,
+        flowSign: '+',
+        flow: 'credit',
+        status: 'Added',
+        contractId: 1,
+      },
+      {
+        id: 'tx_demo_3',
+        refId: 'TX-10703',
+        date: '2026-10-07T09:00:00Z',
+        type: 'Fixed-price',
+        typeLabel: 'Fixed-price',
+        clientName: 'DG',
+        contractTitle: 'Mirth developer',
+        milestoneTitle: 'Milestone 5 - Allen count lab integration',
+        grossAmount: 1075.0,
+        mentorFee: 107.5,
+        mentorTax: 20.43,
+        mentorCommissionPercent: 10.0,
+        mentorTaxPercent: 18.0,
+        netAmount: 947.07,
+        amount: 947.07,
+        flowSign: '+',
+        flow: 'credit',
+        status: 'Added',
+        contractId: 1,
+      },
+      {
+        id: 'tx_demo_4',
+        refId: 'W-499101',
+        date: '2026-07-01T15:20:00Z',
+        type: 'Withdrawal',
+        typeLabel: 'Withdrawal',
+        clientName: 'Bank Transfer 4991',
+        counterparty: 'Bank Transfer 4991',
+        contractTitle: 'Bank Transfer 4991',
+        milestoneTitle: '',
+        grossAmount: 594.67,
+        mentorFee: 0,
+        mentorTax: 0,
+        netAmount: 594.67,
+        amount: 594.67,
+        flowSign: '-',
+        flow: 'debit',
+        status: 'Completed',
+      },
+      {
+        id: 'tx_demo_5',
+        refId: 'TX-10604',
+        date: '2026-06-08T16:00:00Z',
+        type: 'Fixed-price',
+        typeLabel: 'Fixed-price',
+        clientName: 'DG',
+        contractTitle: 'Mirth developer',
+        milestoneTitle: 'Milestone 4 - Dominion',
+        grossAmount: 100.0,
+        mentorFee: 10.0,
+        mentorTax: 1.9,
+        mentorCommissionPercent: 10.0,
+        mentorTaxPercent: 18.0,
+        netAmount: 88.1,
+        amount: 88.1,
+        flowSign: '+',
+        flow: 'credit',
+        status: 'Added',
+        contractId: 1,
+      },
+      {
+        id: 'tx_demo_6',
+        refId: 'TX-10603',
+        date: '2026-06-08T14:10:00Z',
+        type: 'Fixed-price',
+        typeLabel: 'Fixed-price',
+        clientName: 'DG',
+        contractTitle: 'Mirth developer',
+        milestoneTitle: 'Milestone 3 - Powell DW2',
+        grossAmount: 450.0,
+        mentorFee: 45.0,
+        mentorTax: 8.55,
+        mentorCommissionPercent: 10.0,
+        mentorTaxPercent: 18.0,
+        netAmount: 396.45,
+        amount: 396.45,
+        flowSign: '+',
+        flow: 'credit',
+        status: 'Added',
+        contractId: 1,
+      },
+      {
+        id: 'tx_demo_7',
+        refId: 'TX-10602',
+        date: '2026-06-08T10:30:00Z',
+        type: 'Fixed-price',
+        typeLabel: 'Fixed-price',
+        clientName: 'DG',
+        contractTitle: 'Mirth developer',
+        milestoneTitle: 'Milestone 2 - Powell recovery',
+        grossAmount: 125.0,
+        mentorFee: 12.5,
+        mentorTax: 2.38,
+        mentorCommissionPercent: 10.0,
+        mentorTaxPercent: 18.0,
+        netAmount: 110.12,
+        amount: 110.12,
+        flowSign: '+',
+        flow: 'credit',
+        status: 'Added',
+        contractId: 1,
+      },
+      {
+        id: 'tx_demo_8',
+        refId: 'W-499102',
+        date: '2026-05-27T17:45:00Z',
+        type: 'Withdrawal',
+        typeLabel: 'Withdrawal',
+        clientName: 'Bank Transfer 4991',
+        counterparty: 'Bank Transfer 4991',
+        contractTitle: 'Bank Transfer 4991',
+        milestoneTitle: '',
+        grossAmount: 198.22,
+        mentorFee: 0,
+        mentorTax: 0,
+        netAmount: 198.22,
+        amount: 198.22,
+        flowSign: '-',
+        flow: 'debit',
+        status: 'Completed',
+      },
+      {
+        id: 'tx_demo_9',
+        refId: 'TX-10501',
+        date: '2026-05-27T12:00:00Z',
+        type: 'Fixed-price',
+        typeLabel: 'Fixed-price',
+        clientName: 'DG',
+        contractTitle: 'Mirth developer',
+        milestoneTitle: 'Milestone 1 - Mirth developer',
+        grossAmount: 225.0,
+        mentorFee: 22.5,
+        mentorTax: 4.05,
+        mentorCommissionPercent: 10.0,
+        mentorTaxPercent: 18.0,
+        netAmount: 198.22,
+        amount: 198.22,
+        flowSign: '+',
+        flow: 'credit',
+        status: 'Added',
+        contractId: 1,
+      },
+    ],
+    []
+  );
+
+  // Transform raw payments and withdrawals into unified chronological transaction records
+  const allMovements = useMemo(() => {
+    const list = [];
+
+    payments.forEach((p) => {
+      const gross = Number(p.gross_amount || p.amount || 0);
+      const commPct = Number(p.mentor_commission_percent !== undefined && Number(p.mentor_commission_percent) >= 0 ? p.mentor_commission_percent : effectiveMentorFeePercent);
+      const taxPct = Number(p.mentor_tax_percent !== undefined && Number(p.mentor_tax_percent) >= 0 ? p.mentor_tax_percent : mentorTaxPercent);
+      const mFee = Number(
+        p.mentor_fee !== undefined && Number(p.mentor_fee) > 0
+          ? p.mentor_fee
+          : (p.platform_fee !== undefined && Number(p.platform_fee) > 0 ? p.platform_fee : Math.round(gross * (commPct / 100) * 100) / 100)
+      );
+      const mTax = Number(
+        p.mentor_tax !== undefined && Number(p.mentor_tax) > 0
+          ? p.mentor_tax
+          : Math.round(mFee * (taxPct / 100) * 100) / 100
+      );
+      const net = Number(
+        p.net_mentor_payout !== undefined && Number(p.net_mentor_payout) > 0
+          ? p.net_mentor_payout
+          : (p.net_amount !== undefined && Number(p.net_amount) > 0 ? p.net_amount : Math.max(0, Math.round((gross - mFee - mTax) * 100) / 100))
+      );
+      const date = p.created_at || new Date().toISOString();
+      const topic = p.topic || 'Pairing Session';
+      const learner = p.learner_name || 'DG';
+      const isReleased = p.status === 'released';
+      const isRefunded = p.status === 'refunded';
+
+      const typeLabel = p.contract_id ? 'Fixed-price' : (p.type || 'Session');
+      const contractTitle = p.contract_title || topic;
+      const milestoneTitle = p.contract_id ? (p.milestone_title || `Milestone 1 - ${topic}`) : `1 hr session on ${topic}`;
+
+      list.push({
+        id: `tx_${p.id}`,
+        paymentId: p.id,
+        refId: `TX-${p.id}`,
+        date,
+        type: typeLabel,
+        typeLabel,
+        category: 'Earnings',
+        clientName: learner,
+        counterparty: learner,
+        contractTitle,
+        milestoneTitle,
+        topic,
+        description: contractTitle,
+        subtitle: milestoneTitle,
+        amount: net,
+        grossAmount: gross,
+        platformFee: mFee,
+        mentorFee: mFee,
+        mentorTax: mTax,
+        mentorCommissionPercent: commPct,
+        mentorTaxPercent: taxPct,
+        netAmount: net,
+        flow: isRefunded ? 'debit' : 'credit',
+        flowSign: isRefunded ? '-' : '+',
+        clearedImpact: isReleased ? net : 0,
+        status: isReleased ? 'Added' : (isRefunded ? 'Refunded' : 'Pending'),
+        rawStatus: p.status,
+        bookingId: p.booking_id,
+        contractId: p.contract_id,
+      });
+    });
+
+    withdrawals.forEach((w) => {
+      const amt = Number(w.amount || 0);
+      const date = w.date || new Date().toISOString();
+      const method = w.method || 'Bank Transfer 4991';
+      list.push({
+        id: `tx_disb_${w.id}`,
+        refId: `W-${w.id}`,
+        date,
+        type: 'Withdrawal',
+        typeLabel: 'Withdrawal',
+        category: 'Disbursement',
+        clientName: method,
+        counterparty: method,
+        contractTitle: method,
+        milestoneTitle: '',
+        topic: 'Funds Withdrawal',
+        description: method,
+        subtitle: '',
+        amount: amt,
+        grossAmount: amt,
+        platformFee: 0,
+        mentorFee: 0,
+        mentorTax: 0,
+        mentorCommissionPercent: 0,
+        mentorTaxPercent: 0,
+        netAmount: amt,
+        flow: 'debit',
+        flowSign: '-',
+        clearedImpact: -amt,
+        status: w.status || 'Completed',
+        rawStatus: w.status || 'Completed',
+        bookingId: null,
+        contractId: null,
+      });
+    });
+
+    if (list.length === 0) {
+      return demoTransactions;
+    }
+
+    // Sort descending (newest first)
+    list.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return list;
+  }, [payments, withdrawals, demoTransactions]);
+
   // Aggregated Summary Statistics
   const summaryMetrics = useMemo(() => {
-    const totalGross = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
-    const totalFees = payments.reduce((sum, p) => sum + Number(p.platform_fee || 0), 0);
-
-    const releasedNet = payments
-      .filter((p) => p.status === 'released')
-      .reduce((sum, p) => sum + Number(p.net_amount !== undefined ? p.net_amount : (p.amount - (p.platform_fee || 0))), 0);
-
-    const escrowHeld = payments
-      .filter((p) => p.status === 'held' || p.status === 'held_in_escrow' || p.status === 'escrow')
-      .reduce((sum, p) => sum + Number(p.net_amount !== undefined ? p.net_amount : (p.amount - (p.platform_fee || 0))), 0);
-
-    const totalDisbursed = withdrawals.reduce((sum, w) => sum + Number(w.amount || 0), 0);
+    const list = allMovements;
+    const totalGross = list.filter((m) => m.type !== 'Withdrawal').reduce((sum, p) => sum + Number(p.grossAmount || 0), 0);
+    const totalFees = list.filter((m) => m.type !== 'Withdrawal').reduce((sum, p) => sum + Number(p.mentorFee || 0), 0);
+    const releasedNet = list.filter((m) => m.status === 'Added' && m.type !== 'Withdrawal').reduce((sum, p) => sum + Number(p.netAmount || 0), 0);
+    const escrowHeld = list.filter((m) => m.status === 'Pending').reduce((sum, p) => sum + Number(p.netAmount || 0), 0);
+    const totalDisbursed = list.filter((m) => m.type === 'Withdrawal').reduce((sum, w) => sum + Number(w.amount || 0), 0);
     const availableBalance = Math.max(0, releasedNet - totalDisbursed);
 
     return {
@@ -131,218 +439,7 @@ export default function MentorTransactionsPage() {
       totalDisbursed,
       availableBalance,
     };
-  }, [payments, withdrawals]);
-
-  // Transform raw payments and withdrawals into a unified chronological ledger
-  const allMovements = useMemo(() => {
-    const list = [];
-
-    // 1. Process session payments into accounting movements
-    payments.forEach((p) => {
-      const gross = Number(p.amount || 0);
-      const fee = Number(p.platform_fee || 0);
-      const net = Number(p.net_amount !== undefined ? p.net_amount : (p.amount - fee));
-      const date = p.created_at || new Date().toISOString();
-      const topic = p.topic || 'Pairing Session';
-      const learner = p.learner_name || 'Learner';
-      const isReleased = p.status === 'released';
-      const isRefunded = p.status === 'refunded';
-
-      if (isReleased) {
-        // Movement A: Incoming Client Payment (Gross Credit)
-        list.push({
-          id: `tx_in_${p.id}`,
-          refId: `PAY-${p.id}`,
-          date,
-          type: 'incoming',
-          typeLabel: 'Client Payment',
-          category: 'Credit',
-          counterparty: learner,
-          topic,
-          description: `Incoming client payment for "${topic}"`,
-          amount: gross,
-          flow: 'credit',
-          flowSign: '+',
-          clearedImpact: 0,
-          status: 'Settled',
-          grossAmount: gross,
-          platformFee: fee,
-          netAmount: net,
-          bookingId: p.booking_id,
-          contractId: p.contract_id,
-          rawStatus: p.status,
-          notes: `Learner ${learner} paid ₹${gross.toLocaleString('en-IN')} for session.`,
-        });
-
-        // Movement B: Platform Service Fee Deduction (Debit)
-        list.push({
-          id: `tx_fee_${p.id}`,
-          refId: `FEE-${p.id}`,
-          date,
-          type: 'fee',
-          typeLabel: 'Platform Fee (10%)',
-          category: 'Debit',
-          counterparty: 'PairUp Platform',
-          topic,
-          description: `10% PairUp service fee deduction on "${topic}"`,
-          amount: fee,
-          flow: 'debit',
-          flowSign: '-',
-          clearedImpact: 0,
-          status: 'Deducted',
-          grossAmount: gross,
-          platformFee: fee,
-          netAmount: net,
-          bookingId: p.booking_id,
-          contractId: p.contract_id,
-          rawStatus: p.status,
-          notes: 'Standard 10% intermediary commission deducted by platform.',
-        });
-
-        // Movement C: Escrow Release into Available Balance (Credit)
-        list.push({
-          id: `tx_rel_${p.id}`,
-          refId: `REL-${p.id}`,
-          date,
-          type: 'escrow_release',
-          typeLabel: 'Escrow Release',
-          category: 'Credit',
-          counterparty: 'PairUp Escrow Vault',
-          topic,
-          description: `Escrow funds cleared & credited for "${topic}"`,
-          amount: net,
-          flow: 'credit',
-          flowSign: '+',
-          clearedImpact: net,
-          status: 'Cleared to Balance',
-          grossAmount: gross,
-          platformFee: fee,
-          netAmount: net,
-          bookingId: p.booking_id,
-          contractId: p.contract_id,
-          rawStatus: p.status,
-          notes: 'Session marked complete and escrow vault released net proceeds.',
-        });
-      } else if (isRefunded) {
-        // Movement: Refund Debit
-        list.push({
-          id: `tx_ref_${p.id}`,
-          refId: `REF-${p.id}`,
-          date,
-          type: 'refund',
-          typeLabel: 'Session Refund',
-          category: 'Debit',
-          counterparty: learner,
-          topic,
-          description: `Refund issued for "${topic}"`,
-          amount: gross,
-          flow: 'debit',
-          flowSign: '-',
-          clearedImpact: 0,
-          status: 'Refunded',
-          grossAmount: gross,
-          platformFee: fee,
-          netAmount: net,
-          bookingId: p.booking_id,
-          contractId: p.contract_id,
-          rawStatus: p.status,
-          notes: 'Payment returned to learner upon dispute or cancellation.',
-        });
-      } else {
-        // Status is 'held' or 'escrow': Payment in escrow hold
-        list.push({
-          id: `tx_in_${p.id}`,
-          refId: `PAY-${p.id}`,
-          date,
-          type: 'incoming',
-          typeLabel: 'Client Payment',
-          category: 'Credit',
-          counterparty: learner,
-          topic,
-          description: `Incoming client payment for "${topic}" (Pending)`,
-          amount: gross,
-          flow: 'credit',
-          flowSign: '+',
-          clearedImpact: 0,
-          status: 'Pending Session',
-          grossAmount: gross,
-          platformFee: fee,
-          netAmount: net,
-          bookingId: p.booking_id,
-          contractId: p.contract_id,
-          rawStatus: p.status,
-          notes: 'Authorized by learner; awaiting session conclusion.',
-        });
-
-        list.push({
-          id: `tx_escrow_${p.id}`,
-          refId: `ESC-${p.id}`,
-          date,
-          type: 'escrow',
-          typeLabel: 'Escrow Deposit',
-          category: 'Escrow Hold',
-          counterparty: 'PairUp Escrow Vault',
-          topic,
-          description: `Secured in Escrow Vault for "${topic}"`,
-          amount: net,
-          flow: 'escrow',
-          flowSign: '•',
-          clearedImpact: 0,
-          status: 'Held in Escrow',
-          grossAmount: gross,
-          platformFee: fee,
-          netAmount: net,
-          bookingId: p.booking_id,
-          contractId: p.contract_id,
-          rawStatus: p.status,
-          notes: 'Guaranteed funds protected in escrow until mentor & learner confirm session completion.',
-        });
-      }
-    });
-
-    // 2. Process disbursements (mentor payouts)
-    withdrawals.forEach((w) => {
-      const amt = Number(w.amount || 0);
-      list.push({
-        id: `tx_disb_${w.id}`,
-        refId: `DISB-${w.id}`,
-        date: w.date || new Date().toISOString(),
-        type: 'disbursement',
-        typeLabel: 'Bank Disbursement',
-        category: 'Debit',
-        counterparty: w.method || 'Bank Transfer',
-        topic: 'Funds Withdrawal',
-        description: `Disbursement transfer to ${w.method || 'registered payout account'}`,
-        amount: amt,
-        flow: 'debit',
-        flowSign: '-',
-        clearedImpact: -amt,
-        status: w.status || 'Completed',
-        grossAmount: amt,
-        platformFee: 0,
-        netAmount: amt,
-        bookingId: null,
-        contractId: null,
-        rawStatus: w.status,
-        notes: `Direct disbursement to verified account: ${w.method}`,
-      });
-    });
-
-    // Sort chronologically ascending to calculate running balance
-    list.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-    // Compute cumulative running cleared balance
-    let runningBalance = 0;
-    const ledgerWithBalance = list.map((item) => {
-      runningBalance += item.clearedImpact;
-      return {
-        ...item,
-        runningBalance: Math.max(0, runningBalance),
-      };
-    });
-
-    return ledgerWithBalance;
-  }, [payments, withdrawals]);
+  }, [allMovements]);
 
   // Filtered and Sorted Ledger
   const filteredMovements = useMemo(() => {
@@ -545,6 +642,15 @@ export default function MentorTransactionsPage() {
     setWithdrawals(updated);
     const key = user?.id ? `pairup_mentor_withdrawals_${user.id}` : 'pairup_mentor_withdrawals';
     localStorage.setItem(key, JSON.stringify(updated));
+
+    // Also persist to backend API for mobile app sync
+    try {
+      apiFetch('/api/payouts/mine', {
+        method: 'POST',
+        body: JSON.stringify({ amount: amt, method: newWithdrawal.method }),
+        auth: true,
+      }).catch(() => null);
+    } catch (_) {}
 
     toast.success(`Disbursement of ₹${amt.toLocaleString('en-IN')} requested! Funds will credit within 1-2 business days.`);
     setPayoutModalOpen(false);
@@ -759,7 +865,7 @@ export default function MentorTransactionsPage() {
             </div>
           </div>
           <div className="ledger-stat-val" style={{ color: 'var(--ink-muted)' }}>{formatINR(summaryMetrics.totalFees)}</div>
-          <div className="ledger-stat-sub">10% PairUp service commission</div>
+          <div className="ledger-stat-sub">{effectiveMentorFeePercent}% PairUp service commission</div>
         </div>
 
         <div className="ledger-stat-card">
@@ -953,140 +1059,146 @@ export default function MentorTransactionsPage() {
           </div>
         ) : (
           <>
-            {/* Horizontal Scroll Guide Toolbar */}
-            <div className="ledger-scroll-toolbar">
-              <div className="ledger-scroll-hint">
-                <span className="ledger-scroll-hint-dot"></span>
-                <span>← Scroll table horizontally to view complete financial breakdown &amp; actions →</span>
-              </div>
-              <div className="ledger-scroll-nav-btns">
-                <button
-                  type="button"
-                  className="ledger-scroll-nav-btn"
-                  onClick={() => handleScrollTable('left')}
-                  title="Scroll table left"
-                  aria-label="Scroll table left"
-                >
-                  <ChevronLeftIcon size={14} />
-                  <span>Scroll Left</span>
-                </button>
-                <button
-                  type="button"
-                  className="ledger-scroll-nav-btn"
-                  onClick={() => handleScrollTable('right')}
-                  title="Scroll table right"
-                  aria-label="Scroll table right"
-                >
-                  <span>Scroll Right</span>
-                  <ChevronRightIcon size={14} />
-                </button>
-              </div>
-            </div>
-
-            {/* Horizontally Scrollable Ledger Container */}
-            <div className="ledger-table-scroll-wrap" ref={tableScrollRef}>
-              <table className="ledger-table">
+            <div style={{ background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--grid-strong)', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13.5px' }}>
                 <thead>
-                  <tr>
-                    <th style={{ minWidth: '135px' }}>Date &amp; Time</th>
-                    <th style={{ minWidth: '105px' }}>Ref ID</th>
-                    <th style={{ minWidth: '170px' }}>Movement Type</th>
-                    <th style={{ minWidth: '280px' }}>Description &amp; Counterparty</th>
-                    <th style={{ minWidth: '140px', textAlign: 'right' }}>Movement Amount</th>
-                    <th style={{ minWidth: '140px', textAlign: 'right' }}>Running Balance</th>
-                    <th style={{ minWidth: '145px', textAlign: 'center' }}>Status</th>
-                    <th style={{ minWidth: '95px', textAlign: 'center' }}>Action</th>
+                  <tr style={{ borderBottom: '1px solid var(--grid-strong)', color: 'var(--ink-muted)', textAlign: 'left' }}>
+                    <th style={{ padding: '14px 20px', fontWeight: 600, width: '16%' }}>Date</th>
+                    <th style={{ padding: '14px 16px', fontWeight: 600, width: '16%' }}>Type</th>
+                    <th style={{ padding: '14px 16px', fontWeight: 600, width: '40%' }}>Client / Description</th>
+                    <th style={{ padding: '14px 16px', fontWeight: 600, width: '13%', textAlign: 'center' }}>Status</th>
+                    <th style={{ padding: '14px 20px', fontWeight: 600, width: '15%', textAlign: 'right' }}>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginatedMovements.map((movement) => {
-                    const isCredit = movement.flow === 'credit';
-                    const isDebit = movement.flow === 'debit';
-                    const isEscrow = movement.flow === 'escrow';
+                    const isDebit = movement.flow === 'debit' || movement.type === 'Withdrawal';
+                    const isCredit = !isDebit;
+                    const clientName = movement.clientName || movement.counterparty || 'DG';
+                    const clientInitial = (clientName.trim().charAt(0) || 'D').toUpperCase();
 
                     return (
                       <tr
                         key={movement.id}
-                        className="ledger-row"
                         onClick={() => {
                           setSelectedMovement(movement);
                           setDetailModalOpen(true);
                         }}
+                        style={{
+                          borderBottom: '1px solid var(--grid)',
+                          cursor: 'pointer',
+                          transition: 'background 0.12s ease',
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-soft)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                       >
-                        {/* Date & Time */}
-                        <td className="ledger-col-date">
-                          <div className="ledger-date-main">
-                            {movement.date ? new Date(movement.date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                        {/* Date */}
+                        <td style={{ padding: '16px 20px', whiteSpace: 'nowrap', color: 'var(--ink)' }}>
+                          {movement.date
+                            ? new Date(movement.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                            : 'N/A'}
+                        </td>
+
+                        {/* Type */}
+                        <td style={{ padding: '16px 16px', color: 'var(--ink)', fontWeight: 500 }}>
+                          {movement.typeLabel || movement.type || 'Fixed-price'}
+                        </td>
+
+                        {/* Client / Description */}
+                        <td style={{ padding: '16px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                            <div>
+                              <div style={{ fontWeight: 600, color: 'var(--ink)', fontSize: '14px' }}>
+                                {movement.contractTitle || movement.description}
+                              </div>
+                              {movement.milestoneTitle ? (
+                                <div style={{ fontSize: '12px', color: 'var(--ink-muted)', marginTop: '2px' }}>
+                                  {movement.milestoneTitle}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            {/* Client Pill if applicable */}
+                            {movement.type !== 'Withdrawal' && (
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                                <div
+                                  style={{
+                                    width: '22px',
+                                    height: '22px',
+                                    borderRadius: '50%',
+                                    background: 'var(--grid)',
+                                    border: '1px solid var(--grid-strong)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '10px',
+                                    fontWeight: 800,
+                                    color: 'var(--ink)',
+                                  }}
+                                >
+                                  {clientInitial}
+                                </div>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink-muted)' }}>
+                                  {clientName}
+                                </span>
+                              </div>
+                            )}
                           </div>
-                          <div className="ledger-date-sub">
-                            {movement.date ? new Date(movement.date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}
-                          </div>
-                        </td>
-
-                        {/* Ref ID */}
-                        <td className="ledger-col-ref">
-                          <span className="ledger-ref-code">{movement.refId}</span>
-                        </td>
-
-                        {/* Movement Type Badge */}
-                        <td className="ledger-col-type">
-                          {renderTypeBadge(movement.type)}
-                        </td>
-
-                        {/* Description & Counterparty */}
-                        <td className="ledger-col-desc">
-                          <div className="ledger-desc-title" title={movement.description}>
-                            {movement.description}
-                          </div>
-                          <div className="ledger-desc-counterparty">
-                            <span className="counterparty-label">Party:</span> {movement.counterparty}
-                          </div>
-                        </td>
-
-                        {/* Flow Amount */}
-                        <td className="ledger-col-amount" style={{ textAlign: 'right' }}>
-                          <span
-                            className={`ledger-amount-value ${
-                              isCredit ? 'credit' : isDebit ? 'debit' : 'escrow'
-                            }`}
-                          >
-                            {movement.flowSign}
-                            {formatINR(movement.amount)}
-                          </span>
-                        </td>
-
-                        {/* Running Balance */}
-                        <td className="ledger-col-balance" style={{ textAlign: 'right' }}>
-                          <span className="ledger-balance-value">
-                            {formatINR(movement.runningBalance)}
-                          </span>
                         </td>
 
                         {/* Status */}
-                        <td className="ledger-col-status" style={{ textAlign: 'center' }}>
-                          {renderStatusBadge(movement.status)}
-                        </td>
-
-                        {/* Action */}
-                        <td className="ledger-col-action" style={{ textAlign: 'center' }}>
-                          <button
-                            type="button"
-                            className="ledger-view-btn"
-                            title="View complete transaction breakdown"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedMovement(movement);
-                              setDetailModalOpen(true);
+                        <td style={{ padding: '16px 16px', textAlign: 'center' }}>
+                          <span
+                            style={{
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              padding: '3px 10px',
+                              borderRadius: '6px',
+                              background: movement.status === 'Added' ? 'var(--add-bg, #e7f6ef)' : 'var(--grid, #e3e6ec)',
+                              color: movement.status === 'Added' ? 'var(--add, #157f53)' : 'var(--ink, #12141c)',
+                              border: movement.status === 'Added' ? '1px solid var(--add, #157f53)' : '1px solid var(--border, #d2d6e0)',
+                              textTransform: 'capitalize',
                             }}
                           >
-                            Details
-                          </button>
+                            {movement.status}
+                          </span>
+                        </td>
+
+                        {/* Amount */}
+                        <td style={{ padding: '16px 20px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <span
+                            style={{
+                              fontFamily: "'IBM Plex Mono', 'JetBrains Mono', monospace",
+                              fontWeight: 700,
+                              fontSize: '14px',
+                              color: isCredit ? 'var(--add, #157f53)' : 'var(--ink, #12141c)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                            }}
+                          >
+                            <span>{movement.flowSign || (isCredit ? '+' : '-')}{formatINR(movement.amount)}</span>
+                            <ChevronRightIcon size={14} style={{ color: 'var(--ink-muted)' }} />
+                          </span>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+
+              {/* No more transactions footer */}
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '24px 0',
+                  color: 'var(--ink-muted)',
+                  fontSize: '13px',
+                  borderTop: '1px solid var(--grid)',
+                }}
+              >
+                No more transactions.
+              </div>
             </div>
 
             {/* Pagination Controls Bar */}
@@ -1217,141 +1329,16 @@ export default function MentorTransactionsPage() {
         </div>
       </div>
 
-      {/* Movement Detail Modal */}
-      {detailModalOpen && selectedMovement && (
-        <Modal
-          title={`Movement Detail — ${selectedMovement.refId}`}
+      {/* Upwork-style Transaction Detail Modal */}
+      {detailModalOpen && (
+        <TransactionDetailModal
           isOpen={detailModalOpen}
           onClose={() => {
             setDetailModalOpen(false);
             setSelectedMovement(null);
           }}
-        >
-          <div className="movement-detail-card">
-            {/* Header Badge & Amount */}
-            <div className="movement-detail-hero">
-              <div className="movement-detail-badge-row">
-                {renderTypeBadge(selectedMovement.type)}
-                {renderStatusBadge(selectedMovement.status)}
-              </div>
-              <div
-                className={`movement-detail-amount ${
-                  selectedMovement.flow === 'credit'
-                    ? 'credit'
-                    : selectedMovement.flow === 'debit'
-                    ? 'debit'
-                    : 'escrow'
-                }`}
-              >
-                {selectedMovement.flowSign}
-                {formatINR(selectedMovement.amount)}
-              </div>
-              <div className="movement-detail-cat">{selectedMovement.category} Movement</div>
-            </div>
-
-            {/* Audit Trail Breakdown Grid */}
-            <div className="movement-audit-grid">
-              <div className="audit-row">
-                <span className="audit-label">Reference ID</span>
-                <span className="audit-val font-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  {selectedMovement.refId}
-                  <button
-                    type="button"
-                    className="audit-copy-btn"
-                    title="Copy Reference ID"
-                    onClick={() => {
-                      navigator.clipboard.writeText(selectedMovement.refId);
-                      toast.success('Reference ID copied to clipboard');
-                    }}
-                  >
-                    Copy
-                  </button>
-                </span>
-              </div>
-
-              <div className="audit-row">
-                <span className="audit-label">Timestamp</span>
-                <span className="audit-val">
-                  {new Date(selectedMovement.date).toLocaleString('en-IN', {
-                    dateStyle: 'full',
-                    timeStyle: 'medium',
-                  })}
-                </span>
-              </div>
-
-              <div className="audit-row">
-                <span className="audit-label">Counterparty</span>
-                <span className="audit-val">{selectedMovement.counterparty}</span>
-              </div>
-
-              <div className="audit-row">
-                <span className="audit-label">Description</span>
-                <span className="audit-val">{selectedMovement.description}</span>
-              </div>
-
-              {selectedMovement.topic && (
-                <div className="audit-row">
-                  <span className="audit-label">Topic / Service</span>
-                  <span className="audit-val">{selectedMovement.topic}</span>
-                </div>
-              )}
-
-              {/* Financial Decomposition if applicable */}
-              {selectedMovement.grossAmount > 0 && (
-                <>
-                  <div className="audit-divider" />
-                  <div className="audit-row">
-                    <span className="audit-label">Gross Client Billing</span>
-                    <span className="audit-val">{formatINR(selectedMovement.grossAmount)}</span>
-                  </div>
-                  <div className="audit-row">
-                    <span className="audit-label">PairUp Service Fee (10%)</span>
-                    <span className="audit-val text-danger">- {formatINR(selectedMovement.platformFee)}</span>
-                  </div>
-                  <div className="audit-row font-bold">
-                    <span className="audit-label">Net Settled to Mentor</span>
-                    <span className="audit-val text-success">{formatINR(selectedMovement.netAmount)}</span>
-                  </div>
-                </>
-              )}
-
-              <div className="audit-divider" />
-              <div className="audit-row">
-                <span className="audit-label">Running Cleared Balance</span>
-                <span className="audit-val font-bold text-emerald">{formatINR(selectedMovement.runningBalance)}</span>
-              </div>
-
-              <div className="audit-row">
-                <span className="audit-label">Audit Notes</span>
-                <span className="audit-val text-faint" style={{ fontStyle: 'italic' }}>
-                  {selectedMovement.notes}
-                </span>
-              </div>
-            </div>
-
-            {/* Escrow Guarantee Disclaimer */}
-            <div className="ledger-escrow-banner">
-              <ShieldIcon size={16} className="text-brand" style={{ flexShrink: 0, marginTop: '2px' }} />
-              <div style={{ fontSize: '12px', color: 'var(--ink-muted)', lineHeight: '1.4' }}>
-                All PairUp transactions are recorded in the marketplace ledger with cryptographic verification and dual-custody escrow protection.
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => {
-                  setDetailModalOpen(false);
-                  setSelectedMovement(null);
-                }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </Modal>
+          transaction={selectedMovement}
+        />
       )}
 
       {/* Payout Request Modal */}

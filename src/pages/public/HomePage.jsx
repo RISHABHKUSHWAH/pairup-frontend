@@ -5,7 +5,7 @@ import Footer from '../../components/Footer';
 import BookSessionModal from '../../components/BookSessionModal';
 import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon } from '../../components/Icons';
 import { TechIcon } from '../../components/TechIcon';
-import { api, initials, stars } from '../../api/client';
+import { api, initials, stars, resolveImageUrl } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
 
@@ -533,7 +533,31 @@ export default function HomePage() {
                   style={{ cursor: 'pointer' }}
                 >
                   <div className="card-top">
-                    <div className="avatar">{initials(m.name)}</div>
+                    <div className="avatar">
+                      {m.photo_url || m.avatar ? (
+                        <img
+                          src={resolveImageUrl(m.photo_url || m.avatar)}
+                          alt={m.name}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fallback = e.currentTarget.parentElement?.querySelector('.avatar-fallback');
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <span
+                        className="avatar-fallback"
+                        style={{
+                          display: m.photo_url || m.avatar ? 'none' : 'flex',
+                          width: '100%',
+                          height: '100%',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {initials(m.name)}
+                      </span>
+                    </div>
                     <div style={{ flex: 1 }}>
                       <div className="card-name">
                         {m.name}{' '}
@@ -601,7 +625,31 @@ export default function HomePage() {
             {selectedMentor ? (
               <div className="mentor-preview-content">
                 <div className="panel-head">
-                  <div className="avatar-lg">{initials(selectedMentor.name)}</div>
+                  <div className="avatar-lg">
+                    {selectedMentor.photo_url || selectedMentor.avatar ? (
+                      <img
+                        src={resolveImageUrl(selectedMentor.photo_url || selectedMentor.avatar)}
+                        alt={selectedMentor.name}
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          const fallback = e.currentTarget.parentElement?.querySelector('.avatar-fallback');
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
+                    <span
+                      className="avatar-fallback"
+                      style={{
+                        display: selectedMentor.photo_url || selectedMentor.avatar ? 'none' : 'flex',
+                        width: '100%',
+                        height: '100%',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {initials(selectedMentor.name)}
+                    </span>
+                  </div>
                   <div style={{ flex: 1 }}>
                     <div className="panel-name">
                       {selectedMentor.name}{' '}

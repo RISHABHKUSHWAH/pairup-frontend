@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
 import { api, initials } from '../../api/client';
 import {
@@ -366,6 +367,7 @@ export default function AdminPaymentsPage() {
 
   return (
     <PortalLayout title="Payments &amp; Escrow Ledger" portalType="admin">
+      <AdminCategoryNav category="finances" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
         {/* Top Header & System Online Status */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
@@ -1434,26 +1436,36 @@ export default function AdminPaymentsPage() {
               </table>
 
               {/* Totals Breakdown */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
-                <div style={{ width: '240px', fontSize: '12.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                    <span>Subtotal:</span>
-                    <strong>₹{Number(selectedTxn.amount).toLocaleString('en-IN')}</strong>
+              {(() => {
+                const totalAmt = Number(selectedTxn.amount) || 0;
+                const platformFee = Number(selectedTxn.platform_fee) || (totalAmt * 0.10);
+                const commPercent = totalAmt > 0 ? Math.round((platformFee / totalAmt) * 100) : 10;
+                const commissionTaxable = platformFee > 0 ? platformFee / 1.18 : 0;
+                const gstOnCommission = platformFee > 0 ? platformFee - commissionTaxable : 0;
+
+                return (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+                    <div style={{ width: '260px', fontSize: '12.5px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                        <span>Subtotal:</span>
+                        <strong>₹{totalAmt.toLocaleString('en-IN')}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#6b7280' }}>
+                        <span>Platform Commission ({commPercent}%):</span>
+                        <span>₹{commissionTaxable.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#6b7280' }}>
+                        <span>GST (18% on Commission):</span>
+                        <span>₹{gstOnCommission.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '2px solid #e5e7eb', fontSize: '14px', fontWeight: 800 }}>
+                        <span>Total Paid:</span>
+                        <span style={{ color: '#4F46E5' }}>₹{totalAmt.toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#6b7280' }}>
-                    <span>Platform Fee (included):</span>
-                    <span>₹{Number(selectedTxn.platform_fee).toLocaleString('en-IN')}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#6b7280' }}>
-                    <span>Taxes (GST 18%):</span>
-                    <span>Included</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '2px solid #e5e7eb', fontSize: '14px', fontWeight: 800 }}>
-                    <span>Total Paid:</span>
-                    <span style={{ color: '#4F46E5' }}>₹{Number(selectedTxn.amount).toLocaleString('en-IN')}</span>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Footer */}
               <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '12px', textAlign: 'center', fontSize: '11px', color: '#9ca3af' }}>

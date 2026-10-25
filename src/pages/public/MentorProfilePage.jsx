@@ -4,7 +4,7 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import BookSessionModal from '../../components/BookSessionModal';
 import Pagination from '../../components/Pagination';
-import { api, initials, stars } from '../../api/client';
+import { api, initials, stars, resolveImageUrl } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import {
   MessageIcon,
@@ -210,11 +210,22 @@ export default function MentorProfilePage() {
         <div className="profile-body">
           {/* Avatar with image or initials and online dot */}
           <div className="profile-avatar-lg">
-            {mentor.photo_url ? (
-              <img src={mentor.photo_url} alt={mentor.name} className="profile-avatar-img" />
-            ) : (
-              <span>{initials(mentor.name)}</span>
-            )}
+            {mentor.photo_url || mentor.avatar ? (
+              <img
+                src={resolveImageUrl(mentor.photo_url || mentor.avatar)}
+                alt={mentor.name}
+                className="profile-avatar-img"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  if (e.currentTarget.nextElementSibling) {
+                    e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                  }
+                }}
+              />
+            ) : null}
+            <span style={{ display: mentor.photo_url || mentor.avatar ? 'none' : 'inline-block' }}>
+              {initials(mentor.name)}
+            </span>
             {mentor.online && <span className="dot" title="Online now"></span>}
           </div>
 

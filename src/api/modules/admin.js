@@ -4,6 +4,46 @@ export const adminApi = {
   getAdminStats: () =>
     apiFetch('/api/admin/stats', { auth: true }),
 
+  getAccountTracking: (params = {}) => {
+    const cleanParams = {};
+    Object.keys(params).forEach((k) => {
+      if (params[k] !== undefined && params[k] !== null && params[k] !== '') {
+        cleanParams[k] = params[k];
+      }
+    });
+    const q = new URLSearchParams(cleanParams).toString();
+    return apiFetch(`/api/admin/account-tracking${q ? '?' + q : ''}`, { auth: true });
+  },
+
+  getSignupsTracking: (params = {}) => {
+    const cleanParams = {};
+    Object.keys(params).forEach((k) => {
+      if (params[k] !== undefined && params[k] !== null && params[k] !== '') {
+        cleanParams[k] = params[k];
+      }
+    });
+    const q = new URLSearchParams(cleanParams).toString();
+    return apiFetch(`/api/admin/signups-tracking${q ? '?' + q : ''}`, { auth: true });
+  },
+
+  adminManualActivateUser: (userId) =>
+    apiFetch(`/api/admin/users/${userId}/manual-activate`, {
+      method: 'POST',
+      auth: true,
+    }),
+
+  adminResendUserActivation: (userId) =>
+    apiFetch(`/api/admin/users/${userId}/resend-activation`, {
+      method: 'POST',
+      auth: true,
+    }),
+
+  adminBulkResendActivations: () =>
+    apiFetch('/api/admin/signups-tracking/bulk-resend', {
+      method: 'POST',
+      auth: true,
+    }),
+
   getAdminUsers: (role) =>
     apiFetch(`/api/admin/users${role ? '?role=' + role : ''}`, { auth: true }),
 
@@ -65,6 +105,31 @@ export const adminApi = {
   updateAdminSettings: (data) =>
     apiFetch('/api/admin/settings', { method: 'PUT', auth: true, body: data }),
 
+  setMentorCommission: (mentorId, custom_commission_percent, custom_tax_percent) => {
+    const body = typeof custom_commission_percent === 'object' && custom_commission_percent !== null
+      ? custom_commission_percent
+      : { custom_commission_percent, custom_tax_percent };
+    return apiFetch(`/api/admin/mentors/${mentorId}/set-commission`, {
+      method: 'POST',
+      auth: true,
+      body,
+    });
+  },
+
+  setUserCommission: (userId, custom_commission_percent, custom_tax_percent) => {
+    const body = typeof custom_commission_percent === 'object' && custom_commission_percent !== null
+      ? custom_commission_percent
+      : { custom_commission_percent, custom_tax_percent };
+    return apiFetch(`/api/admin/users/${userId}/set-commission`, {
+      method: 'POST',
+      auth: true,
+      body,
+    });
+  },
+
+  getCommissionRates: () =>
+    apiFetch('/api/platform/commission-rates'),
+
   getAdminReviews: () =>
     apiFetch('/api/admin/reviews', { auth: true }),
 
@@ -83,12 +148,55 @@ export const adminApi = {
   getAdminNotifications: () =>
     apiFetch('/api/admin/notifications', { auth: true }),
 
-  getAuditLogs: () =>
-    apiFetch('/api/admin/audit-logs', { auth: true }),
+  getAuditLogs: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.page) qs.set('page', params.page);
+    if (params.page_size) qs.set('page_size', params.page_size);
+    if (params.q) qs.set('q', params.q);
+    if (params.target_type && params.target_type !== 'all') qs.set('target_type', params.target_type);
+    const query = qs.toString();
+    return apiFetch(`/api/admin/audit-logs${query ? `?${query}` : ''}`, { auth: true });
+  },
 
   getAdminPages: () =>
     apiFetch('/api/admin/pages', { auth: true }),
 
   updateAdminPage: (slug, data) =>
     apiFetch(`/api/admin/pages/${slug}`, { method: 'PUT', auth: true, body: data }),
+
+  // Mail & Communication Management
+  getMailConfig: () =>
+    apiFetch('/api/admin/mail/config', { auth: true }),
+
+  saveMailConfig: (data) =>
+    apiFetch('/api/admin/mail/config/save', { method: 'POST', auth: true, body: data }),
+
+  testMailConnection: (toEmail, config) =>
+    apiFetch('/api/admin/mail/test', {
+      method: 'POST',
+      auth: true,
+      body: { to_email: toEmail, config },
+    }),
+
+  sendInfoEmail: (payload) =>
+    apiFetch('/api/admin/mail/send-info', { method: 'POST', auth: true, body: payload }),
+
+  sendActivationEmail: (payload) =>
+    apiFetch('/api/admin/mail/send-activation', { method: 'POST', auth: true, body: payload }),
+
+  getUnverifiedUsers: () =>
+    apiFetch('/api/admin/mail/unverified-users', { auth: true }),
+
+  getDeletionRequests: () =>
+    apiFetch('/api/admin/deletion-requests', { auth: true }),
+
+  adminDeleteUser: (userId) =>
+    apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE', auth: true }),
+
+  adminRejectDeletionRequest: (userId, reason = '') =>
+    apiFetch(`/api/admin/users/${userId}/reject-deletion`, {
+      method: 'POST',
+      auth: true,
+      body: { reason },
+    }),
 };

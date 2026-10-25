@@ -5,6 +5,7 @@ import Modal from '../../components/Modal';
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { usePlatformCommission } from '../../utils';
 import {
   DocumentIcon,
   DownloadIcon,
@@ -28,6 +29,7 @@ import {
 
 export default function MentorReportsPage() {
   const { user } = useAuth();
+  const { effectiveMentorFeePercent } = usePlatformCommission();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -354,7 +356,7 @@ MENTOR IDENTIFICATION & COMPLIANCE:
 
 FINANCIAL YEAR-TO-DATE AUDIT SUMMARY (APRIL 2026 – MARCH 2027):
   1. Gross Mentoring & Pair Programming Billings:  INR ${metrics.totalGross.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-  2. PairUp Platform Commission Retained (10%):    INR ${metrics.totalFees.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+  2. PairUp Platform Commission Retained (${effectiveMentorFeePercent}%):    INR ${metrics.totalFees.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
   3. Net Cleared & Realized Take-Home Earnings:    INR ${metrics.totalNet.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
   4. Total Funds Disbursed to Bank Account:        INR ${(metrics.totalNet - 4619.9).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
   5. Active Funds in PairUp Escrow Vault:          INR 4,619.90
@@ -548,7 +550,7 @@ Audit Token: PAIR-AUDIT-FY26-27-${Math.random().toString(36).substring(2, 9).toU
         {/* Card 2: Platform Fees Retained */}
         <div className="earnings-stat-card">
           <div className="earnings-stat-card-top">
-            <span className="earnings-stat-label">Platform Fees (10%)</span>
+            <span className="earnings-stat-label">Platform Fees ({effectiveMentorFeePercent}%)</span>
             <div className="earnings-stat-icon-wrap" style={{ background: 'rgba(245, 158, 11, 0.12)', color: '#d97706' }}>
               <PercentIcon size={16} />
             </div>
@@ -557,7 +559,7 @@ Audit Token: PAIR-AUDIT-FY26-27-${Math.random().toString(36).substring(2, 9).toU
             {formatINR(metrics.totalFees)}
           </div>
           <div className="earnings-stat-desc">
-            10% standard platform commission with zero hidden surcharges
+            {effectiveMentorFeePercent}% standard platform commission with zero hidden surcharges
           </div>
           <div className="earnings-stat-pill" style={{ background: 'rgba(245, 158, 11, 0.12)', color: '#b45309' }}>
             ● Tax Receipts Reconciled
@@ -910,7 +912,7 @@ Audit Token: PAIR-AUDIT-FY26-27-${Math.random().toString(36).substring(2, 9).toU
               </div>
               <div className="tax-doc-meta-row">
                 <span className="tax-doc-meta-key">Commission:</span>
-                <span className="tax-doc-meta-val" style={{ color: 'var(--brand)' }}>10% Platform Standard</span>
+                <span className="tax-doc-meta-val" style={{ color: 'var(--brand)' }}>{effectiveMentorFeePercent}% Platform Standard</span>
               </div>
               <div className="tax-doc-meta-row">
                 <span className="tax-doc-meta-key">Ledger Status:</span>

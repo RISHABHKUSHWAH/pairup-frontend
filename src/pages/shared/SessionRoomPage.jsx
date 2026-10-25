@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useParams, useNavigate, Link } from 'react-router-dom';
+import { Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import { bookingApi, initials, formatCurrency } from '../../api/client';
@@ -51,13 +52,15 @@ export default function SessionRoomPage() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [mediaPermissionDenied, setMediaPermissionDenied] = useState(false);
 
-  // WebRTC Live Video Connection states
+  // WebRTC & LiveKit Live Video Connection states
   const [connectionStatus, setConnectionStatus] = useState('initializing'); // 'initializing' | 'waiting' | 'connecting' | 'connected'
+  const [connectionMode, setConnectionMode] = useState('livekit'); // 'livekit' | 'p2p'
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [isRemoteCamOff, setIsRemoteCamOff] = useState(false);
   const [isRemoteMuted, setIsRemoteMuted] = useState(false);
   const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState(false);
   const [testLoopbackActive, setTestLoopbackActive] = useState(false);
+  const roomRef = useRef(null);
 
   // Active sidebar tab: 'notes' | 'chat' | 'files'
   const [activeTab, setActiveTab] = useState('notes');
@@ -163,57 +166,177 @@ export default function SessionRoomPage() {
     initSession();
   }, [bookingId]);
 
-  // 2. Initialize Local Camera & Microphone Stream
+  // 2. Initialize LiveKit Room & Local Media
   useEffect(() => {
     let active = true;
 
-    async function setupLocalMedia() {
+    async function initLiveKitAndMedia() {
+      // 1. First get user local media stream preview
       try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('getUserMedia not supported in this browser.');
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280, max: 1920 },
+              height: { ideal: 720, max: 1080 },
+              frameRate: { ideal: 30 },
+            },
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+
+          if (!active) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+
+          localStreamRef.current = stream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
         }
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            frameRate: { ideal: 30 },
-          },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
-
-        if (!active) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-
-        localStreamRef.current = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
-
-        setConnectionStatus('waiting');
-
-        // Once local media is ready, connect WebRTC
-        startWebRTCSignaling();
       } catch (err) {
         console.warn('Camera/Microphone access denied or unavailable:', err);
         setMediaPermissionDenied(true);
+      }
+
+      // 2. Connect to LiveKit Room if credentials are present
+      if (sessionData?.token && sessionData?.server_url) {
+        try {
+          setConnectionStatus('connecting');
+          const room = new Room({
+            adaptiveStream: true,
+            dynacast: true,
+            videoCaptureDefaults: {
+              resolution: VideoPresets.h720.resolution,
+            },
+          });
+          roomRef.current = room;
+
+          room
+            .on(RoomEvent.Connected, async () => {
+              console.log('>>> LiveKit connected to room:', room.name);
+              setConnectionMode('livekit');
+              setConnectionStatus('connected');
+              // Publish microphone & camera tracks to LiveKit SFU
+              try {
+                await room.localParticipant.enableCameraAndMicrophone();
+                const pub = Array.from(room.localParticipant.videoTrackPublications.values())[0];
+                if (pub?.videoTrack && localVideoRef.current) {
+                  pub.videoTrack.attach(localVideoRef.current);
+                }
+              } catch (e) {
+                console.warn('LiveKit local participant media publish warning:', e);
+              }
+            })
+            .on(RoomEvent.Disconnected, () => {
+              console.log('>>> LiveKit room disconnected');
+              setConnectionStatus('waiting');
+            })
+            .on(RoomEvent.ParticipantConnected, (participant) => {
+              console.log('>>> LiveKit participant joined:', participant.identity);
+              toast.info(`${participant.name || 'Participant'} joined the room`);
+              setConnectionStatus('connected');
+            })
+            .on(RoomEvent.ParticipantDisconnected, (participant) => {
+              console.log('>>> LiveKit participant left:', participant.identity);
+              toast.info(`${participant.name || 'Participant'} left the room`);
+              setHasRemoteVideo(false);
+              setConnectionStatus('waiting');
+            })
+            .on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+              console.log('>>> LiveKit TrackSubscribed:', track.kind, track.source);
+              if (track.kind === Track.Kind.Video) {
+                if (track.source === Track.Source.ScreenShare) {
+                  setIsRemoteScreenSharing(true);
+                  if (screenVideoRef.current) {
+                    track.attach(screenVideoRef.current);
+                  }
+                } else {
+                  setHasRemoteVideo(true);
+                  setIsRemoteCamOff(false);
+                  if (remoteVideoRef.current) {
+                    track.attach(remoteVideoRef.current);
+                  }
+                }
+                setConnectionStatus('connected');
+              } else if (track.kind === Track.Kind.Audio) {
+                const audioEl = document.createElement('audio');
+                audioEl.autoplay = true;
+                track.attach(audioEl);
+              }
+            })
+            .on(RoomEvent.TrackUnsubscribed, (track) => {
+              track.detach();
+              if (track.source === Track.Source.ScreenShare) {
+                setIsRemoteScreenSharing(false);
+              } else if (track.kind === Track.Kind.Video) {
+                setHasRemoteVideo(false);
+              }
+            })
+            .on(RoomEvent.TrackMuted, (pub) => {
+              if (pub.kind === Track.Kind.Audio) setIsRemoteMuted(true);
+              if (pub.kind === Track.Kind.Video) setIsRemoteCamOff(true);
+            })
+            .on(RoomEvent.TrackUnmuted, (pub) => {
+              if (pub.kind === Track.Kind.Audio) setIsRemoteMuted(false);
+              if (pub.kind === Track.Kind.Video) setIsRemoteCamOff(false);
+            })
+            .on(RoomEvent.DataReceived, (payload, participant) => {
+              try {
+                const text = new TextDecoder().decode(payload);
+                const data = JSON.parse(text);
+                setChatMessages((prev) => [
+                  ...prev,
+                  {
+                    id: Date.now() + Math.random(),
+                    sender: participant?.name || 'Counterpart',
+                    isMe: false,
+                    text: data.text || text,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  },
+                ]);
+              } catch (_) {
+                const text = new TextDecoder().decode(payload);
+                setChatMessages((prev) => [
+                  ...prev,
+                  {
+                    id: Date.now() + Math.random(),
+                    sender: participant?.name || 'Counterpart',
+                    isMe: false,
+                    text,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  },
+                ]);
+              }
+            });
+
+          await room.connect(sessionData.server_url, sessionData.token);
+        } catch (lkErr) {
+          console.warn('LiveKit SFU connection unreachable, fallback to P2P signaling:', lkErr);
+          setConnectionMode('p2p');
+          setConnectionStatus('waiting');
+          startWebRTCSignaling();
+        }
+      } else {
+        setConnectionMode('p2p');
         setConnectionStatus('waiting');
         startWebRTCSignaling();
       }
     }
 
     if (sessionData && !tooEarlyInfo) {
-      setupLocalMedia();
+      initLiveKitAndMedia();
     }
 
     return () => {
       active = false;
+      if (roomRef.current) {
+        roomRef.current.disconnect();
+        roomRef.current = null;
+      }
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
       }
@@ -380,12 +503,18 @@ export default function SessionRoomPage() {
     }
   };
 
-  // 4. Mic & Camera Toggles
-  const handleToggleMic = () => {
+  // 4. Mic & Camera Toggles (LiveKit + WebRTC)
+  const handleToggleMic = async () => {
     const newMuted = !isMuted;
     setIsMuted(newMuted);
 
-    if (localStreamRef.current) {
+    if (roomRef.current && roomRef.current.state === 'connected') {
+      try {
+        await roomRef.current.localParticipant.setMicrophoneEnabled(!newMuted);
+      } catch (e) {
+        console.warn('LiveKit setMicrophoneEnabled error:', e);
+      }
+    } else if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach((t) => {
         t.enabled = !newMuted;
       });
@@ -401,11 +530,21 @@ export default function SessionRoomPage() {
       .catch(() => {});
   };
 
-  const handleToggleCamera = () => {
+  const handleToggleCamera = async () => {
     const newCamOff = !isCamOff;
     setIsCamOff(newCamOff);
 
-    if (localStreamRef.current) {
+    if (roomRef.current && roomRef.current.state === 'connected') {
+      try {
+        await roomRef.current.localParticipant.setCameraEnabled(!newCamOff);
+        if (!newCamOff && localVideoRef.current) {
+          const pub = Array.from(roomRef.current.localParticipant.videoTrackPublications.values())[0];
+          if (pub?.videoTrack) pub.videoTrack.attach(localVideoRef.current);
+        }
+      } catch (e) {
+        console.warn('LiveKit setCameraEnabled error:', e);
+      }
+    } else if (localStreamRef.current) {
       localStreamRef.current.getVideoTracks().forEach((t) => {
         t.enabled = !newCamOff;
       });
@@ -421,7 +560,7 @@ export default function SessionRoomPage() {
       .catch(() => {});
   };
 
-  // 5. Screen Share Track Handling
+  // 5. Screen Share Track Handling (LiveKit + WebRTC)
   const handleToggleScreenShare = async () => {
     if (isScreenSharing) {
       handleStopScreenShare();
@@ -429,31 +568,46 @@ export default function SessionRoomPage() {
     }
 
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-        toast.warning('Screen sharing is not supported on this device/browser.');
-        return;
-      }
-
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always' },
-        audio: false,
-      });
-
-      screenStreamRef.current = stream;
-      setIsScreenSharing(true);
-
-      if (screenVideoRef.current) {
-        screenVideoRef.current.srcObject = stream;
-      }
-
-      // Replace WebRTC video track with screen track
-      const screenTrack = stream.getVideoTracks()[0];
-      const pc = peerConnectionRef.current;
-      if (pc) {
-        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(screenTrack);
+      if (roomRef.current && roomRef.current.state === 'connected') {
+        await roomRef.current.localParticipant.setScreenShareEnabled(true);
+        setIsScreenSharing(true);
+        const screenPub = Array.from(roomRef.current.localParticipant.trackPublications.values()).find(
+          (p) => p.source === Track.Source.ScreenShare
+        );
+        if (screenPub?.videoTrack && screenVideoRef.current) {
+          screenPub.videoTrack.attach(screenVideoRef.current);
         }
+      } else {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          toast.warning('Screen sharing is not supported on this device/browser.');
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: { cursor: 'always' },
+          audio: false,
+        });
+
+        screenStreamRef.current = stream;
+        setIsScreenSharing(true);
+
+        if (screenVideoRef.current) {
+          screenVideoRef.current.srcObject = stream;
+        }
+
+        // Replace WebRTC video track with screen track
+        const screenTrack = stream.getVideoTracks()[0];
+        const pc = peerConnectionRef.current;
+        if (pc) {
+          const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
+          if (sender) {
+            sender.replaceTrack(screenTrack);
+          }
+        }
+
+        screenTrack.onended = () => {
+          handleStopScreenShare();
+        };
       }
 
       // Broadcast screen share state
@@ -461,18 +615,19 @@ export default function SessionRoomPage() {
         isScreenSharing: true,
         isCamOff,
         isMuted,
-      });
-
-      screenTrack.onended = () => {
-        handleStopScreenShare();
-      };
+      }).catch(() => {});
     } catch (err) {
       console.warn('Screen sharing cancelled or error:', err);
       setIsScreenSharing(false);
     }
   };
 
-  const handleStopScreenShare = () => {
+  const handleStopScreenShare = async () => {
+    if (roomRef.current && roomRef.current.state === 'connected') {
+      try {
+        await roomRef.current.localParticipant.setScreenShareEnabled(false);
+      } catch (_) {}
+    }
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
@@ -543,7 +698,7 @@ export default function SessionRoomPage() {
     }, 800);
   };
 
-  // 9. In-Call Chat Send
+  // 9. In-Call Chat Send (LiveKit Data Channel + WebRTC Signal)
   const handleSendMessage = (e) => {
     e.preventDefault();
     const text = chatInput.trim();
@@ -559,6 +714,25 @@ export default function SessionRoomPage() {
 
     setChatMessages((prev) => [...prev, newMsg]);
     setChatInput('');
+
+    // If LiveKit room is connected, publish via LiveKit Data Channel
+    if (roomRef.current && roomRef.current.state === 'connected') {
+      try {
+        const payload = new TextEncoder().encode(JSON.stringify({ text }));
+        roomRef.current.localParticipant.publishData(payload, { reliable: true });
+      } catch (err) {
+        console.warn('LiveKit publishData error:', err);
+      }
+    }
+
+    // Also send via session signal for persistence & P2P fallback
+    bookingApi
+      .sendSessionSignal(bookingId, 'chat', {
+        text,
+        sender_name: user?.name || 'Me',
+      })
+      .catch(() => {});
+
     setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
@@ -783,9 +957,11 @@ export default function SessionRoomPage() {
               >
                 <span>
                   {connectionStatus === 'connected'
-                    ? '● WebRTC Connected'
+                    ? connectionMode === 'livekit'
+                      ? '● LiveKit Room Connected'
+                      : '● WebRTC Connected'
                     : connectionStatus === 'connecting'
-                    ? 'Connecting Peer…'
+                    ? 'Connecting to LiveKit…'
                     : 'Waiting for Peer…'}
                 </span>
               </div>

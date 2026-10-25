@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
-import { api, initials, stars, learnerFavorites } from '../../api/client';
+import { api, initials, stars, resolveImageUrl, learnerFavorites } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { HeartIcon, MessageIcon, CalendarIcon, UserIcon, ChevronLeftIcon, ChevronRightIcon } from '../../components/Icons';
 import { TechIcon } from '../../components/TechIcon';
@@ -144,6 +144,16 @@ export default function LearnerExplorePage() {
   useEffect(() => {
     setFavorites(learnerFavorites.getFavorites());
     loadMentors();
+
+    const handleFocus = () => {
+      // Re-fetch in background on tab focus so live mentor statuses stay up to date
+      api.getMentors({ sort: 'rating' }).then((data) => {
+        if (data && Array.isArray(data)) setMentors(data);
+      }).catch(() => {});
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, []);
 
   const loadMentors = async () => {
@@ -244,7 +254,8 @@ export default function LearnerExplorePage() {
       }
 
       // 6. Availability filter
-      if (filters.availability === 'online' && !m.online && !m.online_status) {
+      const isMentorOnline = Boolean(m.online || m.online_status || m.is_online);
+      if (filters.availability === 'online' && !isMentorOnline) {
         return false;
       }
 
@@ -581,7 +592,31 @@ export default function LearnerExplorePage() {
                   </div>
 
                   <div className="card-top">
-                    <div className="avatar">{initials(m.name)}</div>
+                    <div className="avatar">
+                      {m.photo_url || m.avatar ? (
+                        <img
+                          src={resolveImageUrl(m.photo_url || m.avatar)}
+                          alt={m.name}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fallback = e.currentTarget.parentElement?.querySelector('.avatar-fallback');
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <span
+                        className="avatar-fallback"
+                        style={{
+                          display: m.photo_url || m.avatar ? 'none' : 'flex',
+                          width: '100%',
+                          height: '100%',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {initials(m.name)}
+                      </span>
+                    </div>
                     <div>
                       <div className="card-name">{m.name}</div>
                       <div className="card-title">{m.title || 'Technical Specialist'}</div>
@@ -665,7 +700,31 @@ export default function LearnerExplorePage() {
               <div key={id} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div className="card-top" style={{ flex: 1 }}>
-                    <div className="avatar">{initials(m.name)}</div>
+                    <div className="avatar">
+                      {m.photo_url || m.avatar ? (
+                        <img
+                          src={resolveImageUrl(m.photo_url || m.avatar)}
+                          alt={m.name}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const fallback = e.currentTarget.parentElement?.querySelector('.avatar-fallback');
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <span
+                        className="avatar-fallback"
+                        style={{
+                          display: m.photo_url || m.avatar ? 'none' : 'flex',
+                          width: '100%',
+                          height: '100%',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {initials(m.name)}
+                      </span>
+                    </div>
                     <div>
                       <Link
                         to={`/mentor/${id}`}
@@ -682,9 +741,9 @@ export default function LearnerExplorePage() {
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className={`status ${m.online_status ? 'online' : 'away'}`}>
+                    <span className={`status ${(m.online || m.online_status || m.is_online) ? 'online' : 'away'}`}>
                       <span className="led"></span>
-                      {m.online_status ? 'Online' : 'Offline'}
+                      {(m.online || m.online_status || m.is_online) ? 'Online' : 'Offline'}
                     </span>
                     <button
                       type="button"
@@ -763,7 +822,31 @@ export default function LearnerExplorePage() {
         {previewMentor && (
           <div>
             <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '16px' }}>
-              <div className="avatar-lg">{initials(previewMentor.name)}</div>
+              <div className="avatar-lg">
+                {previewMentor.photo_url || previewMentor.avatar ? (
+                  <img
+                    src={resolveImageUrl(previewMentor.photo_url || previewMentor.avatar)}
+                    alt={previewMentor.name}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fallback = e.currentTarget.parentElement?.querySelector('.avatar-fallback');
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                ) : null}
+                <span
+                  className="avatar-fallback"
+                  style={{
+                    display: previewMentor.photo_url || previewMentor.avatar ? 'none' : 'flex',
+                    width: '100%',
+                    height: '100%',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {initials(previewMentor.name)}
+                </span>
+              </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                   <h4 style={{ margin: 0, fontSize: '18px' }}>{previewMentor.name}</h4>

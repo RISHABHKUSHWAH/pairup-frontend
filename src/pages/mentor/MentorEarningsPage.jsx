@@ -5,6 +5,7 @@ import Modal from '../../components/Modal';
 import { api, mentorPayoutSettings } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { usePlatformCommission } from '../../utils';
 import {
   CreditCardIcon,
   WalletIcon,
@@ -25,6 +26,7 @@ import {
 
 export default function MentorEarningsPage() {
   const { user } = useAuth();
+  const { effectiveMentorFeePercent } = usePlatformCommission();
   const { toast } = useToast();
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -726,165 +728,180 @@ This is an electronically generated annual tax statement for personal filing and
         </div>
 
         {/* SVG Chart */}
-        <div style={{ width: '100%', overflowX: 'auto', position: 'relative' }}>
-          <svg
-            viewBox={`0 0 ${svgW} ${svgH}`}
-            style={{ width: '100%', height: 'auto', minWidth: '540px', overflow: 'visible' }}
-          >
-            <defs>
-              <linearGradient id="earningsAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={chartThemeColor} stopOpacity="0.32" />
-                <stop offset="100%" stopColor={chartThemeColor} stopOpacity="0.0" />
-              </linearGradient>
-            </defs>
+        <div style={{ width: '100%', overflowX: 'auto' }}>
+          <div style={{ position: 'relative', minWidth: '540px', width: '100%' }}>
+            <svg
+              viewBox={`0 0 ${svgW} ${svgH}`}
+              style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
+            >
+              <defs>
+                <linearGradient id="earningsAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={chartThemeColor} stopOpacity="0.32" />
+                  <stop offset="100%" stopColor={chartThemeColor} stopOpacity="0.0" />
+                </linearGradient>
+              </defs>
 
-            {/* Horizontal Ticks & Reference Grid */}
-            {[0, Math.round(maxChartVal * 0.33), Math.round(maxChartVal * 0.66), Math.round(maxChartVal)].map((tick) => {
-              const y = getChartY(tick);
-              return (
-                <g key={tick}>
-                  <line
-                    x1={padL}
-                    y1={y}
-                    x2={padL + chartW}
-                    y2={y}
-                    stroke="var(--grid)"
-                    strokeDasharray="3 3"
-                    strokeWidth="1"
-                  />
-                  <text
-                    x={padL - 8}
-                    y={y + 3.5}
-                    fontSize="10"
-                    textAnchor="end"
-                    fill="var(--ink-muted)"
-                    fontFamily="IBM Plex Mono"
-                  >
-                    {chartMetric === 'sessions'
-                      ? tick
-                      : tick >= 1000
-                      ? `₹${Math.round(tick / 1000)}k`
-                      : `₹${tick}`}
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* Area Fill */}
-            <path d={makeAreaPath()} fill="url(#earningsAreaGrad)" />
-
-            {/* Line Stroke */}
-            <path
-              d={makeSmoothPath()}
-              fill="none"
-              stroke={chartThemeColor}
-              strokeWidth="2.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-
-            {/* Data Points and Interactivity */}
-            {chartData.map((pt, i) => {
-              const x = getChartX(i);
-              const y = getChartY(pt[chartMetric]);
-              const isHovered = hoveredIndex === i;
-
-              return (
-                <g
-                  key={pt.key}
-                  onMouseEnter={() => setHoveredIndex(i)}
-                  onMouseLeave={() => setHoveredIndex(null)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  {/* Bottom Date Labels */}
-                  {(timeframe !== '30d' || pt.shortLabel) && (
+              {/* Horizontal Ticks & Reference Grid */}
+              {[0, Math.round(maxChartVal * 0.33), Math.round(maxChartVal * 0.66), Math.round(maxChartVal)].map((tick) => {
+                const y = getChartY(tick);
+                return (
+                  <g key={tick}>
+                    <line
+                      x1={padL}
+                      y1={y}
+                      x2={padL + chartW}
+                      y2={y}
+                      stroke="var(--grid)"
+                      strokeDasharray="3 3"
+                      strokeWidth="1"
+                    />
                     <text
-                      x={x}
-                      y={padT + chartH + 18}
-                      fontSize="10.5"
-                      textAnchor="middle"
-                      fill={isHovered ? 'var(--ink)' : 'var(--ink-muted)'}
-                      fontWeight={isHovered ? 700 : 500}
+                      x={padL - 8}
+                      y={y + 3.5}
+                      fontSize="10"
+                      textAnchor="end"
+                      fill="var(--ink-muted)"
                       fontFamily="IBM Plex Mono"
                     >
-                      {pt.shortLabel}
+                      {chartMetric === 'sessions'
+                        ? tick
+                        : tick >= 1000
+                        ? `₹${Math.round(tick / 1000)}k`
+                        : `₹${tick}`}
                     </text>
-                  )}
+                  </g>
+                );
+              })}
 
-                  {/* Vertical Hover Crosshair */}
-                  {isHovered && (
-                    <line
-                      x1={x}
-                      y1={padT}
-                      x2={x}
-                      y2={padT + chartH}
-                      stroke="var(--ink-muted)"
-                      strokeDasharray="3 3"
-                      strokeWidth="1.2"
+              {/* Area Fill */}
+              <path d={makeAreaPath()} fill="url(#earningsAreaGrad)" />
+
+              {/* Line Stroke */}
+              <path
+                d={makeSmoothPath()}
+                fill="none"
+                stroke={chartThemeColor}
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+
+              {/* Data Points and Interactivity */}
+              {chartData.map((pt, i) => {
+                const x = getChartX(i);
+                const y = getChartY(pt[chartMetric]);
+                const isHovered = hoveredIndex === i;
+
+                return (
+                  <g
+                    key={pt.key}
+                    onMouseEnter={() => setHoveredIndex(i)}
+                    onMouseLeave={() => setHoveredIndex(null)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {/* Bottom Date Labels */}
+                    {(timeframe !== '30d' || pt.shortLabel) && (
+                      <text
+                        x={x}
+                        y={padT + chartH + 18}
+                        fontSize="10.5"
+                        textAnchor="middle"
+                        fill={isHovered ? 'var(--ink)' : 'var(--ink-muted)'}
+                        fontWeight={isHovered ? 700 : 500}
+                        fontFamily="IBM Plex Mono"
+                      >
+                        {pt.shortLabel}
+                      </text>
+                    )}
+
+                    {/* Vertical Hover Crosshair */}
+                    {isHovered && (
+                      <line
+                        x1={x}
+                        y1={padT}
+                        x2={x}
+                        y2={padT + chartH}
+                        stroke="var(--ink-muted)"
+                        strokeDasharray="3 3"
+                        strokeWidth="1.2"
+                      />
+                    )}
+
+                    {/* Point Circle */}
+                    <circle
+                      cx={x}
+                      cy={y}
+                      r={isHovered ? 6 : pt[chartMetric] > 0 ? 4 : 2.5}
+                      fill={chartThemeColor}
+                      stroke="var(--surface)"
+                      strokeWidth="2"
+                      style={{ transition: 'all 0.15s ease' }}
                     />
-                  )}
 
-                  {/* Point Circle */}
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r={isHovered ? 6 : pt[chartMetric] > 0 ? 4 : 2.5}
-                    fill={chartThemeColor}
-                    stroke="var(--surface)"
-                    strokeWidth="2"
-                    style={{ transition: 'all 0.15s ease' }}
-                  />
+                    {/* Expanded Click Area for Hover Target */}
+                    <rect
+                      x={x - (chartW / (chartData.length * 2))}
+                      y={padT}
+                      width={chartW / Math.max(1, chartData.length)}
+                      height={chartH}
+                      fill="transparent"
+                    />
+                  </g>
+                );
+              })}
+            </svg>
 
-                  {/* Expanded Click Area for Hover Target */}
-                  <rect
-                    x={x - (chartW / (chartData.length * 2))}
-                    y={padT}
-                    width={chartW / Math.max(1, chartData.length)}
-                    height={chartH}
-                    fill="transparent"
-                  />
-                </g>
+            {/* Floating Tooltip Card on Hover */}
+            {hoveredIndex !== null && chartData[hoveredIndex] && (() => {
+              const ptX = getChartX(hoveredIndex);
+              const ptY = getChartY(chartData[hoveredIndex][chartMetric]);
+              const xPercent = (ptX / svgW) * 100;
+              const yPercent = (ptY / svgH) * 100;
+              // When data point is near the upper half (yPercent < 50%), flip tooltip below the point so it never clips at the top
+              const showBelow = yPercent < 50;
+
+              return (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${Math.min(84, Math.max(16, xPercent))}%`,
+                    top: `${yPercent}%`,
+                    transform: showBelow
+                      ? 'translate(-50%, 14px)'
+                      : 'translate(-50%, calc(-100% - 14px))',
+                    background: 'var(--surface)',
+                    border: `1.5px solid ${chartThemeColor}`,
+                    borderRadius: '8px',
+                    padding: '8px 12px',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+                    pointerEvents: 'none',
+                    zIndex: 20,
+                    minWidth: '150px',
+                    whiteSpace: 'nowrap',
+                    fontFamily: 'inherit',
+                    transition: 'left 0.1s ease-out, top 0.1s ease-out',
+                  }}
+                >
+                  <div style={{ fontSize: '11px', color: 'var(--ink-muted)', fontWeight: 600, marginBottom: '4px' }}>
+                    {chartData[hoveredIndex].label}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '15px', fontWeight: 800, color: chartThemeColor, fontFamily: 'JetBrains Mono' }}>
+                      {chartMetric === 'sessions'
+                        ? `${chartData[hoveredIndex].sessions} sessions`
+                        : formatINR(chartData[hoveredIndex][chartMetric])}
+                    </span>
+                    <span style={{ fontSize: '10px', color: 'var(--ink-faint)', textTransform: 'uppercase' }}>
+                      {chartMetric}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--ink-muted)', borderTop: '1px solid var(--grid)', paddingTop: '4px' }}>
+                    Gross: <strong>{formatINR(chartData[hoveredIndex].gross)}</strong> · Fee: <strong>{formatINR(chartData[hoveredIndex].fee)}</strong>
+                  </div>
+                </div>
               );
-            })}
-          </svg>
-
-          {/* Floating Tooltip Card on Hover */}
-          {hoveredIndex !== null && chartData[hoveredIndex] && (
-            <div
-              style={{
-                position: 'absolute',
-                left: `${Math.min(82, Math.max(18, ((getChartX(hoveredIndex) / svgW) * 100)))}%`,
-                top: `${Math.max(10, ((getChartY(chartData[hoveredIndex][chartMetric]) / svgH) * 100) - 42)}%`,
-                transform: 'translate(-50%, -100%)',
-                background: 'var(--surface)',
-                border: `1.5px solid ${chartThemeColor}`,
-                borderRadius: '8px',
-                padding: '8px 12px',
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
-                pointerEvents: 'none',
-                zIndex: 10,
-                minWidth: '150px',
-                fontFamily: 'inherit',
-              }}
-            >
-              <div style={{ fontSize: '11px', color: 'var(--ink-muted)', fontWeight: 600, marginBottom: '4px' }}>
-                {chartData[hoveredIndex].label}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '4px' }}>
-                <span style={{ fontSize: '15px', fontWeight: 800, color: chartThemeColor, fontFamily: 'JetBrains Mono' }}>
-                  {chartMetric === 'sessions'
-                    ? `${chartData[hoveredIndex].sessions} sessions`
-                    : formatINR(chartData[hoveredIndex][chartMetric])}
-                </span>
-                <span style={{ fontSize: '10px', color: 'var(--ink-faint)', textTransform: 'uppercase' }}>
-                  {chartMetric}
-                </span>
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--ink-muted)', borderTop: '1px solid var(--grid)', paddingTop: '4px' }}>
-                Gross: <strong>{formatINR(chartData[hoveredIndex].gross)}</strong> · Fee: <strong>{formatINR(chartData[hoveredIndex].fee)}</strong>
-              </div>
-            </div>
-          )}
+            })()}
+          </div>
         </div>
 
         {/* Mini KPI Summary Strip */}
@@ -974,7 +991,7 @@ This is an electronically generated annual tax statement for personal filing and
             </div>
             <div className="earnings-pipeline-legend-item">
               <span className="earnings-legend-dot" style={{ background: '#6366f1' }} />
-              <span>Platform Fee (10%): <strong>{formatINR(totalPlatformFees)}</strong> ({feePercent}%)</span>
+              <span>Platform Fee ({effectiveMentorFeePercent}%): <strong>{formatINR(totalPlatformFees)}</strong> ({feePercent}%)</span>
             </div>
           </div>
         </div>
@@ -1130,7 +1147,7 @@ This is an electronically generated annual tax statement for personal filing and
           <div>
             <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>Session Transaction History</h3>
             <div className="sub" style={{ fontSize: '12.5px', marginTop: '3px' }}>
-              Detailed breakdown of learner gross payment, 10% platform fee, and net earnings
+              Detailed breakdown of learner gross payment, {effectiveMentorFeePercent}% platform fee, and net earnings
             </div>
           </div>
 
@@ -1229,7 +1246,7 @@ This is an electronically generated annual tax statement for personal filing and
                     <th>Learner</th>
                     <th>Topic</th>
                     <th>Gross Amount</th>
-                    <th>Platform Fee (10%)</th>
+                    <th>Platform Fee ({effectiveMentorFeePercent}%)</th>
                     <th>Net Earnings</th>
                     <th>Status</th>
                     <th>Date</th>
@@ -1238,7 +1255,7 @@ This is an electronically generated annual tax statement for personal filing and
                 <tbody>
                   {paginatedPayments.map((p) => {
                     const gross = Number(p.amount || 0);
-                    const fee = Number(p.platform_fee !== undefined ? p.platform_fee : Math.round(gross * 0.1));
+                    const fee = Number(p.platform_fee !== undefined ? p.platform_fee : Math.round(gross * (effectiveMentorFeePercent / 100)));
                     const net = Number(p.net_amount !== undefined ? p.net_amount : gross - fee);
 
                     return (

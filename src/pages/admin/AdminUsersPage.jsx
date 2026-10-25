@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
-import { api, initials, stars, formatCurrency } from '../../api/client';
+import { api, initials, stars, formatCurrency, resolveImageUrl } from '../../api/client';
 import { useConfirm, useToast, useAuth } from '../../context';
 
 export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User Management' }) {
@@ -20,6 +21,68 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
   const [error, setError] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [userModalTab, setUserModalTab] = useState('profile'); // 'profile' | 'activity' | 'sessions' | 'payments' | 'reviews'
+  const [customCommissionInput, setCustomCommissionInput] = useState('');
+  const [customTaxInput, setCustomTaxInput] = useState('');
+  const [savingCommission, setSavingCommission] = useState(false);
+
+  useEffect(() => {
+    if (selectedUser) {
+      setCustomCommissionInput(
+        selectedUser.custom_commission_percent !== null && selectedUser.custom_commission_percent !== undefined
+          ? String(selectedUser.custom_commission_percent)
+          : ''
+      );
+      setCustomTaxInput(
+        selectedUser.custom_tax_percent !== null && selectedUser.custom_tax_percent !== undefined
+          ? String(selectedUser.custom_tax_percent)
+          : ''
+      );
+    }
+  }, [selectedUser]);
+
+  const handleUpdateCommission = async (commVal, taxVal) => {
+    if (!selectedUser) return;
+    const userId = selectedUser.id || selectedUser.user_id;
+    setSavingCommission(true);
+    try {
+      const numComm = commVal === null || commVal === '' ? null : parseFloat(commVal);
+      const numTax = taxVal === null || taxVal === '' ? null : parseFloat(taxVal);
+      await api.setUserCommission(userId, numComm, numTax);
+      toast.success(
+        numComm !== null || numTax !== null
+          ? `Custom rates saved (Commission: ${numComm !== null ? numComm + '%' : 'Default'}, Tax: ${numTax !== null ? numTax + '%' : 'Default'})`
+          : 'Rates reset to platform defaults'
+      );
+      setSelectedUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              custom_commission_percent: numComm,
+              effective_commission_percent: numComm,
+              custom_tax_percent: numTax,
+              effective_tax_percent: numTax,
+            }
+          : null
+      );
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId || u.user_id === userId
+            ? {
+                ...u,
+                custom_commission_percent: numComm,
+                effective_commission_percent: numComm,
+                custom_tax_percent: numTax,
+                effective_tax_percent: numTax,
+              }
+            : u
+        )
+      );
+    } catch (err) {
+      toast.error('Failed to update rates: ' + err.message);
+    } finally {
+      setSavingCommission(false);
+    }
+  };
 
   useEffect(() => {
     setRoleFilter(initialRole);
@@ -50,7 +113,9 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
       setBookings(Array.isArray(bookingsData) ? bookingsData : []);
       setPayments(Array.isArray(paymentsData) ? paymentsData : []);
     } catch (err) {
-      setError(err.message || 'Failed to load users');
+      if (err?.status !== 401 && !err?.message?.toLowerCase().includes('expired')) {
+        setError(err.message || 'Failed to load users');
+      }
     } finally {
       setLoading(false);
     }
@@ -204,6 +269,46 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
     }
   };
 
+  const handleApproveDeleteUser = async (userId, userName) => {
+    const confirmed = await confirm({
+      title: 'Permanently Delete User Account',
+      message: `Are you sure you want to permanently delete the account for ${userName || 'this user'}? All associated profiles, contracts, bookings, and records will be completely removed. This action CANNOT be undone.`,
+      confirmText: 'Yes, Delete Permanently',
+      type: 'danger',
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await api.adminDeleteUser(userId);
+      toast.success(res.message || 'User account permanently deleted.');
+      setSelectedUser(null);
+      await loadUsers();
+    } catch (err) {
+      toast.error(err.message || 'Failed to delete user account.');
+    }
+  };
+
+  const handleRejectDeletionRequest = async (userId, userName) => {
+    const confirmed = await confirm({
+      title: 'Reject Deletion Request',
+      message: `Are you sure you want to reject the account deletion request for ${userName || 'this user'}? Their account will remain active.`,
+      confirmText: 'Reject Request',
+      type: 'warning',
+    });
+    if (!confirmed) return;
+
+    try {
+      const res = await api.adminRejectDeletionRequest(userId);
+      toast.success(res.message || 'Account deletion request rejected.');
+      if (selectedUser) {
+        setSelectedUser((prev) => (prev ? { ...prev, deletion_requested: false } : null));
+      }
+      await loadUsers();
+    } catch (err) {
+      toast.error(err.message || 'Failed to reject deletion request.');
+    }
+  };
+
   const filteredUsers = users.filter((u) => {
     const term = search.toLowerCase().trim();
     const matchSearch =
@@ -217,12 +322,14 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
 
     if (statusFilter === 'active' && u.is_suspended) return false;
     if (statusFilter === 'suspended' && !u.is_suspended) return false;
+    if (statusFilter === 'deletion_requested' && !u.deletion_requested) return false;
 
     return true;
   });
 
   return (
     <PortalLayout title={pageTitle} portalType="admin">
+      <AdminCategoryNav category="users" />
       <p className="sub" style={{ marginBottom: '16px' }}>
         Directory of all accounts registered across the PairUp platform. Manage roles, investigate activities, and adjust account access.
       </p>
@@ -252,6 +359,7 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
           <option value="all">All Statuses</option>
           <option value="active">Active Only</option>
           <option value="suspended">Suspended Only</option>
+          <option value="deletion_requested">⚠️ Deletion Requested ({users.filter((u) => u.deletion_requested).length})</option>
         </select>
 
         <input
@@ -322,9 +430,25 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                               justifyContent: 'center',
                               flexShrink: 0,
                               boxShadow: '0 2px 5px rgba(38, 71, 214, 0.15)',
+                              overflow: 'hidden',
                             }}
                           >
-                            {initials(u.name)}
+                            {u.photo_url || u.avatar ? (
+                              <img
+                                src={resolveImageUrl(u.photo_url || u.avatar)}
+                                alt={u.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                  if (e.currentTarget.nextElementSibling) {
+                                    e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                                  }
+                                }}
+                              />
+                            ) : null}
+                            <span style={{ display: u.photo_url || u.avatar ? 'none' : 'inline-block' }}>
+                              {initials(u.name)}
+                            </span>
                           </div>
                           <div style={{ textAlign: 'left' }}>
                             <div className="user-profile-name" style={{ fontWeight: 600, fontSize: '13px', color: 'var(--ink)' }}>
@@ -338,7 +462,19 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                           </div>
                         </button>
                       </td>
-                      <td className="mono" style={{ fontSize: '12px' }}>{u.email}</td>
+                      <td className="mono" style={{ fontSize: '12px' }}>
+                        <div>{u.email}</div>
+                        {u.deletion_requested && (
+                          <div style={{ fontSize: '10.5px', color: '#DC2626', fontWeight: 600, marginTop: '2px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                            ⚠️ Deletion Requested
+                          </div>
+                        )}
+                        {u.is_email_verified === false && (
+                          <div style={{ fontSize: '10.5px', color: 'var(--warn, #B54708)', fontWeight: 600, marginTop: '2px' }}>
+                            ⚠️ Pending Activation
+                          </div>
+                        )}
+                      </td>
                       <td>
                         <span
                           className={`badge ${
@@ -627,7 +763,54 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                           ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                           : 'Recent'}
                       </td>
-                      <td style={{ textAlign: 'right' }}>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {u.deletion_requested && (
+                          <button
+                            type="button"
+                            style={{
+                              fontSize: '11px',
+                              padding: '3px 8px',
+                              marginRight: '6px',
+                              borderRadius: '6px',
+                              background: '#FEF2F2',
+                              color: '#DC2626',
+                              border: '1px solid #FCA5A5',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => {
+                              setSelectedUser(u);
+                              setUserModalTab('profile');
+                            }}
+                            title="Review Account Deletion Request"
+                          >
+                            Review Request ⚠️
+                          </button>
+                        )}
+                        {u.is_email_verified === false && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{
+                              fontSize: '11px',
+                              padding: '3px 8px',
+                              marginRight: '6px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border)',
+                            }}
+                            onClick={async () => {
+                              try {
+                                const res = await api.sendActivationEmail({ user_id: userId });
+                                toast.success(res.message || `Activation email sent to ${u.email}!`);
+                              } catch (err) {
+                                toast.error('Failed to send activation email: ' + err.message);
+                              }
+                            }}
+                            title="Send activation email to user"
+                          >
+                            📨 Send Activation
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={currentUser && (currentUser.id === userId || currentUser.user_id === userId)}
@@ -685,9 +868,25 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    overflow: 'hidden',
                   }}
                 >
-                  {initials(selectedUser.name)}
+                  {selectedUser.photo_url || selectedUser.avatar ? (
+                    <img
+                      src={resolveImageUrl(selectedUser.photo_url || selectedUser.avatar)}
+                      alt={selectedUser.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        if (e.currentTarget.nextElementSibling) {
+                          e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                        }
+                      }}
+                    />
+                  ) : null}
+                  <span style={{ display: selectedUser.photo_url || selectedUser.avatar ? 'none' : 'inline-block' }}>
+                    {initials(selectedUser.name)}
+                  </span>
                 </div>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '16px' }}>{selectedUser.name}</div>
@@ -704,6 +903,65 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                 </span>
               </div>
             </div>
+
+            {/* Account Deletion Request Alert */}
+            {selectedUser.deletion_requested && (
+              <div
+                style={{
+                  padding: '14px 16px',
+                  background: '#FEF2F2',
+                  border: '1px solid #FCA5A5',
+                  borderRadius: '8px',
+                  marginBottom: '16px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '13.5px', color: '#991B1B', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ⚠️ Account Deletion Requested by User
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#7F1D1D', marginTop: '4px' }}>
+                      Requested on: {selectedUser.deletion_requested_at ? new Date(selectedUser.deletion_requested_at).toLocaleString() : 'Recently'}
+                    </div>
+                    {selectedUser.deletion_request_reason && (
+                      <div style={{ fontSize: '12px', color: '#374151', fontStyle: 'italic', marginTop: '6px', background: '#fff', padding: '6px 10px', borderRadius: '4px', border: '1px solid #FECACA' }}>
+                        Reason: "{selectedUser.deletion_request_reason}"
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{
+                        background: '#DC2626',
+                        color: '#fff',
+                        border: 'none',
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        padding: '6px 14px',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => handleApproveDeleteUser(selectedUser.id || selectedUser.user_id, selectedUser.name)}
+                    >
+                      Approve & Delete Account
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{
+                        fontSize: '11.5px',
+                        padding: '6px 14px',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => handleRejectDeletionRequest(selectedUser.id || selectedUser.user_id, selectedUser.name)}
+                    >
+                      Reject Request
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Inner Tabs */}
             <div className="filter-bar" style={{ marginBottom: '14px', display: 'flex', gap: '6px' }}>
@@ -757,6 +1015,125 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
                     • Logged in from Chrome (macOS) on {new Date().toLocaleDateString()}<br />
                     • Participated in pairing session room #12<br />
                     • Account standing: Good (0 policy violations)
+                  </div>
+                </div>
+
+                {/* Platform Commission & Tax Override Card */}
+                <div style={{ padding: '12px 14px', background: 'var(--panel-bg)', border: '1px solid var(--grid)', borderRadius: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--ink)' }}>Commission &amp; Tax Overrides</div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          background: selectedUser.custom_commission_percent !== null && selectedUser.custom_commission_percent !== undefined
+                            ? 'rgba(99, 102, 241, 0.15)'
+                            : 'var(--bg)',
+                          color: selectedUser.custom_commission_percent !== null && selectedUser.custom_commission_percent !== undefined
+                            ? '#6366f1'
+                            : 'var(--ink-muted)',
+                          border: '1px solid var(--grid)',
+                        }}
+                      >
+                        {selectedUser.custom_commission_percent !== null && selectedUser.custom_commission_percent !== undefined
+                          ? `Comm: ${selectedUser.custom_commission_percent}%`
+                          : `Default Comm (${selectedUser.role === 'mentor' ? '10%' : '0%'})`}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          background: selectedUser.custom_tax_percent !== null && selectedUser.custom_tax_percent !== undefined
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : 'var(--bg)',
+                          color: selectedUser.custom_tax_percent !== null && selectedUser.custom_tax_percent !== undefined
+                            ? '#dc2626'
+                            : 'var(--ink-muted)',
+                          border: '1px solid var(--grid)',
+                        }}
+                      >
+                        {selectedUser.custom_tax_percent !== null && selectedUser.custom_tax_percent !== undefined
+                          ? `Tax: ${selectedUser.custom_tax_percent}%`
+                          : `Default Tax (${selectedUser.role === 'mentor' ? '0%' : '18%'})`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="sub" style={{ fontSize: '11.5px', marginBottom: '10px' }}>
+                    {selectedUser.role === 'mentor'
+                      ? 'Override the standard platform take-rate and tax percentage deducted from this mentor’s earnings.'
+                      : 'Override the platform convenience fee and tax percentage charged to this learner at checkout.'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-muted)', display: 'block', marginBottom: '4px' }}>
+                        Commission (%)
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          placeholder={selectedUser.role === 'mentor' ? '10.0' : '0.0'}
+                          value={customCommissionInput}
+                          onChange={(e) => setCustomCommissionInput(e.target.value)}
+                          style={{ width: '90px', padding: '5px 8px', fontSize: '12px', margin: 0, borderRadius: '6px' }}
+                        />
+                        <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--ink-muted)' }}>%</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-muted)', display: 'block', marginBottom: '4px' }}>
+                        Tax on Comm (%)
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          placeholder={selectedUser.role === 'mentor' ? '0.0' : '18.0'}
+                          value={customTaxInput}
+                          onChange={(e) => setCustomTaxInput(e.target.value)}
+                          style={{ width: '90px', padding: '5px 8px', fontSize: '12px', margin: 0, borderRadius: '6px' }}
+                        />
+                        <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--ink-muted)' }}>%</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '11.5px', padding: '5px 12px' }}
+                        disabled={savingCommission || (customCommissionInput === '' && customTaxInput === '')}
+                        onClick={() => handleUpdateCommission(customCommissionInput, customTaxInput)}
+                      >
+                        {savingCommission ? 'Saving...' : 'Set Overrides'}
+                      </button>
+                      {((selectedUser.custom_commission_percent !== null && selectedUser.custom_commission_percent !== undefined) ||
+                        (selectedUser.custom_tax_percent !== null && selectedUser.custom_tax_percent !== undefined)) && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '11.5px', padding: '5px 10px' }}
+                          disabled={savingCommission}
+                          onClick={() => {
+                            setCustomCommissionInput('');
+                            setCustomTaxInput('');
+                            handleUpdateCommission(null, null);
+                          }}
+                        >
+                          Reset Defaults
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -914,7 +1291,32 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
             })()}
 
             {/* Bottom Modal Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px' }}>
+              <div>
+                <button
+                  type="button"
+                  disabled={currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id))}
+                  title={currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id)) ? 'You cannot delete your own account' : undefined}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    background: '#FEF2F2',
+                    color: '#DC2626',
+                    border: '1px solid #FCA5A5',
+                    cursor: (currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id))) ? 'not-allowed' : 'pointer',
+                    opacity: (currentUser && (currentUser.id === (selectedUser.id || selectedUser.user_id) || currentUser.user_id === (selectedUser.id || selectedUser.user_id))) ? 0.45 : 1,
+                  }}
+                  onClick={() => handleApproveDeleteUser(selectedUser.id || selectedUser.user_id, selectedUser.name)}
+                >
+                  Permanently Delete User
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
@@ -934,6 +1336,7 @@ export default function AdminUsersPage({ initialRole = 'all', pageTitle = 'User 
               <button type="button" className="btn btn-ghost" onClick={() => setSelectedUser(null)}>
                 Close
               </button>
+              </div>
             </div>
           </div>
         )}

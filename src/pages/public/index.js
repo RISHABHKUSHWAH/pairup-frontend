@@ -14,6 +14,8 @@ export { default as WhatIsPairUpPage } from './WhatIsPairUpPage';
 export * from './WhatIsPairUpPage';
 export { default as HelpPage } from './HelpPage';
 export * from './HelpPage';
+export { default as ActivateAccountPage } from './ActivateAccountPage';
+export * from './ActivateAccountPage';
 export * from './CmsPages';
 
 

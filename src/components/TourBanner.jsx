@@ -1,24 +1,20 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useTour } from '../context/TourContext';
-import { CrownIcon, ChevronRightIcon, XIcon, CheckCircleIcon } from './Icons';
+import { CrownIcon, ChevronRightIcon, XIcon } from './Icons';
 
 export default function TourBanner({ role = 'learner' }) {
-  const { startTour } = useTour();
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(`pairup_banner_dismissed_${role}`) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const { startTour, dismissBanner, isBannerDismissed } = useTour();
 
-  if (dismissed) return null;
+  // If dismissed or tour already completed, do not render
+  if (isBannerDismissed(role)) return null;
+
+  const handleStartTour = () => {
+    dismissBanner(role);
+    startTour(role);
+  };
 
   const handleDismiss = () => {
-    setDismissed(true);
-    try {
-      localStorage.setItem(`pairup_banner_dismissed_${role}`, 'true');
-    } catch {}
+    dismissBanner(role);
   };
 
   const isMentor = role === 'mentor';
@@ -53,7 +49,7 @@ export default function TourBanner({ role = 'learner' }) {
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => startTour(role)}
+          onClick={handleStartTour}
           style={{ fontSize: '13px', padding: '8px 16px' }}
         >
           <span>Start Guided Tour</span>

@@ -4,7 +4,7 @@ import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
 import TourBanner from '../../components/TourBanner';
-import { api, initials, stars, learnerFavorites } from '../../api/client';
+import { api, initials, stars, resolveImageUrl, learnerFavorites } from '../../api/client';
 import { SearchIcon, PlusIcon, DocumentIcon } from '../../components/Icons';
 import { useToast } from '../../context';
 import PairUpLoader from '../../components/PairUpLoader';
@@ -274,7 +274,21 @@ export default function LearnerDashboard() {
                 <div key={s.id} className="mini-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                     <div className="avatar" style={{ width: '36px', height: '36px', fontSize: '12px' }}>
-                      {initials(s.mentor_name)}
+                      {s.mentor_photo_url || s.photo_url || s.avatar ? (
+                        <img
+                          src={resolveImageUrl(s.mentor_photo_url || s.photo_url || s.avatar)}
+                          alt={s.mentor_name}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            if (e.currentTarget.nextElementSibling) {
+                              e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                            }
+                          }}
+                        />
+                      ) : null}
+                      <span style={{ display: s.mentor_photo_url || s.photo_url || s.avatar ? 'none' : 'inline-block' }}>
+                        {initials(s.mentor_name)}
+                      </span>
                     </div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '13px' }}>{s.mentor_name}</div>
@@ -416,7 +430,21 @@ export default function LearnerDashboard() {
               <div key={id} className="mini-card" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                   <div className="avatar" style={{ width: '40px', height: '40px', fontSize: '14px' }}>
-                    {initials(m.name)}
+                    {m.photo_url || m.avatar ? (
+                      <img
+                        src={resolveImageUrl(m.photo_url || m.avatar)}
+                        alt={m.name}
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          if (e.currentTarget.nextElementSibling) {
+                            e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                          }
+                        }}
+                      />
+                    ) : null}
+                    <span style={{ display: m.photo_url || m.avatar ? 'none' : 'inline-block' }}>
+                      {initials(m.name)}
+                    </span>
                   </div>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '13.5px' }}>{m.name}</div>

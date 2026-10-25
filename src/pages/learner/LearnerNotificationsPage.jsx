@@ -41,11 +41,10 @@ export default function LearnerNotificationsPage() {
   };
 
   const loadNotifications = async () => {
-    let remote = [];
     try {
       const data = await notificationsApi.list();
       if (Array.isArray(data)) {
-        remote = data.map((n) => ({
+        const remote = data.map((n) => ({
           id: n.id,
           type: n.type || 'system',
           title: n.title,
@@ -54,17 +53,13 @@ export default function LearnerNotificationsPage() {
           read: n.is_read,
           link: n.link,
         }));
+        setNotifications(remote);
+        return;
       }
     } catch (_) {}
 
     const localData = learnerNotifications.getNotifications();
-    if (remote.length > 0) {
-      const remoteIds = new Set(remote.map((r) => String(r.id)));
-      const combined = [...remote, ...localData.filter((l) => !remoteIds.has(String(l.id)))];
-      setNotifications(combined);
-    } else {
-      setNotifications(localData);
-    }
+    setNotifications(localData);
   };
 
   const handleMarkRead = async (id) => {

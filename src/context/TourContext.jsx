@@ -268,14 +268,52 @@ export function TourProvider({ children }) {
 
   const [tourRole, setTourRole] = useState(() => getEffectiveRole());
 
+  // Check if banner or tour has been dismissed/completed
+  const checkIsDismissed = useCallback(
+    (role) => {
+      const r = role || getEffectiveRole();
+      try {
+        const uid = user?.id ? `_${user.id}` : '';
+        if (localStorage.getItem(`pairup_banner_dismissed${uid}_${r}`) === 'true') return true;
+        if (localStorage.getItem(`pairup_banner_dismissed_${r}`) === 'true') return true;
+        if (localStorage.getItem('pairup_banner_dismissed') === 'true') return true;
+        if (localStorage.getItem(`pairup_tour_completed${uid}_${r}`) === 'true') return true;
+        if (localStorage.getItem(`pairup_tour_completed_${r}`) === 'true') return true;
+        if (localStorage.getItem('pairup_tour_completed') === 'true') return true;
+        return false;
+      } catch {
+        return false;
+      }
+    },
+    [getEffectiveRole, user?.id]
+  );
+
+  // In-memory state tracking dismissed roles for immediate UI re-rendering
+  const [dismissedState, setDismissedState] = useState(() => ({
+    learner: checkIsDismissed('learner'),
+    mentor: checkIsDismissed('mentor'),
+  }));
+
   // Track if user has seen tour
   const [tourSeen, setTourSeen] = useState(() => {
     try {
-      return localStorage.getItem('pairup_tour_completed') === 'true';
+      return (
+        localStorage.getItem('pairup_tour_completed') === 'true' ||
+        checkIsDismissed('learner') ||
+        checkIsDismissed('mentor')
+      );
     } catch {
       return false;
     }
   });
+
+  // Re-sync dismissed state if user changes
+  useEffect(() => {
+    setDismissedState({
+      learner: checkIsDismissed('learner'),
+      mentor: checkIsDismissed('mentor'),
+    });
+  }, [checkIsDismissed]);
 
   // Automatically adapt default role based on authenticated user or URL
   useEffect(() => {
@@ -287,25 +325,58 @@ export function TourProvider({ children }) {
   const steps = tourRole === 'mentor' ? MENTOR_TOUR_STEPS : LEARNER_TOUR_STEPS;
   const currentStep = steps[currentStepIndex] || steps[0];
 
+  const dismissBanner = useCallback(
+    (roleToDismiss) => {
+      const r = roleToDismiss || tourRole;
+      setDismissedState((prev) => ({ ...prev, [r]: true }));
+      try {
+        localStorage.setItem(`pairup_banner_dismissed_${r}`, 'true');
+        localStorage.setItem('pairup_banner_dismissed', 'true');
+        if (user?.id) {
+          localStorage.setItem(`pairup_banner_dismissed_${user.id}_${r}`, 'true');
+        }
+      } catch {}
+    },
+    [tourRole, user?.id]
+  );
+
+  const isBannerDismissed = useCallback(
+    (roleToCheck) => {
+      const r = roleToCheck || tourRole;
+      return Boolean(dismissedState[r] || checkIsDismissed(r));
+    },
+    [dismissedState, checkIsDismissed, tourRole]
+  );
+
   const startTour = useCallback(
     (preferredRole) => {
       const roleToUse = getEffectiveRole(preferredRole);
       setTourRole(roleToUse);
       setCurrentStepIndex(0);
       setIsTourActive(true);
+      // Immediately dismiss the banner when tour starts so it is never seen again
+      dismissBanner(roleToUse);
     },
-    [getEffectiveRole]
+    [getEffectiveRole, dismissBanner]
   );
 
-  const endTour = useCallback((markAsSeen = true) => {
-    setIsTourActive(false);
-    if (markAsSeen) {
-      setTourSeen(true);
-      try {
-        localStorage.setItem('pairup_tour_completed', 'true');
-      } catch {}
-    }
-  }, []);
+  const endTour = useCallback(
+    (markAsSeen = true) => {
+      setIsTourActive(false);
+      dismissBanner(tourRole);
+      if (markAsSeen) {
+        setTourSeen(true);
+        try {
+          localStorage.setItem('pairup_tour_completed', 'true');
+          localStorage.setItem(`pairup_tour_completed_${tourRole}`, 'true');
+          if (user?.id) {
+            localStorage.setItem(`pairup_tour_completed_${user.id}_${tourRole}`, 'true');
+          }
+        } catch {}
+      }
+    },
+    [dismissBanner, tourRole, user?.id]
+  );
 
   const nextStep = useCallback(() => {
     setCurrentStepIndex((prev) => {
@@ -337,10 +408,22 @@ export function TourProvider({ children }) {
     try {
       localStorage.removeItem('pairup_tour_completed');
       localStorage.removeItem('pairup_tour_banner_dismissed');
+      localStorage.removeItem('pairup_banner_dismissed');
+      localStorage.removeItem('pairup_banner_dismissed_learner');
+      localStorage.removeItem('pairup_banner_dismissed_mentor');
+      localStorage.removeItem('pairup_tour_completed_learner');
+      localStorage.removeItem('pairup_tour_completed_mentor');
+      if (user?.id) {
+        localStorage.removeItem(`pairup_banner_dismissed_${user.id}_learner`);
+        localStorage.removeItem(`pairup_banner_dismissed_${user.id}_mentor`);
+        localStorage.removeItem(`pairup_tour_completed_${user.id}_learner`);
+        localStorage.removeItem(`pairup_tour_completed_${user.id}_mentor`);
+      }
     } catch {}
     setTourSeen(false);
+    setDismissedState({ learner: false, mentor: false });
     startTour();
-  }, [startTour]);
+  }, [startTour, user?.id]);
 
   return (
     <TourContext.Provider
@@ -354,6 +437,8 @@ export function TourProvider({ children }) {
         tourSeen,
         startTour,
         endTour,
+        dismissBanner,
+        isBannerDismissed,
         nextStep,
         prevStep,
         goToStep,

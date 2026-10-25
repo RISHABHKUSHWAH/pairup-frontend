@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
 import { adminRefunds, initials } from '../../api/client';
 import {
@@ -326,6 +327,7 @@ export default function AdminRefundsPage() {
 
   return (
     <PortalLayout title="Refund Management" portalType="admin">
+      <AdminCategoryNav category="finances" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
         {/* Top Header & System Online Status */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>

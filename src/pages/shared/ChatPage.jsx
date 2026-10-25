@@ -305,6 +305,7 @@ export default function ChatPage() {
     const uid = c.user_id || c.other_id || c.id;
     const uname = c.name || c.other_name || 'User';
     const urole = c.role || c.other_role || 'learner';
+    const isOnline = Boolean(c.online || c.is_online || c.online_status);
     return {
       ...c,
       user_id: uid,
@@ -313,6 +314,9 @@ export default function ChatPage() {
       other_name: uname,
       role: urole,
       other_role: urole,
+      online: isOnline,
+      is_online: isOnline,
+      online_status: isOnline ? 1 : 0,
       last_time: c.last_time || (c.last_message_at ? new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''),
     };
   };
@@ -418,6 +422,14 @@ export default function ChatPage() {
       }
     }
     loadConversations();
+
+    const interval = setInterval(loadConversations, 10000);
+    const handleFocus = () => loadConversations();
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, []);
 
   // If no partner selected in URL but conversations exist, auto-select first conversation
@@ -441,13 +453,17 @@ export default function ChatPage() {
 
   // Fetch mentor profile for otherId so we always have the real hourly rate, title, and details
   useEffect(() => {
+    setPartnerProfile(null);
     if (!otherId) {
-      setPartnerProfile(null);
+      return;
+    }
+    // Skip fetching mentor profile if partner is not a mentor (e.g. platform admin or learner)
+    if (activeConvo && activeConvo.role && activeConvo.role !== 'mentor') {
       return;
     }
     api.getMentor(otherId)
       .then((m) => {
-        if (m) {
+        if (m && String(m.user_id || m.id) === String(otherId)) {
           setPartnerProfile({
             id: m.user_id || m.id,
             name: m.name,
@@ -455,23 +471,34 @@ export default function ChatPage() {
             title: m.title || 'Technical Mentor',
             hourly_rate: m.hourly_rate !== undefined && m.hourly_rate !== null ? Number(m.hourly_rate) : undefined,
           });
+        } else {
+          setPartnerProfile(null);
         }
       })
-      .catch(() => {});
-  }, [otherId]);
+      .catch(() => {
+        setPartnerProfile(null);
+      });
+  }, [otherId, activeConvo?.role]);
 
+  // Priority: 1. activeConvo from DB (reliable ground truth)
+  //           2. partnerProfile (if matching otherId)
+  //           3. searchName query param
+  //           4. fallback
   const otherName =
-    searchName ||
     activeConvo?.name ||
     activeConvo?.other_name ||
-    partnerProfile?.name ||
+    (partnerProfile && String(partnerProfile.id) === String(otherId) ? partnerProfile.name : null) ||
+    searchName ||
     'Direct Message';
 
   const otherRole =
     activeConvo?.role ||
     activeConvo?.other_role ||
-    partnerProfile?.role ||
+    (partnerProfile && String(partnerProfile.id) === String(otherId) ? partnerProfile.role : null) ||
     'user';
+
+  const isPlatformAdmin = otherRole === 'admin' || otherRole === 'superadmin' || activeConvo?.role === 'admin' || activeConvo?.role === 'superadmin';
+  const isPartnerOnline = Boolean(activeConvo?.online || activeConvo?.is_online || activeConvo?.online_status || partnerProfile?.online);
 
   // Keep URL parameters clean and aligned with resolved name
   useEffect(() => {
@@ -1683,6 +1710,7 @@ export default function ChatPage() {
                           {c.contract_id ? <DocumentIcon size={18} /> : initials(displayName)}
                         </div>
                         <span
+                          title={c.is_online ? 'Online' : 'Offline'}
                           style={{
                             position: 'absolute',
                             bottom: '-1px',
@@ -1690,7 +1718,8 @@ export default function ChatPage() {
                             width: '9px',
                             height: '9px',
                             borderRadius: '50%',
-                            background: '#10b981',
+                            background: c.is_online ? '#10b981' : '#94a3b8',
+                            boxShadow: c.is_online ? '0 0 5px rgba(16, 185, 129, 0.6)' : 'none',
                             border: '2px solid var(--surface)',
                           }}
                         />
@@ -1807,6 +1836,7 @@ export default function ChatPage() {
                       {searchContractId ? <DocumentIcon size={20} /> : initials(otherName)}
                     </div>
                     <span
+                      title={isPartnerOnline ? 'Online' : 'Offline'}
                       style={{
                         position: 'absolute',
                         bottom: '-1px',
@@ -1814,7 +1844,8 @@ export default function ChatPage() {
                         width: '9px',
                         height: '9px',
                         borderRadius: '50%',
-                        background: '#10b981',
+                        background: isPartnerOnline ? '#10b981' : '#94a3b8',
+                        boxShadow: isPartnerOnline ? '0 0 5px rgba(16, 185, 129, 0.6)' : 'none',
                         border: '2px solid var(--surface)',
                       }}
                     />
@@ -1825,6 +1856,24 @@ export default function ChatPage() {
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {searchContractId && activeConvo?.contract_title ? activeConvo.contract_title : otherName}
                       </span>
+                      {isPlatformAdmin && (
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            background: 'rgba(59, 130, 246, 0.15)',
+                            color: '#3b82f6',
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            border: '1px solid rgba(59, 130, 246, 0.25)',
+                          }}
+                        >
+                          <ShieldIcon size={12} /> Platform Support
+                        </span>
+                      )}
                       {searchContractId && (
                         <span
                           style={{
@@ -1849,28 +1898,34 @@ export default function ChatPage() {
                           <span style={{ color: 'var(--ink-faint)' }}>•</span>
                         </>
                       )}
-                      <span className="chat-status-indicator">
-                        <span className="led"></span>
-                        Active on PairUp
+                      <span className={`chat-status-indicator ${isPartnerOnline ? 'online' : 'offline'}`}>
+                        <span className={`led ${isPartnerOnline ? 'online' : 'offline'}`}></span>
+                        {isPlatformAdmin
+                          ? 'Official PairUp Support'
+                          : isPartnerOnline
+                          ? 'Active on PairUp'
+                          : 'Offline'}
                       </span>
                     </div>
                   </div>
 
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ fontSize: '11.5px', padding: '5px 12px' }}
-                      onClick={() => {
-                        setScheduleModalOpen(true);
-                        setScheduleDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
-                      }}
-                    >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                        <CalendarIcon size={13} /> Schedule Session
-                      </span>
-                    </button>
-                    {!searchContractId && (
+                    {!isPlatformAdmin && otherRole === 'mentor' && (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '11.5px', padding: '5px 12px' }}
+                        onClick={() => {
+                          setScheduleModalOpen(true);
+                          setScheduleDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <CalendarIcon size={13} /> Schedule Session
+                        </span>
+                      </button>
+                    )}
+                    {!isPlatformAdmin && otherRole === 'mentor' && !searchContractId && (
                       <button
                         type="button"
                         className="btn btn-secondary"
@@ -1920,7 +1975,7 @@ export default function ChatPage() {
                             gap: '2px',
                           }}
                         >
-                          {(otherRole === 'mentor' || user?.role === 'learner') && (
+                          {otherRole === 'mentor' && (
                             <Link
                               to={`/mentor/${otherId}`}
                               onClick={() => setMoreMenuOpen(false)}
@@ -2295,7 +2350,8 @@ export default function ChatPage() {
                       const isMine = String(m.sender_id) === String(user?.id);
                       const prevMsg = idx > 0 ? messages[idx - 1] : null;
                       const showDateDivider = !prevMsg || !isSameDay(m.created_at, prevMsg.created_at);
-                      const senderDisplayName = isMine ? (user?.name || 'You') : otherName;
+                      const senderDisplayName = isMine ? (user?.name || 'You') : (m.sender_name || otherName);
+                      const isAdminMsg = !isMine && (m.sender_role === 'admin' || m.sender_role === 'superadmin' || isPlatformAdmin);
                       const isHighlighted = highlightedMsgId === m.id;
 
                       return (
@@ -2360,7 +2416,11 @@ export default function ChatPage() {
                                 height: '36px',
                                 fontSize: '12.5px',
                                 flexShrink: 0,
-                                background: isMine ? 'var(--accent)' : 'var(--surface-hover, #232733)',
+                                background: isMine
+                                  ? 'var(--accent)'
+                                  : isAdminMsg
+                                  ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+                                  : 'var(--surface-hover, #232733)',
                                 color: '#fff',
                                 fontWeight: 700,
                                 borderRadius: '8px',
@@ -2381,6 +2441,11 @@ export default function ChatPage() {
                                 {isMine && (
                                   <span style={{ fontSize: '9.5px', fontWeight: 600, background: 'var(--accent-soft)', color: 'var(--accent)', padding: '1px 5px', borderRadius: '4px' }}>
                                     You
+                                  </span>
+                                )}
+                                {isAdminMsg && (
+                                  <span style={{ fontSize: '9.5px', fontWeight: 600, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', padding: '1px 5px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                    <ShieldIcon size={10} /> Admin
                                   </span>
                                 )}
                                 <span style={{ fontSize: '11px', color: 'var(--ink-faint)' }}>

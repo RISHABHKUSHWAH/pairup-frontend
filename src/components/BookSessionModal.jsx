@@ -5,7 +5,7 @@ import { useToast } from '../context';
 import { api } from '../api';
 import Modal from './Modal';
 import { ClockIcon, CalendarIcon, ShieldCheckIcon, StarIcon, CheckIcon } from './Icons';
-import { initials } from '../utils';
+import { initials, resolveImageUrl } from '../utils';
 
 const DURATION_OPTIONS = [
   { value: 30, label: '30 mins', badge: 'Quick Sync' },
@@ -278,9 +278,24 @@ export default function BookSessionModal({
                 background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
                 color: '#fff',
                 fontWeight: 700,
+                overflow: 'hidden',
               }}
             >
-              {initials(mentorName)}
+              {liveMentor?.photo_url || mentor?.photo_url || liveMentor?.avatar || mentor?.avatar ? (
+                <img
+                  src={resolveImageUrl(liveMentor?.photo_url || mentor?.photo_url || liveMentor?.avatar || mentor?.avatar)}
+                  alt={mentorName}
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    if (e.currentTarget.nextElementSibling) {
+                      e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                    }
+                  }}
+                />
+              ) : null}
+              <span style={{ display: liveMentor?.photo_url || mentor?.photo_url || liveMentor?.avatar || mentor?.avatar ? 'none' : 'inline-block' }}>
+                {initials(mentorName)}
+              </span>
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: '15px' }}>{mentorName}</div>

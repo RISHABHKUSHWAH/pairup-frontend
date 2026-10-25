@@ -1,6 +1,18 @@
+import { API_BASE } from '../api/http';
+
 /**
- * Common formatting and display utility functions.
+ * Resolves a profile photo or avatar image URL ensuring it's absolute and accessible.
+ * @param {string} url 
+ * @returns {string}
  */
+export function resolveImageUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return API_BASE ? `${API_BASE}${cleanPath}` : cleanPath;
+}
 
 /**
  * Extracts up to 2 uppercase initials from a user's display name.
@@ -136,6 +148,9 @@ export function resolveNotificationLink(item, role = 'learner') {
     if (combined.includes('dispute') || combined.includes('refund')) return '/admin/disputes';
     if (combined.includes('mentor')) return '/admin/mentors';
     if (combined.includes('contract')) return '/admin/contracts';
+    if (combined.includes('deletion') || combined.includes('user') || combined.includes('account')) return '/admin/users';
+    if (combined.includes('message') || combined.includes('chat')) return '/chat';
+    if (combined.includes('verification') || combined.includes('id')) return '/admin/verification';
     return '/admin/overview';
   } else {
     // Learner

@@ -8,9 +8,12 @@ import { useToast } from '../../context';
 import { UserIcon, RefreshIcon, CodeIcon, MailIcon, UsersIcon } from '../../components/Icons';
 import { mentorPayoutSettings } from '../../api/client';
 import { adminSupport } from '../../api/storage/adminStorage';
+import { api } from '../../api';
+import { usePlatformCommission } from '../../utils';
 
 export default function MentorSettingsPage() {
   const { user, switchRole, logout } = useAuth();
+  const { effectiveMentorFeePercent } = usePlatformCommission();
   const { theme, toggleTheme } = useTheme();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -96,8 +99,54 @@ export default function MentorSettingsPage() {
   const [disputeDetails, setDisputeDetails] = useState('');
   const [disputeReason, setDisputeReason] = useState('');
 
-  // 7. Delete Account Modal
+  // 7. Delete Account Modal & Request State
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deletionStatus, setDeletionStatus] = useState({ pending: false, requested_at: null, reason: '' });
+  const [deletionReason, setDeletionReason] = useState('');
+  const [submittingDeletion, setSubmittingDeletion] = useState(false);
+  const [cancellingDeletion, setCancellingDeletion] = useState(false);
+
+  useEffect(() => {
+    api.getAccountDeletionStatus()
+      .then((res) => {
+        if (res && res.pending) {
+          setDeletionStatus(res);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleRequestDeletion = async (e) => {
+    if (e) e.preventDefault();
+    setSubmittingDeletion(true);
+    try {
+      const res = await api.requestAccountDeletion(deletionReason);
+      setDeletionStatus({
+        pending: true,
+        requested_at: res.requested_at || new Date().toISOString(),
+        reason: deletionReason,
+      });
+      setDeleteModalOpen(false);
+      toast.success('Account deletion request has been submitted to the administrator for review.');
+    } catch (err) {
+      toast.error(err.message || 'Failed to submit account deletion request.');
+    } finally {
+      setSubmittingDeletion(false);
+    }
+  };
+
+  const handleCancelDeletion = async () => {
+    setCancellingDeletion(true);
+    try {
+      await api.cancelAccountDeletion();
+      setDeletionStatus({ pending: false, requested_at: null, reason: '' });
+      toast.success('Account deletion request has been cancelled.');
+    } catch (err) {
+      toast.error(err.message || 'Failed to cancel deletion request.');
+    } finally {
+      setCancellingDeletion(false);
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -728,7 +777,7 @@ export default function MentorSettingsPage() {
                   What is the PairUp platform fee?
                 </summary>
                 <p className="sub" style={{ fontSize: '12.5px', marginTop: '8px', lineHeight: 1.5 }}>
-                  PairUp charges a flat 10% platform commission on completed mentorship sessions. This covers high-definition WebRTC video infrastructure, automated escrow protection, and payment processing fees.
+                  PairUp charges a flat {effectiveMentorFeePercent}% platform commission on completed mentorship sessions. This covers high-definition WebRTC video infrastructure, automated escrow protection, and payment processing fees.
                 </p>
               </details>
             </div>
@@ -802,21 +851,66 @@ export default function MentorSettingsPage() {
             </div>
 
             {/* Danger Zone: Delete Account */}
-            <div style={{ padding: '16px', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.04)' }}>
-              <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--danger, #ef4444)' }}>
-                Danger Zone: Delete Account
+            <div style={{
+              padding: '16px',
+              border: deletionStatus.pending ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px',
+              background: deletionStatus.pending ? 'rgba(245, 158, 11, 0.04)' : 'rgba(239, 68, 68, 0.04)',
+            }}>
+              <div style={{ fontWeight: 600, fontSize: '14px', color: deletionStatus.pending ? '#d97706' : 'var(--danger, #ef4444)' }}>
+                {deletionStatus.pending ? 'Account Deletion Request Pending Review' : 'Danger Zone: Delete Account'}
               </div>
-              <p className="sub" style={{ fontSize: '12px', margin: '4px 0 12px' }}>
-                Permanently close your account, remove your public profile, and forfeit unwithdrawn balances.
-              </p>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                style={{ color: 'var(--danger, #ef4444)', borderColor: 'var(--danger, #ef4444)', fontSize: '12px' }}
-                onClick={() => setDeleteModalOpen(true)}
-              >
-                Delete Account
-              </button>
+
+              {deletionStatus.pending ? (
+                <div style={{ marginTop: '8px' }}>
+                  <div style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(245, 158, 11, 0.1)',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    marginBottom: '14px',
+                  }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: '#b45309', marginBottom: '4px' }}>
+                      ⏳ Deletion Request Submitted to Admin
+                    </div>
+                    <p className="sub" style={{ fontSize: '12px', margin: 0, color: 'inherit' }}>
+                      You requested account deletion on {new Date(deletionStatus.requested_at).toLocaleDateString()} at {new Date(deletionStatus.requested_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
+                      A platform administrator has been notified to review and process your request.
+                    </p>
+                    {deletionStatus.reason && (
+                      <div style={{ fontSize: '12px', marginTop: '6px', fontStyle: 'italic', color: 'var(--text-muted, #666)' }}>
+                        Reason provided: "{deletionStatus.reason}"
+                      </div>
+                    )}
+                  </div>
+                  <p className="sub" style={{ fontSize: '12px', marginBottom: '14px' }}>
+                    Changed your mind? You can cancel your deletion request at any time before an administrator processes it.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={cancellingDeletion}
+                    onClick={handleCancelDeletion}
+                    style={{ fontSize: '12px' }}
+                  >
+                    {cancellingDeletion ? 'Cancelling Request...' : 'Cancel Deletion Request'}
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="sub" style={{ fontSize: '12px', margin: '4px 0 12px' }}>
+                    Permanently close your account, remove your public profile, and forfeit unwithdrawn balances. An account deletion request will be sent to the administrator for review.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ color: 'var(--danger, #ef4444)', borderColor: 'var(--danger, #ef4444)', fontSize: '12px' }}
+                    onClick={() => setDeleteModalOpen(true)}
+                  >
+                    Delete Account
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1101,33 +1195,45 @@ export default function MentorSettingsPage() {
       <Modal
         isOpen={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
-        title="Confirm Account Deletion"
+        title="Request Account Deletion"
       >
-        <div>
-          <p style={{ color: 'var(--danger, #ef4444)', fontSize: '13px', lineHeight: 1.5 }}>
-            This action cannot be undone. All active proposals will be withdrawn, and your public profile will be permanently deleted.
+        <form onSubmit={handleRequestDeletion}>
+          <p style={{ color: 'var(--danger, #ef4444)', fontSize: '13px', lineHeight: 1.5, marginTop: 0 }}>
+            Submitting this request will notify the platform administrator to review and permanently delete your mentor profile, contracts, and account data.
           </p>
-          <div className="field" style={{ marginTop: '12px' }}>
-            <label>Type "DELETE" to confirm:</label>
-            <input type="text" placeholder="DELETE" />
+          <div className="field" style={{ marginTop: '14px' }}>
+            <label style={{ fontSize: '12.5px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+              Reason for leaving (Optional):
+            </label>
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="Please share why you wish to delete your account..."
+              value={deletionReason}
+              onChange={(e) => setDeletionReason(e.target.value)}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
           </div>
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-            <button type="button" className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setDeleteModalOpen(false)}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ flex: 1 }}
+              onClick={() => setDeleteModalOpen(false)}
+              disabled={submittingDeletion}
+            >
               Cancel
             </button>
             <button
-              type="button"
+              type="submit"
               className="btn btn-secondary"
-              style={{ flex: 1, color: 'var(--danger, #ef4444)' }}
-              onClick={() => {
-                toast.info('Account deletion request registered.');
-                setDeleteModalOpen(false);
-              }}
+              style={{ flex: 1, color: 'var(--danger, #ef4444)', fontWeight: 600 }}
+              disabled={submittingDeletion}
             >
-              Permanently Delete
+              {submittingDeletion ? 'Submitting...' : 'Send Request to Admin'}
             </button>
           </div>
-        </div>
+        </form>
       </Modal>
     </PortalLayout>
   );

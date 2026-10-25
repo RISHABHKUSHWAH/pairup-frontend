@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
 import { api, initials, formatCurrency, formatDateTime } from '../../api/client';
 import {
@@ -367,6 +368,7 @@ export default function AdminContractsPage() {
 
   return (
     <PortalLayout title="Mentorship Contracts" portalType="admin">
+      <AdminCategoryNav category="operations" />
       <div style={{ paddingBottom: '50px' }}>
         {/* Page Top Header */}
         <div

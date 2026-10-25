@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
-import { api, initials } from '../../api/client';
+import { api, initials, resolveImageUrl } from '../../api/client';
 import {
   ShieldIcon,
   ScaleIcon,
@@ -17,12 +17,16 @@ import {
   RefreshIcon,
   SparklesIcon,
   WalletIcon,
+  TrendingUpIcon,
+  UserIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
+import { usePlatformCommission } from '../../utils';
 
 export default function AdminOverviewPage() {
   const { confirm } = useConfirm();
   const { toast } = useToast();
+  const { mentorCommissionPercent } = usePlatformCommission();
   const [stats, setStats] = useState(null);
   const [pendingMentors, setPendingMentors] = useState([]);
   const [disputes, setDisputes] = useState([]);
@@ -35,6 +39,7 @@ export default function AdminOverviewPage() {
   const [error, setError] = useState('');
   const [hoveredDayIdx, setHoveredDayIdx] = useState(null);
   const [chartMetric, setChartMetric] = useState('revenue'); // 'revenue' | 'commission'
+  const [activityTab, setActivityTab] = useState('registrations'); // 'registrations' | 'transactions' | 'sessions'
 
   useEffect(() => {
     loadAll();
@@ -100,12 +105,43 @@ export default function AdminOverviewPage() {
     }
   };
 
-  const totalUsers = (stats?.total_learners || 0) + (stats?.total_mentors || 0) || 13;
+  const totalUsers = stats?.total_users ?? ((stats?.total_learners || 0) + (stats?.total_mentors || 0) || 13);
   const learnersCount = stats?.total_learners ?? 6;
   const mentorsCount = stats?.total_mentors ?? 7;
-  const activeSessions = (stats?.bookings_by_status?.paid || 0) + (stats?.bookings_by_status?.accepted || 0) || 2;
+  const adminsCount = stats?.total_admins ?? 2;
+
+  const activeUsersCount = stats?.active_users ?? Math.max(1, totalUsers - (stats?.inactive_users || 0));
+  const inactiveUsersCount = stats?.inactive_users ?? 0;
+  const activeLearnersCount = stats?.active_learners ?? learnersCount;
+  const inactiveLearnersCount = stats?.inactive_learners ?? 0;
+  const activeMentorsCount = stats?.active_mentors ?? mentorsCount;
+  const inactiveMentorsCount = stats?.inactive_mentors ?? 0;
+
+  const totalProjects = stats?.total_projects ?? (contractsCount + openProblemsCount);
+  const totalContracts = stats?.total_contracts ?? contractsCount;
+  const activeContracts = stats?.active_contracts ?? (contractsCount > 0 ? 1 : 0);
+  const completedContracts = stats?.completed_contracts ?? 0;
+  const totalProblems = stats?.total_problems ?? openProblemsCount;
+  const openProblems = stats?.open_problems ?? openProblemsCount;
+
+  const totalBookings = stats?.total_bookings ?? 18;
+  const completedSessions = stats?.completed_sessions ?? (stats?.bookings_by_status?.completed || 12);
+  const activeSessions = stats?.active_sessions ?? ((stats?.bookings_by_status?.paid || 0) + (stats?.bookings_by_status?.accepted || 0) || 2);
+  const pendingSessions = stats?.bookings_by_status?.pending || 0;
+
+  const totalPaymentsCount = stats?.total_payments_count ?? 24;
+  const totalPaymentsVolume = stats?.total_payments_volume ?? (stats?.total_revenue_released || 32000);
   const revenueReleased = stats?.total_revenue_released || 27623;
+  const totalEscrowHeld = stats?.total_escrow_held || 4500;
+  const totalRefunded = stats?.total_refunded || 1200;
+  const totalRefundsCount = stats?.total_refunds_count ?? 1;
+  const pendingPayouts = stats?.pending_payouts || 4050;
+  const totalMentorPayouts = stats?.total_mentor_payouts || 24861;
   const platformFee = Math.round(stats?.total_platform_fees || 2762);
+  const pendingPlatformFee = Math.round(stats?.pending_platform_fees || 450);
+
+  const recentRegistrations = stats?.recent_registrations || [];
+  const recentTransactions = stats?.recent_transactions || [];
 
   // 7-day Daily Activity Chart Data
   const chartDays = useMemo(() => {
@@ -123,13 +159,14 @@ export default function AdminOverviewPage() {
     if (stats?.revenue_by_day && Array.isArray(stats.revenue_by_day) && stats.revenue_by_day.length > 0) {
       const map = {};
       stats.revenue_by_day.forEach((r) => {
-        if (r.date) map[r.date] = r.total;
+        if (r.date) map[r.date] = r;
       });
       days.forEach((day) => {
         if (map[day.iso] !== undefined) {
-          day.amount = Math.round(map[day.iso]);
-          day.commission = Math.round(day.amount * 0.1);
-          day.calls = Math.max(1, Math.round(day.amount / 1200));
+          const item = map[day.iso];
+          day.amount = Math.round(item.total || 0);
+          day.commission = Math.round(item.commission !== undefined ? item.commission : day.amount * 0.1);
+          day.calls = item.count || Math.max(1, Math.round(day.amount / 1200));
         }
       });
     }
@@ -258,6 +295,26 @@ export default function AdminOverviewPage() {
             Quick Actions:
           </span>
 
+          <Link
+            to="/admin/signups-tracking"
+            className="btn"
+            style={{
+              padding: '6px 14px',
+              fontSize: '12.5px',
+              borderRadius: '8px',
+              background: 'rgba(59, 130, 246, 0.1)',
+              color: '#2563eb',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '7px',
+              fontWeight: 600,
+            }}
+          >
+            <TrendingUpIcon size={15} />
+            <span>Signups & Activations</span>
+          </Link>
+
           <Link
             to="/admin/verification"
             className="btn"
@@ -384,13 +441,30 @@ export default function AdminOverviewPage() {
             <MegaphoneIcon size={15} />
             <span>Broadcast</span>
           </Link>
+
+          <Link
+            to="/admin/audit-logs"
+            className="btn btn-ghost"
+            style={{
+              padding: '6px 14px',
+              fontSize: '12.5px',
+              borderRadius: '8px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '7px',
+              fontWeight: 600,
+            }}
+          >
+            <ClockIcon size={15} />
+            <span>Audit Logs</span>
+          </Link>
         </div>
 
         {error && <div className="error-box">{error}</div>}
 
-        {/* 8 Elevated Overview Metric Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px' }}>
-          {/* 1. Total Users */}
+        {/* 8 Comprehensive Platform Overview Metric Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+          {/* 1. Total Users, Learners & Mentors */}
           <div
             style={{
               background: 'var(--surface)',
@@ -399,74 +473,90 @@ export default function AdminOverviewPage() {
               borderRadius: '14px',
               padding: '16px 18px',
               boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Total Users
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: 'rgba(99, 102, 241, 0.12)',
-                  color: '#6366f1',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <UsersIcon size={18} />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  Total Users
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(99, 102, 241, 0.12)',
+                    color: '#6366f1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <UsersIcon size={18} />
+                </div>
+              </div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', lineHeight: 1 }}>
+                {loading ? '—' : totalUsers}
               </div>
             </div>
-            <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', lineHeight: 1 }}>
-              {loading ? '—' : totalUsers}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-              <strong style={{ color: 'var(--ink)' }}>{learnersCount}</strong> learners · <strong style={{ color: 'var(--ink)' }}>{mentorsCount}</strong> mentors
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <strong style={{ color: '#6366f1' }}>{learnersCount}</strong> learners · <strong style={{ color: '#0ea5e9' }}>{mentorsCount}</strong> mentors · <span>{adminsCount} staff</span>
             </div>
           </div>
 
-          {/* 2. Active Mentors */}
+          {/* 2. Active & Inactive Users */}
           <div
             style={{
               background: 'var(--surface)',
               border: '1px solid var(--grid-strong)',
-              borderTop: '3px solid #0ea5e9',
+              borderTop: '3px solid #10b981',
               borderRadius: '14px',
               padding: '16px 18px',
               boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Active Mentors
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: 'rgba(14, 165, 233, 0.12)',
-                  color: '#0ea5e9',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <MentorIcon size={18} />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  User Activity Status
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    color: '#10b981',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <CheckCircleIcon size={18} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', lineHeight: 1 }}>
+                <span style={{ fontSize: '28px', fontWeight: 800, color: '#10b981' }}>{loading ? '—' : activeUsersCount}</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#10b981' }}>Active</span>
+                <span style={{ color: 'var(--ink-faint)', margin: '0 4px' }}>·</span>
+                <span style={{ fontSize: '18px', fontWeight: 700, color: inactiveUsersCount > 0 ? '#ef4444' : 'var(--ink-muted)' }}>
+                  {loading ? '—' : inactiveUsersCount}
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>Inactive</span>
               </div>
             </div>
-            <div style={{ fontSize: '28px', fontWeight: 800, color: '#0ea5e9', lineHeight: 1 }}>
-              {loading ? '—' : mentorsCount}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px', fontSize: '11.5px', color: '#10b981', fontWeight: 600 }}>
-              <span>Verified coaching community</span>
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <span>{activeLearnersCount} active learners · {activeMentorsCount} active mentors</span>
             </div>
           </div>
 
-          {/* 3. Open Problems */}
+          {/* 3. Total Projects & Contracts */}
           <div
             style={{
               background: 'var(--surface)',
@@ -475,36 +565,84 @@ export default function AdminOverviewPage() {
               borderRadius: '14px',
               padding: '16px 18px',
               boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Open Problems
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: 'rgba(139, 92, 246, 0.12)',
-                  color: '#8b5cf6',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <SparklesIcon size={18} />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  Total Projects
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(139, 92, 246, 0.12)',
+                    color: '#8b5cf6',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <DocumentIcon size={18} />
+                </div>
+              </div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', lineHeight: 1 }}>
+                {loading ? '—' : totalProjects}
               </div>
             </div>
-            <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', lineHeight: 1 }}>
-              {loading ? '—' : openProblemsCount}
-            </div>
-            <div style={{ marginTop: '8px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-              Awaiting mentor proposals
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <strong style={{ color: 'var(--ink)' }}>{totalContracts}</strong> contracts ({activeContracts} active) · <strong style={{ color: 'var(--ink)' }}>{totalProblems}</strong> problem posts ({openProblems} open)
             </div>
           </div>
 
-          {/* 4. Active Sessions */}
+          {/* 4. Mentorship Sessions */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #0ea5e9',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  Mentorship Sessions
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(14, 165, 233, 0.12)',
+                    color: '#0ea5e9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <ClockIcon size={18} />
+                </div>
+              </div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: '#0ea5e9', lineHeight: 1 }}>
+                {loading ? '—' : totalBookings}
+              </div>
+            </div>
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <span style={{ color: '#10b981', fontWeight: 600 }}>{completedSessions} completed</span> · <span style={{ color: '#0ea5e9', fontWeight: 600 }}>{activeSessions} active</span> · <span>{pendingSessions} pending</span>
+            </div>
+          </div>
+
+          {/* 5. Total Payments Processed */}
           <div
             style={{
               background: 'var(--surface)',
@@ -513,159 +651,41 @@ export default function AdminOverviewPage() {
               borderRadius: '14px',
               padding: '16px 18px',
               boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Active Sessions
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: 'rgba(16, 185, 129, 0.12)',
-                  color: '#10b981',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <ClockIcon size={18} />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  Total Payments
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    color: '#10b981',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <WalletIcon size={18} />
+                </div>
+              </div>
+              <div className="mono" style={{ fontSize: '24px', fontWeight: 800, color: '#10b981', lineHeight: 1 }}>
+                {loading ? '—' : `₹${Math.round(totalPaymentsVolume).toLocaleString('en-IN')}`}
               </div>
             </div>
-            <div style={{ fontSize: '28px', fontWeight: 800, color: '#10b981', lineHeight: 1 }}>
-              {loading ? '—' : activeSessions}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '11.5px', color: '#10b981', fontWeight: 600 }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981' }} />
-              Paid / In-progress pairings
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <span>{totalPaymentsCount} transactions</span> · <span className="mono">₹{Math.round(totalEscrowHeld).toLocaleString('en-IN')}</span> in escrow
             </div>
           </div>
 
-          {/* 5. Revenue Released */}
-          <div
-            style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--grid-strong)',
-              borderTop: '3px solid #10b981',
-              borderRadius: '14px',
-              padding: '16px 18px',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Revenue Released
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: 'rgba(16, 185, 129, 0.12)',
-                  color: '#10b981',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <WalletIcon size={18} />
-              </div>
-            </div>
-            <div className="mono" style={{ fontSize: '24px', fontWeight: 800, color: '#10b981', lineHeight: 1 }}>
-              {loading ? '—' : `₹${revenueReleased.toLocaleString('en-IN')}`}
-            </div>
-            <div style={{ marginTop: '8px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-              Platform Take: <strong style={{ color: 'var(--ink)' }}>₹{platformFee.toLocaleString('en-IN')}</strong> (10%)
-            </div>
-          </div>
-
-          {/* 6. Pending Verification */}
-          <div
-            style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--grid-strong)',
-              borderTop: pendingMentors.length > 0 ? '3px solid #f59e0b' : '3px solid var(--grid)',
-              borderRadius: '14px',
-              padding: '16px 18px',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Pending Verification
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: pendingMentors.length > 0 ? 'rgba(245, 158, 11, 0.12)' : 'var(--grid)',
-                  color: pendingMentors.length > 0 ? '#f59e0b' : 'var(--ink-muted)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <ShieldIcon size={18} />
-              </div>
-            </div>
-            <div style={{ fontSize: '28px', fontWeight: 800, color: pendingMentors.length > 0 ? '#f59e0b' : 'var(--ink)', lineHeight: 1 }}>
-              {loading ? '—' : pendingMentors.length}
-            </div>
-            <div style={{ marginTop: '8px', fontSize: '11.5px' }}>
-              {pendingMentors.length > 0 ? (
-                <span style={{ color: '#f59e0b', fontWeight: 600 }}>Applications to inspect</span>
-              ) : (
-                <span style={{ color: '#10b981', fontWeight: 600 }}>✓ Queue clean</span>
-              )}
-            </div>
-          </div>
-
-          {/* 7. Pending Disputes */}
-          <div
-            style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--grid-strong)',
-              borderTop: disputes.length > 0 ? '3px solid #ef4444' : '3px solid var(--grid)',
-              borderRadius: '14px',
-              padding: '16px 18px',
-              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Pending Disputes
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: disputes.length > 0 ? 'rgba(239, 68, 68, 0.12)' : 'var(--grid)',
-                  color: disputes.length > 0 ? '#ef4444' : 'var(--ink-muted)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <ScaleIcon size={18} />
-              </div>
-            </div>
-            <div style={{ fontSize: '28px', fontWeight: 800, color: disputes.length > 0 ? '#ef4444' : 'var(--ink)', lineHeight: 1 }}>
-              {loading ? '—' : disputes.length}
-            </div>
-            <div style={{ marginTop: '8px', fontSize: '11.5px' }}>
-              {disputes.length > 0 ? (
-                <span style={{ color: '#ef4444', fontWeight: 600 }}>Arbitration required</span>
-              ) : (
-                <span style={{ color: '#10b981', fontWeight: 600 }}>✓ Zero open claims</span>
-              )}
-            </div>
-          </div>
-
-          {/* 8. Refund Requests */}
+          {/* 6. Total Refunds */}
           <div
             style={{
               background: 'var(--surface)',
@@ -674,32 +694,123 @@ export default function AdminOverviewPage() {
               borderRadius: '14px',
               padding: '16px 18px',
               boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
-                Refund Requests
-              </span>
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  background: 'rgba(249, 115, 22, 0.12)',
-                  color: '#f97316',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <CreditCardIcon size={18} />
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  Refunds Processed
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(249, 115, 22, 0.12)',
+                    color: '#f97316',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <CreditCardIcon size={18} />
+                </div>
+              </div>
+              <div className="mono" style={{ fontSize: '24px', fontWeight: 800, color: '#f97316', lineHeight: 1 }}>
+                {loading ? '—' : `₹${Math.round(totalRefunded).toLocaleString('en-IN')}`}
               </div>
             </div>
-            <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', lineHeight: 1 }}>
-              {refundsCount}
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <span>{totalRefundsCount} refunded claim{totalRefundsCount === 1 ? '' : 's'} · 100% Escrow Protection</span>
             </div>
-            <div style={{ marginTop: '8px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-              Claims awaiting review
+          </div>
+
+          {/* 7. Pending Mentor Payouts */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #eab308',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  Pending Payouts
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(234, 179, 8, 0.12)',
+                    color: '#eab308',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <TrendingUpIcon size={18} />
+                </div>
+              </div>
+              <div className="mono" style={{ fontSize: '24px', fontWeight: 800, color: '#eab308', lineHeight: 1 }}>
+                {loading ? '—' : `₹${Math.round(pendingPayouts).toLocaleString('en-IN')}`}
+              </div>
+            </div>
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <span>Held until completion · <span className="mono">₹{Math.round(totalMentorPayouts).toLocaleString('en-IN')}</span> paid out</span>
+            </div>
+          </div>
+
+          {/* 8. Platform Commission Earned */}
+          <div
+            style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--grid-strong)',
+              borderTop: '3px solid #6366f1',
+              borderRadius: '14px',
+              padding: '16px 18px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-muted)' }}>
+                  Platform Commission
+                </span>
+                <div
+                  style={{
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    background: 'rgba(99, 102, 241, 0.12)',
+                    color: '#6366f1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <BarChartIcon size={18} />
+                </div>
+              </div>
+              <div className="mono" style={{ fontSize: '24px', fontWeight: 800, color: '#6366f1', lineHeight: 1 }}>
+                {loading ? '—' : `₹${platformFee.toLocaleString('en-IN')}`}
+              </div>
+            </div>
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+              <span>{mentorCommissionPercent}% platform take · <strong style={{ color: 'var(--ink)' }}>₹{pendingPlatformFee.toLocaleString('en-IN')}</strong> pending in escrow</span>
             </div>
           </div>
         </div>
@@ -964,8 +1075,8 @@ export default function AdminOverviewPage() {
                   </div>
                 </div>
 
-                {/* Legend Cards */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', minWidth: '140px', flex: 1 }}>
+                {/* Legend Cards & Activity Reports */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '160px', flex: 1 }}>
                   <div style={{ padding: '8px 12px', background: 'rgba(99, 102, 241, 0.08)', borderRadius: '8px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 700, color: '#6366f1', fontSize: '12px' }}>Learners</span>
@@ -985,13 +1096,49 @@ export default function AdminOverviewPage() {
                       {mentorsCount} verified coaches
                     </div>
                   </div>
+
+                  {/* Active / Inactive Bar */}
+                  <div style={{ padding: '8px 12px', background: 'var(--bg)', borderRadius: '8px', border: '1px solid var(--grid)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11.5px', marginBottom: '5px' }}>
+                      <span style={{ color: '#10b981', fontWeight: 700 }}>● {activeUsersCount} Active</span>
+                      <span style={{ color: inactiveUsersCount > 0 ? '#ef4444' : 'var(--ink-muted)' }}>{inactiveUsersCount} Inactive</span>
+                    </div>
+                    <div style={{ width: '100%', height: '6px', background: 'var(--grid)', borderRadius: '3px', overflow: 'hidden', display: 'flex' }}>
+                      <div style={{ width: `${Math.round((activeUsersCount / Math.max(1, totalUsers)) * 100)}%`, background: '#10b981' }} />
+                      <div style={{ width: `${Math.round((inactiveUsersCount / Math.max(1, totalUsers)) * 100)}%`, background: '#ef4444' }} />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Micro summary */}
-            <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--grid)', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-              Balanced <strong>~1:1 coach-to-student ratio</strong> ensures sub-15min request responses.
+            {/* Platform Activity Reports Grid */}
+            <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--grid)' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-muted)', marginBottom: '8px' }}>
+                Activity Health &amp; Reports
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', fontSize: '11.5px' }}>
+                <div style={{ padding: '6px 10px', background: 'var(--bg)', borderRadius: '6px', border: '1px solid var(--grid)' }}>
+                  <div className="sub" style={{ fontSize: '10.5px' }}>Session Completion</div>
+                  <strong style={{ color: '#10b981', fontSize: '12.5px' }}>
+                    {Math.round((completedSessions / Math.max(1, totalBookings)) * 100)}%
+                  </strong>
+                </div>
+                <div style={{ padding: '6px 10px', background: 'var(--bg)', borderRadius: '6px', border: '1px solid var(--grid)' }}>
+                  <div className="sub" style={{ fontSize: '10.5px' }}>Platform Commission</div>
+                  <strong style={{ color: '#6366f1', fontSize: '12.5px' }}>10% Flat Fee</strong>
+                </div>
+                <div style={{ padding: '6px 10px', background: 'var(--bg)', borderRadius: '6px', border: '1px solid var(--grid)' }}>
+                  <div className="sub" style={{ fontSize: '10.5px' }}>Escrow Guarantee</div>
+                  <strong style={{ color: '#0ea5e9', fontSize: '12.5px' }}>100% Protected</strong>
+                </div>
+                <div style={{ padding: '6px 10px', background: 'var(--bg)', borderRadius: '6px', border: '1px solid var(--grid)' }}>
+                  <div className="sub" style={{ fontSize: '10.5px' }}>Avg Session Value</div>
+                  <strong className="mono" style={{ color: 'var(--ink)', fontSize: '12.5px' }}>
+                    ₹{Math.round(totalPaymentsVolume / Math.max(1, totalPaymentsCount)).toLocaleString('en-IN')}
+                  </strong>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1116,8 +1263,23 @@ export default function AdminOverviewPage() {
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', color: '#fff', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                          {initials(m.name)}
+                        <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', color: '#fff', fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', overflow: 'hidden' }}>
+                          {m.photo_url || m.avatar ? (
+                            <img
+                              src={resolveImageUrl(m.photo_url || m.avatar)}
+                              alt={m.name}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                if (e.currentTarget.nextElementSibling) {
+                                  e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                                }
+                              }}
+                            />
+                          ) : null}
+                          <span style={{ display: m.photo_url || m.avatar ? 'none' : 'inline-block' }}>
+                            {initials(m.name)}
+                          </span>
                         </div>
                         <div>
                           <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--ink)' }}>{m.name}</div>
@@ -1233,7 +1395,7 @@ export default function AdminOverviewPage() {
           </div>
         </div>
 
-        {/* Recent Platform Sessions High-Density Table */}
+        {/* Recent Registrations, Transactions & Sessions Activity Ledger */}
         <div
           style={{
             background: 'var(--surface)',
@@ -1243,87 +1405,361 @@ export default function AdminOverviewPage() {
             boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--grid-strong)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--grid-strong)', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--ink)' }}>⏱️ Recent Platform Sessions</h3>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--ink)' }}>
+                📋 Platform Activity &amp; Records Ledger
+              </h3>
               <div className="sub" style={{ fontSize: '12px', marginTop: '2px' }}>
-                Live activity log of 1:1 pairing encounters across learners and mentors
+                Real-time stream of latest registrations, financial transactions, and mentorship sessions
               </div>
             </div>
-            <Link to="/admin/sessions" style={{ fontSize: '12.5px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 600 }}>
-              View All Sessions →
-            </Link>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              {/* Tab Selector */}
+              <div style={{ display: 'flex', gap: '4px', background: 'var(--bg)', padding: '3px', borderRadius: '8px', border: '1px solid var(--grid)' }}>
+                <button
+                  type="button"
+                  onClick={() => setActivityTab('registrations')}
+                  style={{
+                    border: 'none',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: activityTab === 'registrations' ? 'var(--brand)' : 'transparent',
+                    color: activityTab === 'registrations' ? '#fff' : 'var(--ink-muted)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  👤 Registrations <span style={{ fontSize: '10.5px', opacity: 0.85 }}>({recentRegistrations.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivityTab('transactions')}
+                  style={{
+                    border: 'none',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: activityTab === 'transactions' ? 'var(--brand)' : 'transparent',
+                    color: activityTab === 'transactions' ? '#fff' : 'var(--ink-muted)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  💳 Transactions <span style={{ fontSize: '10.5px', opacity: 0.85 }}>({recentTransactions.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivityTab('sessions')}
+                  style={{
+                    border: 'none',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: activityTab === 'sessions' ? 'var(--brand)' : 'transparent',
+                    color: activityTab === 'sessions' ? '#fff' : 'var(--ink-muted)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  ⏱️ Sessions <span style={{ fontSize: '10.5px', opacity: 0.85 }}>({recentBookings.length})</span>
+                </button>
+              </div>
+
+              {activityTab === 'registrations' && (
+                <Link to="/admin/users" style={{ fontSize: '12.5px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 600 }}>
+                  View All Users →
+                </Link>
+              )}
+              {activityTab === 'transactions' && (
+                <Link to="/admin/payments" style={{ fontSize: '12.5px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 600 }}>
+                  View All Payments →
+                </Link>
+              )}
+              {activityTab === 'sessions' && (
+                <Link to="/admin/sessions" style={{ fontSize: '12.5px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 600 }}>
+                  View All Sessions →
+                </Link>
+              )}
+            </div>
           </div>
 
-          {loading ? (
-            <p className="sub" style={{ padding: '20px', textAlign: 'center' }}>Loading sessions...</p>
-          ) : recentBookings.length === 0 ? (
-            <div style={{ padding: '30px', textAlign: 'center', color: 'var(--ink-muted)' }}>
-              No sessions recorded on this instance yet.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table className="admin-table" style={{ margin: 0, fontSize: '12.5px' }}>
-                <thead>
-                  <tr style={{ background: 'var(--bg)' }}>
-                    <th style={{ padding: '10px 16px' }}>Booking</th>
-                    <th style={{ padding: '10px 14px' }}>Learner</th>
-                    <th style={{ padding: '10px 14px' }}>Mentor</th>
-                    <th style={{ padding: '10px 14px' }}>Topic</th>
-                    <th style={{ padding: '10px 14px' }}>Price</th>
-                    <th style={{ padding: '10px 14px' }}>Status</th>
-                    <th style={{ padding: '10px 14px' }}>Date</th>
-                    <th style={{ padding: '10px 16px', textAlign: 'right' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentBookings.map((b) => (
-                    <tr key={b.id} style={{ borderBottom: '1px solid var(--grid)' }}>
-                      <td style={{ padding: '10px 16px' }}>
-                        <span className="mono" style={{ fontWeight: 700, padding: '2px 6px', background: 'var(--bg)', borderRadius: '6px', border: '1px solid var(--grid)' }}>
-                          #{b.id}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: '#fff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                            {initials(b.learner_name)}
-                          </div>
-                          <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{b.learner_name}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                            {initials(b.mentor_name)}
-                          </div>
-                          <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{b.mentor_name}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <span style={{ color: 'var(--ink)' }}>{b.topic || 'Pair Programming'}</span>
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <strong className="mono" style={{ color: 'var(--ink)' }}>₹{b.price}</strong>
-                      </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '11px' }}>
-                          {b.status}
-                        </span>
-                      </td>
-                      <td className="mono" style={{ padding: '10px 14px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-                        {new Date(b.created_at).toLocaleDateString()}
-                      </td>
-                      <td style={{ padding: '10px 16px', textAlign: 'right' }}>
-                        <Link to="/admin/sessions" className="btn btn-ghost" style={{ padding: '3px 9px', fontSize: '11px', borderRadius: '6px' }}>
-                          Inspect
-                        </Link>
-                      </td>
+          {/* TAB 1: Recent User Registrations */}
+          {activityTab === 'registrations' && (
+            loading ? (
+              <p className="sub" style={{ padding: '24px', textAlign: 'center' }}>Loading registrations...</p>
+            ) : recentRegistrations.length === 0 ? (
+              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-muted)' }}>
+                No recent user registrations found.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table" style={{ margin: 0, fontSize: '12.5px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg)' }}>
+                      <th style={{ padding: '10px 16px' }}>User</th>
+                      <th style={{ padding: '10px 14px' }}>Email</th>
+                      <th style={{ padding: '10px 14px' }}>Role</th>
+                      <th style={{ padding: '10px 14px' }}>Account Status</th>
+                      <th style={{ padding: '10px 14px' }}>Verification</th>
+                      <th style={{ padding: '10px 14px' }}>Joined Date</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'right' }}>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {recentRegistrations.map((u) => (
+                      <tr key={u.id} style={{ borderBottom: '1px solid var(--grid)' }}>
+                        <td style={{ padding: '10px 16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div
+                              style={{
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '50%',
+                                background: u.role === 'mentor' ? 'linear-gradient(135deg, #0ea5e9, #0284c7)' : 'linear-gradient(135deg, #6366f1, #4f46e5)',
+                                color: '#fff',
+                                fontSize: '11px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 'bold',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {u.photo_url || u.avatar ? (
+                                <img
+                                  src={resolveImageUrl(u.photo_url || u.avatar)}
+                                  alt={u.name}
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                    if (e.currentTarget.nextElementSibling) {
+                                      e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                                    }
+                                  }}
+                                />
+                              ) : null}
+                              <span style={{ display: u.photo_url || u.avatar ? 'none' : 'inline-block' }}>
+                                {initials(u.name)}
+                              </span>
+                            </div>
+                            <div>
+                              <strong style={{ color: 'var(--ink)' }}>{u.name}</strong>
+                              <span className="mono" style={{ fontSize: '10.5px', color: 'var(--ink-muted)', display: 'block' }}>
+                                ID: #{u.id}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="mono" style={{ padding: '10px 14px', fontSize: '12px' }}>
+                          {u.email}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span
+                            className="tag mono"
+                            style={{
+                              fontSize: '11px',
+                              textTransform: 'capitalize',
+                              background: u.role === 'mentor' ? 'rgba(14, 165, 233, 0.12)' : 'rgba(99, 102, 241, 0.12)',
+                              color: u.role === 'mentor' ? '#0ea5e9' : '#6366f1',
+                            }}
+                          >
+                            {u.role}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: '10px',
+                              background: u.is_active ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                              color: u.is_active ? '#059669' : '#ef4444',
+                            }}
+                          >
+                            {u.is_active ? 'Active' : 'Suspended'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              color: u.is_email_verified ? '#059669' : '#f59e0b',
+                              fontWeight: 600,
+                            }}
+                          >
+                            {u.is_email_verified ? '✓ Verified' : '⚠ Unverified'}
+                          </span>
+                        </td>
+                        <td className="mono" style={{ padding: '10px 14px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+                          {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                          <Link to="/admin/users" className="btn btn-ghost" style={{ padding: '3px 9px', fontSize: '11px', borderRadius: '6px' }}>
+                            Manage →
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+
+          {/* TAB 2: Recent Transactions */}
+          {activityTab === 'transactions' && (
+            loading ? (
+              <p className="sub" style={{ padding: '24px', textAlign: 'center' }}>Loading transactions...</p>
+            ) : recentTransactions.length === 0 ? (
+              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-muted)' }}>
+                No recent payment transactions recorded yet.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table" style={{ margin: 0, fontSize: '12.5px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg)' }}>
+                      <th style={{ padding: '10px 16px' }}>Payment ID</th>
+                      <th style={{ padding: '10px 14px' }}>Event &amp; Title</th>
+                      <th style={{ padding: '10px 14px' }}>Payer (Learner)</th>
+                      <th style={{ padding: '10px 14px' }}>Recipient (Mentor)</th>
+                      <th style={{ padding: '10px 14px' }}>Gross Amount</th>
+                      <th style={{ padding: '10px 14px' }}>Commission</th>
+                      <th style={{ padding: '10px 14px' }}>Status</th>
+                      <th style={{ padding: '10px 14px' }}>Date</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentTransactions.map((tx) => (
+                      <tr key={tx.id} style={{ borderBottom: '1px solid var(--grid)' }}>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span className="mono" style={{ fontWeight: 700, padding: '2px 6px', background: 'var(--bg)', borderRadius: '6px', border: '1px solid var(--grid)' }}>
+                            #{tx.id}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{tx.title}</span>
+                          <span className="sub mono" style={{ fontSize: '10.5px', display: 'block', textTransform: 'uppercase' }}>
+                            Type: {tx.type}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px', fontWeight: 500 }}>
+                          {tx.payer_name}
+                        </td>
+                        <td style={{ padding: '10px 14px', fontWeight: 500 }}>
+                          {tx.recipient_name}
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <strong className="mono" style={{ color: 'var(--ink)' }}>
+                            ₹{tx.amount.toLocaleString('en-IN')}
+                          </strong>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span className="mono" style={{ color: '#6366f1', fontWeight: 600 }}>
+                            ₹{tx.platform_fee.toLocaleString('en-IN')}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span className={`status-badge badge-${tx.status} mono`} style={{ fontSize: '11px' }}>
+                            {tx.status}
+                          </span>
+                        </td>
+                        <td className="mono" style={{ padding: '10px 14px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+                          {tx.created_at ? new Date(tx.created_at).toLocaleDateString() : '—'}
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                          <Link to="/admin/payments" className="btn btn-ghost" style={{ padding: '3px 9px', fontSize: '11px', borderRadius: '6px' }}>
+                            Inspect →
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+
+          {/* TAB 3: Recent Sessions */}
+          {activityTab === 'sessions' && (
+            loading ? (
+              <p className="sub" style={{ padding: '24px', textAlign: 'center' }}>Loading sessions...</p>
+            ) : recentBookings.length === 0 ? (
+              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-muted)' }}>
+                No sessions recorded on this instance yet.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="admin-table" style={{ margin: 0, fontSize: '12.5px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg)' }}>
+                      <th style={{ padding: '10px 16px' }}>Booking</th>
+                      <th style={{ padding: '10px 14px' }}>Learner</th>
+                      <th style={{ padding: '10px 14px' }}>Mentor</th>
+                      <th style={{ padding: '10px 14px' }}>Topic</th>
+                      <th style={{ padding: '10px 14px' }}>Price</th>
+                      <th style={{ padding: '10px 14px' }}>Status</th>
+                      <th style={{ padding: '10px 14px' }}>Date</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'right' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentBookings.map((b) => (
+                      <tr key={b.id} style={{ borderBottom: '1px solid var(--grid)' }}>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span className="mono" style={{ fontWeight: 700, padding: '2px 6px', background: 'var(--bg)', borderRadius: '6px', border: '1px solid var(--grid)' }}>
+                            #{b.id}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #4f46e5)', color: '#fff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                              {initials(b.learner_name)}
+                            </div>
+                            <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{b.learner_name}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'linear-gradient(135deg, #10b981, #059669)', color: '#fff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                              {initials(b.mentor_name)}
+                            </div>
+                            <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{b.mentor_name}</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{ color: 'var(--ink)' }}>{b.topic || 'Pair Programming'}</span>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <strong className="mono" style={{ color: 'var(--ink)' }}>₹{b.price}</strong>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '11px' }}>
+                            {b.status}
+                          </span>
+                        </td>
+                        <td className="mono" style={{ padding: '10px 14px', fontSize: '11.5px', color: 'var(--ink-muted)' }}>
+                          {new Date(b.created_at).toLocaleDateString()}
+                        </td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                          <Link to="/admin/sessions" className="btn btn-ghost" style={{ padding: '3px 9px', fontSize: '11px', borderRadius: '6px' }}>
+                            Inspect
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )}
         </div>
       </div>

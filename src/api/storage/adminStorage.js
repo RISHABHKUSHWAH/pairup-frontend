@@ -80,6 +80,10 @@ export const adminRefunds = {
 
 export const adminCommissions = {
   getDefaultRules: () => ({
+    mentorCommissionPercent: 10,
+    mentorTaxPercent: 18,
+    learnerCommissionPercent: 0,
+    learnerTaxPercent: 18,
     baseCommissionPercent: 10,
     highVolumeThreshold: 30,
     highVolumeCommissionPercent: 8,

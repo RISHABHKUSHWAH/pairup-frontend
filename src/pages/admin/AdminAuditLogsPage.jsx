@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
+import Pagination from '../../components/Pagination';
 import Modal from '../../components/Modal';
 import { api } from '../../api/client';
 import { DownloadIcon, RefreshIcon } from '../../components/Icons';
@@ -26,6 +28,13 @@ export default function AdminAuditLogsPage() {
   const [entityFilter, setEntityFilter] = useState('all');
   const [selectedLog, setSelectedLog] = useState(null);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, entityFilter, searchQuery]);
+
   useEffect(() => {
     loadLogs();
   }, []);
@@ -34,7 +43,8 @@ export default function AdminAuditLogsPage() {
     setLoading(true);
     try {
       const data = await api.getAuditLogs();
-      const enhanced = data.map((l, idx) => {
+      const rawList = Array.isArray(data) ? data : (data?.results || []);
+      const enhanced = rawList.map((l, idx) => {
         let cat = 'system';
         const act = (l.action || '').toLowerCase();
         if (act.includes('mentor.approve') || act.includes('mentor.reject') || act.includes('verification')) cat = 'verification';
@@ -88,6 +98,14 @@ export default function AdminAuditLogsPage() {
     });
   }, [logs, activeTab, entityFilter, searchQuery]);
 
+  const totalItems = filteredLogs.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+
+  const paginatedLogs = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredLogs.slice(start, start + itemsPerPage);
+  }, [filteredLogs, currentPage, itemsPerPage]);
+
   // Export handlers
   const handleExportCSV = () => {
     const headers = ['ID', 'Timestamp', 'Actor', 'Category', 'Action', 'Target Type', 'Target ID', 'IP Address', 'Details'];
@@ -124,6 +142,7 @@ export default function AdminAuditLogsPage() {
 
   return (
     <PortalLayout title="Audit Logs &amp; Security Ledger" portalType="admin">
+      <AdminCategoryNav category="logs" />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
         <div>
           <p className="sub" style={{ margin: 0 }}>
@@ -236,7 +255,7 @@ export default function AdminAuditLogsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredLogs.map((l) => (
+                {paginatedLogs.map((l) => (
                   <tr key={l.id}>
                     <td className="mono" style={{ fontSize: '11px', whiteSpace: 'nowrap', color: 'var(--ink-muted)' }}>
                       {l.created_at ? new Date(l.created_at).toLocaleString() : '—'}
@@ -274,6 +293,20 @@ export default function AdminAuditLogsPage() {
             </table>
           </div>
         )}
+
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          itemsPerPage={itemsPerPage}
+          pageSizeOptions={[10, 25, 50, 100]}
+          itemLabel="audit records"
+          onPageChange={(p) => setCurrentPage(p)}
+          onPageSizeChange={(size) => {
+            setItemsPerPage(size);
+            setCurrentPage(1);
+          }}
+        />
       </div>
 
       {/* Log Details Modal */}

@@ -1,11 +1,20 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { isJwtExpired } from '../api/client';
 import PairUpLoader from './PairUpLoader';
 
 export default function ProtectedRoute({ children, allowedRoles }) {
-  const { user, token, loading } = useAuth();
+  const { user, token, loading, logout } = useAuth();
   const location = useLocation();
+
+  const isExpired = Boolean(token && isJwtExpired(token));
+
+  useEffect(() => {
+    if (isExpired) {
+      logout({ skipServer: true });
+    }
+  }, [isExpired, logout]);
 
   if (loading) {
     return (
@@ -15,8 +24,9 @@ export default function ProtectedRoute({ children, allowedRoles }) {
     );
   }
 
-  if (!token || !user) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+  if (!token || !user || isExpired) {
+    const notice = isExpired ? '?notice=Your%20session%20has%20expired.%20Please%20sign%20in%20again.' : '';
+    return <Navigate to={`/login${notice}`} state={{ from: location }} replace />;
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {

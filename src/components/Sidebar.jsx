@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context';
-import { initials } from '../api/client';
+import { initials, resolveImageUrl } from '../api/client';
 import {
   DashboardIcon,
   SearchIcon,
@@ -47,13 +47,38 @@ export default function Sidebar({
   unreadCount = 0,
   collapsed: controlledCollapsed,
   onToggle,
+  mobileOpen = false,
+  onCloseMobile,
 }) {
-  const { user, logout, switchRole } = useAuth();
+  const { user, logout, switchRole, isOnline, toggleOnlineStatus } = useAuth();
   const { toast } = useToast();
   const { startTour } = useTour();
   const navigate = useNavigate();
 
   const location = useLocation();
+
+  const [onlineLoading, setOnlineLoading] = useState(false);
+
+  const handleToggleOnline = async (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (onlineLoading) return;
+    setOnlineLoading(true);
+    try {
+      const nextStatus = await toggleOnlineStatus();
+      if (nextStatus) {
+        toast.success('You are now Online for instant pairing & sessions! 🟢');
+      } else {
+        toast.info('You are now marked Offline for sessions. ⚪');
+      }
+    } catch (err) {
+      toast.error('Failed to update status: ' + (err?.message || 'Error'));
+    } finally {
+      setOnlineLoading(false);
+    }
+  };
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -62,8 +87,8 @@ export default function Sidebar({
   const [helpOpen, setHelpOpen] = useState(false);
   const helpMenuRef = useRef(null);
 
-  const [financesFlyoutOpen, setFinancesFlyoutOpen] = useState(false);
-  const financesRef = useRef(null);
+  const [openSubmenu, setOpenSubmenu] = useState(null);
+  const submenuRef = useRef(null);
 
   const [showHelpCenter, setShowHelpCenter] = useState(false);
   const [showSupportRequests, setShowSupportRequests] = useState(false);
@@ -110,20 +135,20 @@ export default function Sidebar({
         setHelpOpen(false);
       }
       if (
-        financesRef.current &&
-        !financesRef.current.contains(event.target)
+        submenuRef.current &&
+        !submenuRef.current.contains(event.target)
       ) {
-        setFinancesFlyoutOpen(false);
+        setOpenSubmenu(null);
       }
     }
     function handleKeyDown(event) {
       if (event.key === 'Escape') {
         setMenuOpen(false);
         setHelpOpen(false);
-        setFinancesFlyoutOpen(false);
+        setOpenSubmenu(null);
       }
     }
-    if (menuOpen || helpOpen || financesFlyoutOpen) {
+    if (menuOpen || helpOpen || openSubmenu) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('keydown', handleKeyDown);
     }
@@ -131,12 +156,12 @@ export default function Sidebar({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [menuOpen, helpOpen, financesFlyoutOpen]);
+  }, [menuOpen, helpOpen, openSubmenu]);
 
   useEffect(() => {
     setMenuOpen(false);
     setHelpOpen(false);
-    setFinancesFlyoutOpen(false);
+    setOpenSubmenu(null);
   }, [location.pathname, location.search]);
 
   useEffect(() => {
@@ -204,21 +229,60 @@ export default function Sidebar({
 
   const adminNav = [
     { to: '/admin', label: 'Dashboard', icon: <DashboardIcon size={20} />, end: true },
-    { to: '/admin/users', label: 'Users', icon: <UsersIcon size={20} /> },
-    { to: '/admin/mentors', label: 'Mentors', icon: <MentorIcon size={20} /> },
-    { to: '/admin/problems', label: 'Problem requests', icon: <DocumentIcon size={20} /> },
-    { to: '/admin/contracts', label: 'Contracts', icon: <DocumentIcon size={20} /> },
-    { to: '/admin/sessions', label: 'Sessions', icon: <ClockIcon size={20} /> },
-    { to: '/chat', label: 'Messages', icon: <MessageIcon size={20} />, dataTour: 'nav-messages' },
-    { to: '/admin/payments', label: 'Payments', icon: <CreditCardIcon size={20} /> },
-    { to: '/admin/payouts', label: 'Payouts', icon: <WalletIcon size={20} /> },
-    { to: '/admin/commissions', label: 'Commissions', icon: <PercentIcon size={20} /> },
-    { to: '/admin/refunds', label: 'Refunds', icon: <RefreshIcon size={20} /> },
-    { to: '/admin/disputes', label: 'Disputes', icon: <ScaleIcon size={20} /> },
-    { to: '/admin/support', label: 'Support requests', icon: <MailIcon size={20} /> },
-    { to: '/admin/verification', label: 'Verification', icon: <ShieldIcon size={20} /> },
+    {
+      to: '/admin/users',
+      label: 'Users & Mentors',
+      icon: <UsersIcon size={20} />,
+      subitems: [
+        { label: 'All Users', to: '/admin/users' },
+        { label: 'Mentors', to: '/admin/mentors' },
+        { label: 'ID Verification', to: '/admin/verification' },
+      ],
+    },
+    {
+      to: '/admin/problems',
+      label: 'Operations',
+      icon: <DocumentIcon size={20} />,
+      subitems: [
+        { label: 'Problem Requests', to: '/admin/problems' },
+        { label: 'Contracts', to: '/admin/contracts' },
+        { label: 'Sessions', to: '/admin/sessions' },
+        { label: 'Disputes', to: '/admin/disputes' },
+      ],
+    },
+    {
+      to: '/admin/payments',
+      label: 'Finances',
+      icon: <RupeeIcon size={20} />,
+      subitems: [
+        { label: 'Payments', to: '/admin/payments' },
+        { label: 'Payouts', to: '/admin/payouts' },
+        { label: 'Commissions', to: '/admin/commissions' },
+        { label: 'Refunds', to: '/admin/refunds' },
+      ],
+    },
+    {
+      to: '/admin/mail',
+      label: 'Communications',
+      icon: <MailIcon size={20} />,
+      subitems: [
+        { label: 'Mail Center', to: '/admin/mail' },
+        { label: 'Support Requests', to: '/admin/support' },
+        { label: 'Direct Messages', to: '/chat' },
+      ],
+    },
     { to: '/admin/reviews', label: 'Reviews', icon: <StarIcon size={20} /> },
     { to: '/admin/reports', label: 'Reports & Analytics', icon: <BarChartIcon size={20} /> },
+    { to: '/admin/audit-logs', label: 'Logs', icon: <ClockIcon size={20} /> },
+    {
+      to: '/admin/settings',
+      label: 'Settings',
+      icon: <SettingsIcon size={20} />,
+      subitems: [
+        { label: 'Platform Settings', to: '/admin/settings' },
+        { label: 'Content CMS', to: '/admin/content' },
+      ],
+    },
   ];
 
   if (user?.role === 'superadmin') {
@@ -261,24 +325,35 @@ export default function Sidebar({
       : '/learner/notifications';
 
   return (
-    <aside className={`admin-sidebar admin-sidebar--${portalType} portal-${portalType} ${isCollapsed ? 'collapsed' : ''}`}>
+    <aside className={`admin-sidebar admin-sidebar--${portalType} portal-${portalType} ${isCollapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <div className="admin-sidebar-top">
         <div className="admin-sidebar-header-row">
-          <Link className="logo" to={homeLink} style={{ color: '#fff' }} title="PairUp Home">
+          <Link className="logo" to={homeLink} style={{ color: '#fff' }} title="PairUp Home" onClick={onCloseMobile}>
             <PairUpLogo size={22} className="logo-mark logo-mark-full" variant="mark" />
             <PairUpLogo size={22} className="logo-mark logo-mark-icon" variant="icon" />
             <span className="logo-text">PairUp</span>
           </Link>
-          <button
-            type="button"
-            className="admin-sidebar-toggle-btn"
-            data-tour="sidebar-toggle"
-            onClick={handleToggle}
-            title={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
-            aria-label={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
-          >
-            {isCollapsed ? <PanelLeftOpenIcon size={16} /> : <PanelLeftCloseIcon size={16} />}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button
+              type="button"
+              className="admin-sidebar-toggle-btn hide-mobile"
+              data-tour="sidebar-toggle"
+              onClick={handleToggle}
+              title={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
+              aria-label={isCollapsed ? "Unfold sidebar" : "Fold sidebar"}
+            >
+              {isCollapsed ? <PanelLeftOpenIcon size={16} /> : <PanelLeftCloseIcon size={16} />}
+            </button>
+            <button
+              type="button"
+              className="admin-sidebar-mobile-close-btn hide-desktop"
+              onClick={onCloseMobile}
+              title="Close menu"
+              aria-label="Close menu"
+            >
+              <PanelLeftCloseIcon size={16} />
+            </button>
+          </div>
         </div>
         <div className="admin-role-label">{roleLabel}</div>
       </div>
@@ -286,27 +361,34 @@ export default function Sidebar({
       <nav className={`admin-nav ${portalType === 'admin' ? 'admin-nav--scrollable' : 'admin-nav--no-scroll'}`}>
         {items.map((item) => {
           if (item.subitems) {
-            const isFinancesActive =
-              location.pathname.startsWith('/mentor/earnings') ||
-              location.pathname.startsWith('/mentor/transactions') ||
-              location.pathname.startsWith('/mentor/billings') ||
-              location.pathname.startsWith('/mentor/reports') ||
-              location.pathname.startsWith('/mentor/taxes');
+            const isSubmenuOpen = openSubmenu === item.label;
+            const isCategoryActive =
+              item.subitems.some((sub) => {
+                const [subPath, subQuery] = sub.to.split('?');
+                if (subQuery) {
+                  return location.pathname === subPath && location.search === `?${subQuery}`;
+                }
+                return location.pathname === subPath || location.pathname.startsWith(subPath + '/');
+              }) || (item.to && (location.pathname === item.to || location.pathname.startsWith(item.to + '/')));
+
             return (
               <div
-                key={item.to}
-                ref={financesRef}
+                key={item.label}
+                ref={isSubmenuOpen ? submenuRef : null}
                 className="sidebar-nav-item-wrapper"
-                onMouseEnter={() => setFinancesFlyoutOpen(true)}
-                onMouseLeave={() => setFinancesFlyoutOpen(false)}
+                onMouseEnter={() => setOpenSubmenu(item.label)}
+                onMouseLeave={() => setOpenSubmenu((curr) => (curr === item.label ? null : curr))}
               >
                 <NavLink
                   to={item.to}
                   end={item.end}
-                  title={item.label}
+                  data-tooltip={item.label}
+                  data-tooltip-pos={isCollapsed ? 'right' : 'top'}
                   data-tour={item.dataTour}
-                  className={`admin-nav-item admin-nav-item--has-submenu ${isFinancesActive ? 'active' : ''}`}
-                  onClick={() => setFinancesFlyoutOpen((prev) => !prev)}
+                  className={`admin-nav-item admin-nav-item--has-submenu ${isCategoryActive ? 'active' : ''}`}
+                  onClick={() => {
+                    setOpenSubmenu((prev) => (prev === item.label ? null : item.label));
+                  }}
                 >
                   <span className="admin-nav-icon">{item.icon}</span>
                   <span className="admin-nav-label">{item.label}</span>
@@ -317,32 +399,41 @@ export default function Sidebar({
                   )}
                 </NavLink>
 
-                {financesFlyoutOpen && (
+                {isSubmenuOpen && (
                   <div
                     className="sidebar-flyout-menu"
                     role="menu"
                     aria-label={`${item.label} options`}
                   >
+                    <div
+                      style={{
+                        padding: '4px 14px 6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: 'rgba(255, 255, 255, 0.45)',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      {item.label}
+                    </div>
                     {item.subitems.map((sub) => {
-                      const isCurrent =
-                        (sub.to === '/mentor/transactions' &&
-                          location.pathname.startsWith('/mentor/transactions')) ||
-                        (sub.to === '/mentor/billings' &&
-                          location.pathname.startsWith('/mentor/billings')) ||
-                        (sub.to === '/mentor/reports' &&
-                          location.pathname.startsWith('/mentor/reports')) ||
-                        (sub.to === '/mentor/taxes' &&
-                          location.pathname.startsWith('/mentor/taxes')) ||
-                        (sub.to.includes('tab=overview') &&
-                          location.pathname === '/mentor/earnings' &&
-                          (!location.search || location.search === '?tab=overview')) ||
-                        location.pathname + location.search === sub.to;
+                      const [subPath, subQuery] = sub.to.split('?');
+                      const isCurrent = subQuery
+                        ? location.pathname === subPath && location.search === `?${subQuery}`
+                        : location.pathname === subPath;
+
                       return (
                         <Link
                           key={sub.label}
                           to={sub.to}
                           className={`sidebar-flyout-item ${isCurrent ? 'active' : ''}`}
-                          onClick={() => setFinancesFlyoutOpen(false)}
+                          onClick={() => {
+                            setOpenSubmenu(null);
+                            if (onCloseMobile) onCloseMobile();
+                          }}
                         >
                           <span>{sub.label}</span>
                         </Link>
@@ -359,9 +450,11 @@ export default function Sidebar({
               key={item.to}
               to={item.to}
               end={item.end}
-              title={item.label}
+              data-tooltip={item.label}
+              data-tooltip-pos={isCollapsed ? 'right' : 'top'}
               data-tour={item.dataTour}
               className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
+              onClick={onCloseMobile}
             >
               <span className="admin-nav-icon">{item.icon}</span>
               <span className="admin-nav-label">{item.label}</span>
@@ -375,21 +468,37 @@ export default function Sidebar({
         {menuOpen && (
           <div ref={menuRef} className="admin-user-menu" role="menu" aria-label="User Account Menu">
             <div className="admin-user-menu-header">
-              <div className="admin-user-menu-title" title={user?.name || 'User'}>
-                {user?.name || 'User'}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                <div className="admin-user-menu-title" title={user?.name || 'User'}>
+                  {user?.name || 'User'}
+                </div>
+
+                {(portalType === 'mentor' || user?.role === 'mentor') && (
+                  <button
+                    type="button"
+                    className={`admin-status-toggle-pill ${isOnline ? 'is-online' : 'is-offline'}`}
+                    onClick={handleToggleOnline}
+                    disabled={onlineLoading}
+                    title={isOnline ? 'Status: Online (Click to go Offline)' : 'Status: Offline (Click to go Online)'}
+                    aria-label="Toggle Online/Offline Status"
+                  >
+                    <span className={`avail-dot ${isOnline ? 'online' : 'offline'}`} />
+                    <span className="admin-toggle-label">{isOnline ? 'Online' : 'Offline'}</span>
+                    <span className={`admin-toggle-switch ${isOnline ? 'on' : 'off'}`}>
+                      <span className="admin-toggle-slider" />
+                    </span>
+                  </button>
+                )}
               </div>
+
               <div className="admin-user-menu-email" title={user?.email || ''}>
                 {user?.email || ''}
               </div>
-              <div style={{ marginTop: '5px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+              <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span className="admin-user-menu-badge">
                   {user?.role ? user.role.toUpperCase() : roleLabel}
                 </span>
-                {portalType === 'mentor' && (
-                  <span className="admin-user-avail-status" title="Available for sessions">
-                    <span className="avail-dot"></span> Available
-                  </span>
-                )}
               </div>
             </div>
 
@@ -402,7 +511,7 @@ export default function Sidebar({
               <span>{portalType === 'mentor' ? 'Mentor Profile' : portalType === 'admin' ? 'Admin Profile' : 'My Profile'}</span>
             </NavLink>
 
-            {portalType === 'mentor' && (
+            {(portalType === 'mentor' || user?.role === 'mentor') && (
               <NavLink
                 to="/mentor/availability"
                 className={({ isActive }) => `admin-user-menu-item ${isActive ? 'active' : ''}`}
@@ -410,7 +519,9 @@ export default function Sidebar({
               >
                 <ClockIcon size={16} />
                 <span>Availability</span>
-                <span className="admin-user-menu-avail-pill">Open</span>
+                <span className={`admin-user-menu-avail-pill ${isOnline ? '' : 'offline'}`}>
+                  {isOnline ? 'Open' : 'Away'}
+                </span>
               </NavLink>
             )}
 
@@ -685,7 +796,21 @@ export default function Sidebar({
           aria-expanded={menuOpen}
         >
           <div className="avatar-sm">
-            {initials(user?.name)}
+            {user?.avatar || user?.photo_url ? (
+              <img
+                src={resolveImageUrl(user.avatar || user.photo_url)}
+                alt={user?.name || 'User'}
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  if (e.currentTarget.nextElementSibling) {
+                    e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                  }
+                }}
+              />
+            ) : null}
+            <span style={{ display: user?.avatar || user?.photo_url ? 'none' : 'inline-block' }}>
+              {initials(user?.name)}
+            </span>
             {unreadCount > 0 && <span className="admin-user-dot" title={`${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`} />}
           </div>
           <div className="admin-user-info">
@@ -694,9 +819,13 @@ export default function Sidebar({
             </div>
             <div className="admin-user-role" style={{ display: 'flex', alignItems: 'center' }}>
               <span>{user?.role || ''}</span>
-              {portalType === 'mentor' && (
-                <span className="admin-user-avail-status" title="Available for sessions">
-                  <span className="avail-dot"></span> Available
+              {(portalType === 'mentor' || user?.role === 'mentor') && (
+                <span
+                  className={`admin-user-avail-status ${isOnline ? 'online' : 'offline'}`}
+                  title={isOnline ? 'Available for sessions (Online)' : 'Offline'}
+                >
+                  <span className={`avail-dot ${isOnline ? 'online' : 'offline'}`}></span>
+                  {isOnline ? 'Available' : 'Offline'}
                 </span>
               )}
             </div>

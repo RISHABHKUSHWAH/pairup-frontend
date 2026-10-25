@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
-import { api, initials, stars } from '../../api/client';
+import { api, initials, stars, resolveImageUrl } from '../../api/client';
 import { ShieldIcon, CheckIcon, EyeIcon } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
 
@@ -16,6 +17,52 @@ export default function AdminMentorsPage() {
   const [statusTab, setStatusTab] = useState('all'); // 'all' | 'pending' | 'verified' | 'suspended' | 'rejected'
   const [search, setSearch] = useState('');
   const [selectedMentor, setSelectedMentor] = useState(null);
+  const [customCommissionInput, setCustomCommissionInput] = useState('');
+  const [customTaxInput, setCustomTaxInput] = useState('');
+  const [savingCommission, setSavingCommission] = useState(false);
+
+  useEffect(() => {
+    if (selectedMentor) {
+      setCustomCommissionInput(
+        selectedMentor.custom_commission_percent !== null && selectedMentor.custom_commission_percent !== undefined
+          ? String(selectedMentor.custom_commission_percent)
+          : ''
+      );
+      setCustomTaxInput(
+        selectedMentor.custom_tax_percent !== null && selectedMentor.custom_tax_percent !== undefined
+          ? String(selectedMentor.custom_tax_percent)
+          : ''
+      );
+    }
+  }, [selectedMentor]);
+
+  const handleUpdateCommission = async (commVal, taxVal) => {
+    if (!selectedMentor) return;
+    const mentorId = selectedMentor.user_id || selectedMentor.id;
+    setSavingCommission(true);
+    try {
+      const numComm = commVal === null || commVal === '' ? null : parseFloat(commVal);
+      const numTax = taxVal === null || taxVal === '' ? null : parseFloat(taxVal);
+      await api.setMentorCommission(mentorId, numComm, numTax);
+      toast.success(
+        numComm !== null || numTax !== null
+          ? `Custom rates saved (Commission: ${numComm !== null ? numComm + '%' : 'Default'}, Tax: ${numTax !== null ? numTax + '%' : 'Default'})`
+          : 'Rates reset to platform defaults'
+      );
+      setSelectedMentor((prev) => (prev ? { ...prev, custom_commission_percent: numComm, custom_tax_percent: numTax } : null));
+      setMentors((prev) =>
+        prev.map((m) =>
+          (m.id === mentorId || m.user_id === mentorId)
+            ? { ...m, custom_commission_percent: numComm, custom_tax_percent: numTax }
+            : m
+        )
+      );
+    } catch (err) {
+      toast.error('Failed to update rates: ' + err.message);
+    } finally {
+      setSavingCommission(false);
+    }
+  };
 
   useEffect(() => {
     loadMentors();
@@ -168,6 +215,7 @@ export default function AdminMentorsPage() {
         </Link>
       }
     >
+      <AdminCategoryNav category="users" />
       <p className="sub" style={{ marginBottom: '16px' }}>
         Directory of all verified, pending, and suspended mentors on the PairUp platform. Inspect profiles, verify credentials, and manage platform permissions.
       </p>
@@ -280,9 +328,25 @@ export default function AdminMentorsPage() {
                               alignItems: 'center',
                               justifyContent: 'center',
                               flexShrink: 0,
+                              overflow: 'hidden',
                             }}
                           >
-                            {initials(m.name)}
+                            {m.photo_url || m.avatar ? (
+                              <img
+                                src={resolveImageUrl(m.photo_url || m.avatar)}
+                                alt={m.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                  if (e.currentTarget.nextElementSibling) {
+                                    e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                                  }
+                                }}
+                              />
+                            ) : null}
+                            <span style={{ display: m.photo_url || m.avatar ? 'none' : 'inline-block' }}>
+                              {initials(m.name)}
+                            </span>
                           </div>
                           <div>
                             <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -469,9 +533,25 @@ export default function AdminMentorsPage() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    overflow: 'hidden',
                   }}
                 >
-                  {initials(selectedMentor.name)}
+                  {selectedMentor.photo_url || selectedMentor.avatar ? (
+                    <img
+                      src={resolveImageUrl(selectedMentor.photo_url || selectedMentor.avatar)}
+                      alt={selectedMentor.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        if (e.currentTarget.nextElementSibling) {
+                          e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                        }
+                      }}
+                    />
+                  ) : null}
+                  <span style={{ display: selectedMentor.photo_url || selectedMentor.avatar ? 'none' : 'inline-block' }}>
+                    {initials(selectedMentor.name)}
+                  </span>
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '17px' }}>{selectedMentor.name}</h3>
@@ -554,6 +634,125 @@ export default function AdminMentorsPage() {
               <p style={{ fontSize: '13px', lineHeight: 1.5, background: 'var(--panel-bg)', padding: '10px 12px', borderRadius: '6px', margin: 0 }}>
                 {selectedMentor.bio || 'Senior engineer with distributed systems, cloud architecture and debugging experience.'}
               </p>
+            </div>
+
+            {/* Commission & Tax Override Section */}
+            <div style={{ padding: '12px 14px', background: 'var(--panel-bg)', border: '1px solid var(--grid)', borderRadius: '8px', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--ink)' }}>
+                  Mentor Commission &amp; Tax Overrides
+                </span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      background: selectedMentor.custom_commission_percent !== null && selectedMentor.custom_commission_percent !== undefined
+                        ? 'rgba(99, 102, 241, 0.15)'
+                        : 'var(--bg)',
+                      color: selectedMentor.custom_commission_percent !== null && selectedMentor.custom_commission_percent !== undefined
+                        ? '#6366f1'
+                        : 'var(--ink-muted)',
+                      border: '1px solid var(--grid)',
+                    }}
+                  >
+                    {selectedMentor.custom_commission_percent !== null && selectedMentor.custom_commission_percent !== undefined
+                      ? `Comm: ${selectedMentor.custom_commission_percent}%`
+                      : 'Default Comm (10%)'}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      background: selectedMentor.custom_tax_percent !== null && selectedMentor.custom_tax_percent !== undefined
+                        ? 'rgba(239, 68, 68, 0.15)'
+                        : 'var(--bg)',
+                      color: selectedMentor.custom_tax_percent !== null && selectedMentor.custom_tax_percent !== undefined
+                        ? '#dc2626'
+                        : 'var(--ink-muted)',
+                      border: '1px solid var(--grid)',
+                    }}
+                  >
+                    {selectedMentor.custom_tax_percent !== null && selectedMentor.custom_tax_percent !== undefined
+                      ? `Tax: ${selectedMentor.custom_tax_percent}%`
+                      : 'Default Tax (0%)'}
+                  </span>
+                </div>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--ink-muted)', marginBottom: '10px' }}>
+                Set individual commission take-rate and tax percentage on commission for this mentor.
+              </div>
+              <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-muted)', display: 'block', marginBottom: '4px' }}>
+                    Commission (%)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      placeholder="e.g. 10.0"
+                      value={customCommissionInput}
+                      onChange={(e) => setCustomCommissionInput(e.target.value)}
+                      style={{ width: '90px', padding: '6px 8px', fontSize: '12.5px', margin: 0, borderRadius: '6px' }}
+                    />
+                    <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--ink-muted)' }}>%</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-muted)', display: 'block', marginBottom: '4px' }}>
+                    Tax on Comm (%)
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      placeholder="e.g. 18.0"
+                      value={customTaxInput}
+                      onChange={(e) => setCustomTaxInput(e.target.value)}
+                      style={{ width: '90px', padding: '6px 8px', fontSize: '12.5px', margin: 0, borderRadius: '6px' }}
+                    />
+                    <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--ink-muted)' }}>%</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                    disabled={savingCommission || (customCommissionInput === '' && customTaxInput === '')}
+                    onClick={() => handleUpdateCommission(customCommissionInput, customTaxInput)}
+                  >
+                    {savingCommission ? 'Saving...' : 'Set Overrides'}
+                  </button>
+                  {((selectedMentor.custom_commission_percent !== null && selectedMentor.custom_commission_percent !== undefined) ||
+                    (selectedMentor.custom_tax_percent !== null && selectedMentor.custom_tax_percent !== undefined)) && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12px', padding: '6px 10px' }}
+                      disabled={savingCommission}
+                      onClick={() => {
+                        setCustomCommissionInput('');
+                        setCustomTaxInput('');
+                        handleUpdateCommission(null, null);
+                      }}
+                    >
+                      Reset Defaults
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Verification Status */}

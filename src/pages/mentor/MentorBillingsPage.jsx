@@ -2,9 +2,11 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
+import TransactionDetailModal from '../../components/TransactionDetailModal';
 import { api, mentorPayoutSettings, mentorPaymentScheduleSettings } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { usePlatformCommission } from '../../utils';
 import {
   CreditCardIcon,
   WalletIcon,
@@ -31,6 +33,7 @@ import {
 
 export default function MentorBillingsPage() {
   const { user } = useAuth();
+  const { effectiveMentorFeePercent, mentorTaxPercent } = usePlatformCommission();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -130,14 +133,23 @@ export default function MentorBillingsPage() {
     if (Array.isArray(payments) && payments.length > 0) {
       payments.forEach((p, idx) => {
         const isContract = Boolean(p.contract_id);
-        const gross = Number(p.amount || 0);
+        const gross = Number(p.gross_amount || p.amount || 0);
+        const commPct = Number(p.mentor_commission_percent !== undefined && Number(p.mentor_commission_percent) >= 0 ? p.mentor_commission_percent : effectiveMentorFeePercent);
+        const taxPct = Number(p.mentor_tax_percent !== undefined && Number(p.mentor_tax_percent) >= 0 ? p.mentor_tax_percent : mentorTaxPercent);
         const fee = Number(
-          p.platform_fee !== undefined
-            ? p.platform_fee
-            : Math.round(gross * 0.1)
+          p.mentor_fee !== undefined && Number(p.mentor_fee) > 0
+            ? p.mentor_fee
+            : (p.platform_fee !== undefined && Number(p.platform_fee) > 0 ? p.platform_fee : Math.round(gross * (commPct / 100) * 100) / 100)
+        );
+        const tax = Number(
+          p.mentor_tax !== undefined && Number(p.mentor_tax) > 0
+            ? p.mentor_tax
+            : Math.round(fee * (taxPct / 100) * 100) / 100
         );
         const net = Number(
-          p.net_amount !== undefined ? p.net_amount : gross - fee
+          p.net_mentor_payout !== undefined && Number(p.net_mentor_payout) > 0
+            ? p.net_mentor_payout
+            : (p.net_amount !== undefined && Number(p.net_amount) > 0 ? p.net_amount : Math.max(0, Math.round((gross - fee - tax) * 100) / 100))
         );
         const dateStr = p.created_at || new Date().toISOString();
         const invoiceId = `INV-2026-${String(p.id || idx + 1).padStart(5, '0')}`;
@@ -156,13 +168,19 @@ export default function MentorBillingsPage() {
           invoiceNumber: invoiceId,
           date: dateStr,
           type: isContract ? 'contract' : 'session',
-          typeLabel: isContract ? 'Contract Milestone' : '1-on-1 Session',
-          learnerName: p.learner_name || 'Client',
-          learnerEmail: p.learner_email || 'learner@pairup.dev',
-          topic: p.topic || (isContract ? 'Development Milestone' : 'Pair Programming Session'),
+          typeLabel: isContract ? 'Fixed-price' : '1-on-1 Session',
+          clientName: p.learner_name || 'DG',
+          learnerName: p.learner_name || 'DG',
+          learnerEmail: p.learner_email || 'client@pairup.dev',
+          topic: p.contract_title || p.topic || (isContract ? 'Mirth developer' : 'Pair Programming Session'),
+          contractTitle: p.contract_title || p.topic || (isContract ? 'Mirth developer' : 'Pair Programming Session'),
           grossAmount: gross,
           platformFee: fee,
-          feeRate: 10,
+          mentorFee: fee,
+          mentorTax: tax,
+          mentorCommissionPercent: commPct,
+          mentorTaxPercent: taxPct,
+          feeRate: commPct,
           netAmount: net,
           status,
           bookingId: p.booking_id,
@@ -178,18 +196,47 @@ export default function MentorBillingsPage() {
     if (list.length < 6) {
       const demoInvoices = [
         {
+          id: 'demo_0',
+          invoiceNumber: 'INV-2026-00007',
+          date: '2026-05-27T10:00:00.000Z',
+          type: 'contract',
+          typeLabel: 'Fixed-price',
+          clientName: 'DG',
+          learnerName: 'DG',
+          learnerEmail: 'dg@client.io',
+          topic: 'Mirth developer',
+          contractTitle: 'Mirth developer',
+          grossAmount: 225.0,
+          platformFee: 22.5,
+          mentorFee: 22.5,
+          mentorTax: 4.05,
+          mentorCommissionPercent: 10.0,
+          mentorTaxPercent: 18.0,
+          feeRate: 10,
+          netAmount: 198.22,
+          status: 'Settled',
+          hoursBilled: 5,
+          settlementDate: '2026-05-27T10:30:00.000Z',
+          payoutReference: 'PAIR-2026-00007-STMT',
+        },
+        {
           id: 'demo_1',
           invoiceNumber: 'INV-2026-00101',
           date: '2026-09-18T14:30:00.000Z',
           type: 'session',
           typeLabel: '1-on-1 Session',
+          clientName: 'Sarah Connor',
           learnerName: 'Sarah Connor',
           learnerEmail: 'sarah.connor@cyberdyne.io',
           topic: 'Django REST Framework JWT Security & Microservices',
           grossAmount: 2500,
           platformFee: 250,
+          mentorFee: 250,
+          mentorTax: 45,
+          mentorCommissionPercent: 10.0,
+          mentorTaxPercent: 18.0,
           feeRate: 10,
-          netAmount: 2250,
+          netAmount: 2205,
           status: 'Settled',
           hoursBilled: 1.5,
           settlementDate: '2026-09-18T16:00:00.000Z',
@@ -200,14 +247,20 @@ export default function MentorBillingsPage() {
           invoiceNumber: 'INV-2026-00102',
           date: '2026-09-17T11:00:00.000Z',
           type: 'contract',
-          typeLabel: 'Contract Milestone',
+          typeLabel: 'Fixed-price',
+          clientName: 'Marcus Vance',
           learnerName: 'Marcus Vance',
           learnerEmail: 'marcus.v@fintechcorp.com',
           topic: 'Fintech Payment Gateway Integration - Milestone 1',
+          contractTitle: 'Fintech Payment Gateway Integration',
           grossAmount: 8000,
           platformFee: 800,
+          mentorFee: 800,
+          mentorTax: 144,
+          mentorCommissionPercent: 10.0,
+          mentorTaxPercent: 18.0,
           feeRate: 10,
-          netAmount: 7200,
+          netAmount: 7056,
           status: 'Settled',
           hoursBilled: 6,
           settlementDate: '2026-09-17T18:30:00.000Z',
@@ -678,10 +731,10 @@ export default function MentorBillingsPage() {
           </span>
         </div>
 
-        {/* Card 2: Platform Fees (10%) */}
+        {/* Card 2: Platform Fees */}
         <div className="earnings-stat-card">
           <div className="earnings-stat-card-top">
-            <span className="earnings-stat-label">Platform Fees (10%)</span>
+            <span className="earnings-stat-label">Platform Fees ({effectiveMentorFeePercent}%)</span>
             <div className="earnings-stat-icon-wrap" style={{ background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444' }}>
               <RupeeIcon size={16} />
             </div>
@@ -690,7 +743,7 @@ export default function MentorBillingsPage() {
             {formatINR(summaryMetrics.totalFees)}
           </div>
           <div className="earnings-stat-desc" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '2px', minHeight: '34px' }}>
-            <div style={{ fontSize: '11px', color: 'var(--ink)', fontWeight: '500' }}>10% standard platform fee</div>
+            <div style={{ fontSize: '11px', color: 'var(--ink)', fontWeight: '500' }}>{effectiveMentorFeePercent}% standard platform fee</div>
             <div style={{ fontSize: '10.5px', color: 'var(--ink-muted)' }}>Zero withdrawal surcharges</div>
           </div>
           <span className="earnings-stat-pill" style={{ background: 'rgba(239, 68, 68, 0.08)', color: '#dc2626' }}>
@@ -999,7 +1052,7 @@ export default function MentorBillingsPage() {
                 <th style={{ width: '140px' }}>Type</th>
                 <th style={{ minWidth: '220px' }}>Description / Topic</th>
                 <th style={{ width: '120px', textAlign: 'right' }}>Gross Billed</th>
-                <th style={{ width: '120px', textAlign: 'right' }}>Fee (10%)</th>
+                <th style={{ width: '120px', textAlign: 'right' }}>Fee ({effectiveMentorFeePercent}%)</th>
                 <th style={{ width: '130px', textAlign: 'right' }}>Net Realized</th>
                 <th style={{ width: '125px', textAlign: 'center' }}>Status</th>
                 <th style={{ width: '95px', textAlign: 'center' }}>Action</th>
@@ -1241,10 +1294,10 @@ export default function MentorBillingsPage() {
           </div>
           <div>
             <h4 style={{ margin: '0 0 6px', fontSize: '15px', color: 'var(--ink)' }}>
-              10% Intermediary Service Fee Transparency
+              {effectiveMentorFeePercent}% Intermediary Service Fee Transparency
             </h4>
             <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--ink-muted)', lineHeight: '1.5' }}>
-              PairUp retains a flat 10% platform fee on all session bookings and milestone contracts. This fee covers high-security escrow vault protection, automated bank transfer settlements, 24/7 dispute mediation, and encrypted WebRTC pairing rooms. Mentors retain 90% with zero hidden withdrawal surcharges.
+              PairUp retains a flat {effectiveMentorFeePercent}% platform fee on all session bookings and milestone contracts. This fee covers high-security escrow vault protection, automated bank transfer settlements, 24/7 dispute mediation, and encrypted WebRTC pairing rooms. Mentors retain {100 - effectiveMentorFeePercent}% with zero hidden withdrawal surcharges.
             </p>
             <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
               <div style={{ fontSize: '12px', color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1459,165 +1512,16 @@ export default function MentorBillingsPage() {
         </Modal>
       )}
 
-      {/* Tax Invoice Detail Modal */}
+      {/* Upwork-style Transaction Detail Modal */}
       {invoiceModalOpen && selectedInvoice && (
-        <Modal
+        <TransactionDetailModal
           isOpen={invoiceModalOpen}
-          onClose={() => setInvoiceModalOpen(false)}
-          title={`Invoice ${selectedInvoice.invoiceNumber}`}
-        >
-          <div className="printable-invoice-wrap" style={{ padding: '4px 0' }}>
-            {/* Invoice Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid var(--grid-strong)', paddingBottom: '16px', marginBottom: '16px' }}>
-              <div>
-                <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--brand)', fontFamily: 'JetBrains Mono, monospace' }}>
-                  PAIRUP
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--ink-muted)', marginTop: '2px' }}>
-                  PairUp Technologies Inc. • GSTIN: 29AAACP0123M1Z5
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
-                  Platform Intermediary & Escrow Services
-                </div>
-              </div>
-
-              <div style={{ textAlign: 'right' }}>
-                <span className="badge badge-primary" style={{ fontSize: '12px', fontWeight: '700', padding: '4px 10px', marginBottom: '6px', display: 'inline-block' }}>
-                  TAX INVOICE
-                </span>
-                <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '13px', fontWeight: '700', color: 'var(--ink)' }}>
-                  {selectedInvoice.invoiceNumber}
-                </div>
-                <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-                  Date: {new Date(selectedInvoice.date).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' })}
-                </div>
-              </div>
-            </div>
-
-            {/* Parties: Billed To and Provided By */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px', background: 'var(--bg)', padding: '12px 14px', borderRadius: '8px' }}>
-              <div>
-                <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-muted)', fontWeight: '700', marginBottom: '4px' }}>
-                  Billed To (Client):
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--ink)' }}>
-                  {selectedInvoice.learnerName}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
-                  {selectedInvoice.learnerEmail}
-                </div>
-              </div>
-
-              <div>
-                <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ink-muted)', fontWeight: '700', marginBottom: '4px' }}>
-                  Service Provider (Mentor):
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--ink)' }}>
-                  {user?.name || 'Alex Rivera'}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
-                  {user?.email || 'alex.mentor@pairup.dev'}
-                </div>
-              </div>
-            </div>
-
-            {/* Line Items Table */}
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '20px', fontSize: '12.5px' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--grid-strong)', color: 'var(--ink-muted)', textAlign: 'left' }}>
-                  <th style={{ padding: '8px 0', fontWeight: '600' }}>Item & Description</th>
-                  <th style={{ padding: '8px 0', fontWeight: '600', textAlign: 'center' }}>Hours</th>
-                  <th style={{ padding: '8px 0', fontWeight: '600', textAlign: 'right' }}>Gross Billed</th>
-                  <th style={{ padding: '8px 0', fontWeight: '600', textAlign: 'right' }}>PairUp Fee (10%)</th>
-                  <th style={{ padding: '8px 0', fontWeight: '600', textAlign: 'right' }}>Net Realized</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ borderBottom: '1px solid var(--grid)' }}>
-                  <td style={{ padding: '12px 0' }}>
-                    <div style={{ fontWeight: '600', color: 'var(--ink)' }}>
-                      {selectedInvoice.topic}
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
-                      Category: {selectedInvoice.typeLabel}
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px 0', textAlign: 'center' }}>
-                    {selectedInvoice.hoursBilled}h
-                  </td>
-                  <td style={{ padding: '12px 0', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace' }}>
-                    {formatINR(selectedInvoice.grossAmount)}
-                  </td>
-                  <td style={{ padding: '12px 0', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', color: '#ef4444' }}>
-                    -{formatINR(selectedInvoice.platformFee)}
-                  </td>
-                  <td style={{ padding: '12px 0', textAlign: 'right', fontFamily: 'JetBrains Mono, monospace', fontWeight: '700', color: '#10b981' }}>
-                    {formatINR(selectedInvoice.netAmount)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-
-            {/* Invoice Totals Box */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
-              <div style={{ width: '260px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--ink-muted)' }}>
-                  <span>Total Gross Billed:</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--ink)' }}>
-                    {formatINR(selectedInvoice.grossAmount)}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ef4444' }}>
-                  <span>Platform Fee (10%):</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                    -{formatINR(selectedInvoice.platformFee)}
-                  </span>
-                </div>
-                <div style={{ height: '1px', background: 'var(--grid-strong)', margin: '4px 0' }} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '15px', color: '#10b981' }}>
-                  <span>Net Mentor Due:</span>
-                  <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-                    {formatINR(selectedInvoice.netAmount)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Settlement Status & Escrow Guarantee Stamp */}
-            <div style={{ background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '10px 14px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircleIcon size={16} style={{ color: '#10b981' }} />
-                <span style={{ fontSize: '12px', fontWeight: '600', color: '#065f46' }}>
-                  Status: {selectedInvoice.status}
-                </span>
-              </div>
-              <span style={{ fontSize: '11px', color: 'var(--ink-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
-                Ref: {selectedInvoice.payoutReference}
-              </span>
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handlePrintInvoice}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-              >
-                <PrinterIcon size={14} />
-                <span>Print Invoice</span>
-              </button>
-
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => setInvoiceModalOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </Modal>
+          onClose={() => {
+            setInvoiceModalOpen(false);
+            setSelectedInvoice(null);
+          }}
+          transaction={selectedInvoice}
+        />
       )}
     </PortalLayout>
   );

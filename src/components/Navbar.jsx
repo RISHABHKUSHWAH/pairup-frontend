@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { initials, notificationsApi, learnerNotifications, mentorNotifications } from '../api/client';
+import { initials, resolveImageUrl, notificationsApi, learnerNotifications, mentorNotifications } from '../api/client';
 import { SunIcon, MoonIcon, BellIcon } from './Icons';
 import PairUpLogo from './PairUpLogo';
 
@@ -128,7 +128,23 @@ export default function Navbar() {
             </span>
 
             <Link to={getDashboardPath()} className="nav-user" title="Go to Dashboard">
-              <span className="nav-avatar">{initials(user.name)}</span>
+              <span className="nav-avatar">
+                {user.avatar || user.photo_url ? (
+                  <img
+                    src={resolveImageUrl(user.avatar || user.photo_url)}
+                    alt={user.name}
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      if (e.currentTarget.nextElementSibling) {
+                        e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                      }
+                    }}
+                  />
+                ) : null}
+                <span style={{ display: user.avatar || user.photo_url ? 'none' : 'inline-block' }}>
+                  {initials(user.name)}
+                </span>
+              </span>
               <span className="nav-user-name">{user.name}</span>
             </Link>
 

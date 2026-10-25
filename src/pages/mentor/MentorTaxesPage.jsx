@@ -4,6 +4,7 @@ import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { usePlatformCommission } from '../../utils';
 import {
   ShieldIcon,
   DocumentIcon,
@@ -23,6 +24,7 @@ import {
 
 export default function MentorTaxesPage() {
   const { user } = useAuth();
+  const { effectiveMentorFeePercent } = usePlatformCommission();
   const { toast } = useToast();
 
   // Mask / Unmask PAN state
@@ -136,7 +138,7 @@ TAXPAYER IDENTIFICATION DETAILS:
 
 FINANCIAL YEAR-TO-DATE RECONCILIATION:
   Gross Mentoring & Consulting Billings:    INR ${stmt.grossBillings.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-  PairUp Platform Fee Retained (10%):       INR ${stmt.platformFee.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+  PairUp Platform Fee Retained (${effectiveMentorFeePercent}%):       INR ${stmt.platformFee.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
   Net Taxable Realized Income:              INR ${stmt.netTaxable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
   TDS Withheld under Section 194J / 194H:   INR ${stmt.tdsWithheld.toLocaleString('en-IN', { minimumFractionDigits: 2 })} (0.00% Zero-Rate Marketplace Model)
   Total Completed Engagements:              ${stmt.sessionsCount} Sessions, ${stmt.contractsCount} Milestone Contracts
@@ -260,7 +262,7 @@ RECONCILIATION CONFIRMATION:
 1. PairUp functions strictly as a peer-to-peer marketplace intermediary and escrow
    facilitator between client learners and independent technical mentors.
 2. In accordance with Section 194J/194H intermediary reconciliation guidelines,
-   100% of realized net earnings (gross billings less 10% platform facilitation fee)
+   100% of realized net earnings (gross billings less ${effectiveMentorFeePercent}% platform facilitation fee)
    are disbursed directly to the consultant without intermediary TDS deduction.
 3. Total TDS Deducted by Facilitator: INR 0.00 (Zero Rupees).
 4. Full gross and net earnings have been reported to the consultant for inclusion in

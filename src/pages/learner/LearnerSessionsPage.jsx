@@ -20,8 +20,11 @@ import {
 } from '../../components/Icons';
 import { useConfirm, useToast, useAuth } from '../../context';
 
+import { usePlatformCommission } from '../../utils';
+
 export default function LearnerSessionsPage() {
   const { user } = useAuth();
+  const { effectiveLearnerFeePercent, learnerTaxPercent: defaultLearnerTax } = usePlatformCommission();
   const { confirm } = useConfirm();
   const { toast } = useToast();
   const [bookings, setBookings] = useState([]);
@@ -76,7 +79,9 @@ export default function LearnerSessionsPage() {
       const data = await api.getBookings();
       setBookings(data);
     } catch (err) {
-      setError(err.message);
+      if (err?.status !== 401) {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -573,7 +578,7 @@ export default function LearnerSessionsPage() {
                       onClick={() => handlePay(b)}
                     >
                       <CreditCardIcon size={14} />
-                      {payingBookingId === b.id ? 'Securing Escrow...' : `Deposit Escrow (₹${b.price})`}
+                      {payingBookingId === b.id ? 'Securing Escrow...' : `Deposit Escrow (₹${Number(b.total_amount_paid || b.price).toLocaleString('en-IN')})`}
                     </button>
                     <button
                       type="button"
@@ -1162,24 +1167,43 @@ export default function LearnerSessionsPage() {
                 </div>
               </div>
 
-              <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '10px', marginTop: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
-                  <span style={{ color: 'var(--ink-muted)' }}>Session Fee:</span>
-                  <span className="mono" style={{ fontWeight: 600 }}>₹{paidSuccessBooking.price}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
-                  <span style={{ color: 'var(--ink-muted)' }}>Platform Escrow Protection:</span>
-                  <span style={{ color: '#10b981', fontWeight: 600 }}>100% Protected</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
-                  <span style={{ color: 'var(--ink-muted)' }}>Payment Status:</span>
-                  <span style={{ color: '#10b981', fontWeight: 600 }}>● Paid &amp; Held in Escrow</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700, marginTop: '8px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
-                  <span>Total Paid:</span>
-                  <span className="mono" style={{ color: 'var(--brand)' }}>₹{paidSuccessBooking.price}</span>
-                </div>
-              </div>
+              {(() => {
+                const basePrice = Number(paidSuccessBooking.price || 800);
+                const commPct = Number(paidSuccessBooking.learner_commission_percent !== undefined && paidSuccessBooking.learner_commission_percent !== null ? paidSuccessBooking.learner_commission_percent : effectiveLearnerFeePercent);
+                const taxPct = Number(paidSuccessBooking.learner_tax_percent !== undefined && paidSuccessBooking.learner_tax_percent !== null ? paidSuccessBooking.learner_tax_percent : defaultLearnerTax);
+                const lFee = Number(paidSuccessBooking.learner_fee !== undefined ? paidSuccessBooking.learner_fee : Math.round(basePrice * (commPct / 100) * 100) / 100);
+                const lTax = Number(paidSuccessBooking.learner_tax !== undefined ? paidSuccessBooking.learner_tax : Math.round(lFee * (taxPct / 100) * 100) / 100);
+                const totalPaid = Number(paidSuccessBooking.total_amount_paid !== undefined ? paidSuccessBooking.total_amount_paid : Math.round((basePrice + lFee + lTax) * 100) / 100);
+
+                return (
+                  <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '10px', marginTop: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                      <span style={{ color: 'var(--ink-muted)' }}>Session Rate:</span>
+                      <span className="mono" style={{ fontWeight: 600 }}>₹{basePrice.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                      <span style={{ color: 'var(--ink-muted)' }}>Platform Service Fee ({commPct}%):</span>
+                      <span className="mono" style={{ fontWeight: 600 }}>₹{lFee.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                      <span style={{ color: 'var(--ink-muted)' }}>GST on Service Fee ({taxPct}%):</span>
+                      <span className="mono" style={{ fontWeight: 600 }}>₹{lTax.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                      <span style={{ color: 'var(--ink-muted)' }}>Platform Escrow Protection:</span>
+                      <span style={{ color: '#10b981', fontWeight: 600 }}>100% Protected</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '12.5px' }}>
+                      <span style={{ color: 'var(--ink-muted)' }}>Payment Status:</span>
+                      <span style={{ color: '#10b981', fontWeight: 600 }}>● Paid &amp; Held in Escrow</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700, marginTop: '8px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+                      <span>Total Paid:</span>
+                      <span className="mono" style={{ color: 'var(--brand)' }}>₹{totalPaid.toFixed(2)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Timing Guidance notice */}

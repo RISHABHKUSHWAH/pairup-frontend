@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import { learnerProfile, initials } from '../../api/client';
@@ -32,11 +32,12 @@ function splitCommaItems(arr) {
 }
 
 export default function LearnerProfilePage() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { toast } = useToast();
   const [profile, setProfile] = useState(null);
   const [skillInput, setSkillInput] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     const data = learnerProfile.getProfile(user);
@@ -84,6 +85,48 @@ export default function LearnerProfilePage() {
     }));
   };
 
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file (PNG, JPG, WebP).');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Image size must be less than 2MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result;
+      setProfile((prev) => ({ ...prev, avatar: base64 }));
+      learnerProfile.saveProfile({ ...profile, avatar: base64 }, user?.id);
+      if (updateUser && user) {
+        updateUser({ ...user, avatar: base64 });
+      }
+      toast.success('Profile image updated! Remember to save other profile changes.');
+    };
+    reader.onerror = () => {
+      toast.error('Failed to read image file.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setProfile((prev) => ({ ...prev, avatar: '' }));
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    learnerProfile.saveProfile({ ...profile, avatar: '' }, user?.id);
+    if (updateUser && user) {
+      updateUser({ ...user, avatar: '' });
+    }
+    toast.success('Profile picture removed. Initials will be used.');
+  };
+
   const handleSave = (e) => {
     if (e && e.preventDefault) e.preventDefault();
     const pendingSkills = skillInput.trim() ? skillInput.trim().split(',').map((s) => s.trim()).filter(Boolean) : [];
@@ -96,6 +139,9 @@ export default function LearnerProfilePage() {
     };
     setProfile(updatedProfile);
     learnerProfile.saveProfile(updatedProfile, user?.id);
+    if (updateUser && user) {
+      updateUser({ ...user, avatar: updatedProfile.avatar });
+    }
     toast.success('Profile changes saved successfully!');
   };
 
@@ -118,20 +164,50 @@ export default function LearnerProfilePage() {
         Tell mentors about your background, learning roadmap, and preferred pairing style.
       </p>
 
-      <form onSubmit={handleSave} style={{ maxWidth: '640px' }}>
+      <form onSubmit={handleSave} style={{ maxWidth: '640px', width: '100%', boxSizing: 'border-box' }}>
         {/* Personal Information */}
         <div className="panel" style={{ margin: '0 0 20px 0' }}>
           <div className="section-label" style={{ marginTop: 0 }}>Personal Information</div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '18px' }}>
-            <div className="avatar-lg" style={{ fontSize: '24px' }}>
-              {initials(profile.name)}
+          <div className="profile-pic-uploader">
+            <div className="profile-pic-preview">
+              {profile.avatar ? (
+                <img src={profile.avatar} alt={profile.name} />
+              ) : (
+                <span>{initials(profile.name)}</span>
+              )}
             </div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '14px' }}>{profile.name}</div>
-              <div className="sub" style={{ margin: '2px 0 0', fontSize: '12px' }}>
-                Profile Avatar generated from initials
+            <div className="profile-pic-actions">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/png, image/jpeg, image/jpg, image/webp"
+                style={{ display: 'none' }}
+                onChange={handleImageSelect}
+              />
+              <div className="profile-pic-btn-group">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ fontSize: '12.5px', padding: '6px 14px' }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  📷 {profile.avatar ? 'Change photo' : 'Upload photo'}
+                </button>
+                {profile.avatar && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12.5px', padding: '6px 12px', color: '#DC2626' }}
+                    onClick={handleRemoveImage}
+                  >
+                    Remove
+                  </button>
+                )}
               </div>
+              <span className="profile-pic-hint">
+                PNG, JPG or WebP. Max 2MB. Square avatar recommended.
+              </span>
             </div>
           </div>
 
@@ -155,7 +231,7 @@ export default function LearnerProfilePage() {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div className="form-row-2col">
             <div className="field">
               <label>Email Address</label>
               <div style={{ position: 'relative' }}>
@@ -208,7 +284,7 @@ export default function LearnerProfilePage() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div className="form-row-2col">
             <div className="field">
               <label>Location</label>
               <input
@@ -324,7 +400,7 @@ export default function LearnerProfilePage() {
         <div className="panel" style={{ margin: '0 0 20px 0' }}>
           <div className="section-label" style={{ marginTop: 0 }}>Background &amp; Social Links</div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div className="form-row-2col">
             <div className="field">
               <label>Current Role / Student Status</label>
               <input
@@ -398,7 +474,7 @@ export default function LearnerProfilePage() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '40px' }}>
+        <div className="profile-actions-row">
           <button type="submit" className="btn btn-primary" style={{ padding: '12px 28px' }}>
             Save Profile Changes
           </button>
@@ -420,7 +496,13 @@ export default function LearnerProfilePage() {
       >
         <div className="card" style={{ border: '2px solid var(--accent)' }}>
           <div className="card-top">
-            <div className="avatar-lg">{initials(profile.name)}</div>
+            <div className="avatar-lg">
+              {profile.avatar ? (
+                <img src={profile.avatar} alt={profile.name} />
+              ) : (
+                initials(profile.name)
+              )}
+            </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: '17px' }}>{profile.name}</div>
               <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px' }}>

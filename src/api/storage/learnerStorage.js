@@ -36,6 +36,7 @@ export const learnerProfile = {
       if (saved) {
         if (defaultUser?.name && (!saved.name || saved.name === 'Jane Doe')) saved.name = defaultUser.name;
         if (defaultUser?.email && (!saved.email || saved.email === 'learner@example.com')) saved.email = defaultUser.email;
+        if (saved.avatar === undefined && defaultUser?.avatar) saved.avatar = defaultUser.avatar;
         return saved;
       }
     } catch {}
@@ -50,6 +51,7 @@ export const learnerProfile = {
     if (isSarah || !defaultUser?.name) {
       return {
         name: defaultUser?.name || 'Sarah Connor',
+        avatar: defaultUser?.avatar || '',
         headline: 'Full-Stack Developer learning Python & Cloud Architecture',
         email: defaultUser?.email || 'sarah@example.com',
         phone: '+91 98765 43210',
@@ -73,6 +75,7 @@ export const learnerProfile = {
     // Fresh profile for newly registered learners
     return {
       name: defaultUser?.name || '',
+      avatar: defaultUser?.avatar || '',
       headline: '',
       email: defaultUser?.email || '',
       phone: '',
@@ -100,70 +103,19 @@ export const learnerProfile = {
 };
 
 export const learnerNotifications = {
-  getDefaults: () => [
-    {
-      id: 1,
-      type: 'proposal',
-      title: 'New proposal received',
-      body: 'Alex Rivera submitted a proposal for "Django migration failing with IntegrityError" (₹1,500 / 45 mins)',
-      time: '15 minutes ago',
-      read: false,
-      link: '/learner/my-problems',
-    },
-    {
-      id: 2,
-      type: 'session',
-      title: 'Upcoming session reminder',
-      body: 'Pairing session with Sarah Chen starts today at 4:30 PM (IST). Topic: React Query State Management',
-      time: '1 hour ago',
-      read: false,
-      link: '/learner/sessions',
-    },
-    {
-      id: 3,
-      type: 'message',
-      title: 'New message from David Patel',
-      body: 'David: "I pushed the updated schema sample for you to review before our call!"',
-      time: '3 hours ago',
-      read: false,
-      link: '/chat',
-    },
-    {
-      id: 4,
-      type: 'payment',
-      title: 'Escrow payment secured',
-      body: 'Payment of ₹2,500 held safely in escrow for booking #104. Funds will only be released after your confirmation.',
-      time: 'Yesterday',
-      read: true,
-      link: '/learner/payments',
-    },
-    {
-      id: 5,
-      type: 'review',
-      title: 'Leave a review for Michael Scott',
-      body: 'Your pairing session on "AWS Lambda Deployment" concluded. Help the community by sharing your feedback!',
-      time: '2 days ago',
-      read: true,
-      link: '/learner/reviews',
-    },
-    {
-      id: 6,
-      type: 'refund',
-      title: 'Dispute update',
-      body: 'Admin resolved dispute #12 with full refund of ₹1,800 credited to your wallet balance.',
-      time: '3 days ago',
-      read: true,
-      link: '/learner/payments',
-    },
-  ],
+  getDefaults: () => [],
   getNotifications: () => {
     try {
       const stored = localStorage.getItem('pairup_learner_notifications');
-      if (stored) return JSON.parse(stored);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          // Remove legacy dummy notifications (ids 1..10)
+          return parsed.filter((n) => Number(n.id) > 10 || typeof n.id === 'string');
+        }
+      }
     } catch {}
-    const defaults = learnerNotifications.getDefaults();
-    localStorage.setItem('pairup_learner_notifications', JSON.stringify(defaults));
-    return defaults;
+    return [];
   },
   markRead: (id) => {
     const list = learnerNotifications.getNotifications().filter((n) => String(n.id) !== String(id));

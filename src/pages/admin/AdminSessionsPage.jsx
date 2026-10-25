@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import PortalLayout from '../../components/PortalLayout';
+import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
 import { api, initials } from '../../api/client';
 import {
@@ -380,6 +381,7 @@ export default function AdminSessionsPage() {
 
   return (
     <PortalLayout title="All Platform Sessions" portalType="admin">
+      <AdminCategoryNav category="operations" />
       <div style={{ paddingBottom: '40px' }}>
         {/* Top Header Row */}
         <div

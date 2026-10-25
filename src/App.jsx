@@ -12,6 +12,7 @@ import {
   ContactPage,
   PrivacyPage,
   TermsPage,
+  ActivateAccountPage,
 } from './pages/public';
 
 import {
@@ -74,6 +75,10 @@ import {
   AdminContentPage,
   AdminContractsPage,
   AdminSupportRequestsPage,
+  AdminMailPage,
+  AdminSignupsTrackingPage,
+  AdminAccountTrackingPage,
+
   SuperadminPage,
 } from './pages/admin';
 
@@ -92,6 +97,9 @@ export default function App() {
       <Route path="/become-a-mentor" element={<BecomeMentorPage />} />
       <Route path="/explore" element={<Navigate to="/learner/explore" replace />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<LoginPage />} />
+      <Route path="/reset-password" element={<LoginPage />} />
+      <Route path="/activate" element={<ActivateAccountPage />} />
       <Route path="/help" element={<HelpPage />} />
       <Route path="/contact" element={<ContactPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
@@ -421,6 +429,14 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/admin/account-tracking"
+        element={
+          <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+            <AdminAccountTrackingPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/admin/mentors"
         element={
@@ -445,6 +461,30 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+
+        path="/admin/signups-tracking"
+
+        element={
+
+          <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+
+            <AdminSignupsTrackingPage />
+
+          </ProtectedRoute>
+
+        }
+
+      />
+
+      <Route
+
+        path="/admin/signups"
+
+        element={<Navigate to="/admin/signups-tracking" replace />}
+
+      />
+
       <Route
         path="/admin/disputes"
         element={
@@ -559,6 +599,10 @@ export default function App() {
         }
       />
       <Route
+        path="/admin/logs"
+        element={<Navigate to="/admin/audit-logs" replace />}
+      />
+      <Route
         path="/admin/content"
         element={
           <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
@@ -577,6 +621,14 @@ export default function App() {
       <Route
         path="/admin/support-requests"
         element={<Navigate to="/admin/support" replace />}
+      />
+      <Route
+        path="/admin/mail"
+        element={
+          <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+            <AdminMailPage />
+          </ProtectedRoute>
+        }
       />
 
       {/* Superadmin Portal */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
@@ -7,6 +7,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useToast } from '../../context';
 import { DownloadIcon, MailIcon, BugIcon, RefreshIcon, ShieldIcon } from '../../components/Icons';
 import { adminSupport } from '../../api/storage/adminStorage';
+import { api } from '../../api';
 
 export default function LearnerSettingsPage() {
   const { user, switchRole, logout } = useAuth();
@@ -49,8 +50,54 @@ export default function LearnerSettingsPage() {
   const [bugModalOpen, setBugModalOpen] = useState(false);
   const [bugDescription, setBugDescription] = useState('');
 
-  // Delete account modal
+  // Delete account modal & request state
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deletionStatus, setDeletionStatus] = useState({ pending: false, requested_at: null, reason: '' });
+  const [deletionReason, setDeletionReason] = useState('');
+  const [submittingDeletion, setSubmittingDeletion] = useState(false);
+  const [cancellingDeletion, setCancellingDeletion] = useState(false);
+
+  useEffect(() => {
+    api.getAccountDeletionStatus()
+      .then((res) => {
+        if (res && res.pending) {
+          setDeletionStatus(res);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleRequestDeletion = async (e) => {
+    if (e) e.preventDefault();
+    setSubmittingDeletion(true);
+    try {
+      const res = await api.requestAccountDeletion(deletionReason);
+      setDeletionStatus({
+        pending: true,
+        requested_at: res.requested_at || new Date().toISOString(),
+        reason: deletionReason,
+      });
+      setDeleteModalOpen(false);
+      toast.success('Account deletion request has been submitted to the administrator for review.');
+    } catch (err) {
+      toast.error(err.message || 'Failed to submit account deletion request.');
+    } finally {
+      setSubmittingDeletion(false);
+    }
+  };
+
+  const handleCancelDeletion = async () => {
+    setCancellingDeletion(true);
+    try {
+      await api.cancelAccountDeletion();
+      setDeletionStatus({ pending: false, requested_at: null, reason: '' });
+      toast.success('Account deletion request has been cancelled.');
+    } catch (err) {
+      toast.error(err.message || 'Failed to cancel deletion request.');
+    } finally {
+      setCancellingDeletion(false);
+    }
+  };
 
   const showSaveSuccess = (msg = 'Settings updated successfully!') => {
     toast.success(msg);
@@ -504,18 +551,58 @@ export default function LearnerSettingsPage() {
               </div>
             )}
 
-            <div className="panel" style={{ margin: 0, borderColor: 'var(--warn)' }}>
-              <div className="section-label" style={{ marginTop: 0, color: 'var(--warn)' }}>Danger Zone</div>
-              <p className="sub" style={{ fontSize: '13px', marginBottom: '14px' }}>
-                Permanently delete your account, session logs, and personal profile from PairUp. This action is irreversible.
-              </p>
-              <button
-                type="button"
-                className="btn btn-danger"
-                onClick={() => setDeleteModalOpen(true)}
-              >
-                Delete Account
-              </button>
+            <div className="panel" style={{ margin: 0, borderColor: deletionStatus.pending ? 'var(--warn, #f59e0b)' : 'var(--warn)' }}>
+              <div className="section-label" style={{ marginTop: 0, color: deletionStatus.pending ? '#d97706' : 'var(--warn)' }}>
+                {deletionStatus.pending ? 'Account Deletion Request Pending Review' : 'Danger Zone'}
+              </div>
+              {deletionStatus.pending ? (
+                <div style={{ marginTop: '8px' }}>
+                  <div style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(245, 158, 11, 0.1)',
+                    border: '1px solid rgba(245, 158, 11, 0.3)',
+                    marginBottom: '14px',
+                  }}>
+                    <div style={{ fontWeight: 600, fontSize: '13px', color: '#b45309', marginBottom: '4px' }}>
+                      ⏳ Deletion Request Submitted to Admin
+                    </div>
+                    <p className="sub" style={{ fontSize: '12.5px', margin: 0, color: 'inherit' }}>
+                      You submitted an account deletion request on {new Date(deletionStatus.requested_at).toLocaleDateString()} at {new Date(deletionStatus.requested_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
+                      A platform administrator has been notified to review and process your request.
+                    </p>
+                    {deletionStatus.reason && (
+                      <div style={{ fontSize: '12px', marginTop: '6px', fontStyle: 'italic', color: 'var(--text-muted, #666)' }}>
+                        Reason provided: "{deletionStatus.reason}"
+                      </div>
+                    )}
+                  </div>
+                  <p className="sub" style={{ fontSize: '12.5px', marginBottom: '14px' }}>
+                    Changed your mind? You can cancel your deletion request at any time before an administrator processes it.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={cancellingDeletion}
+                    onClick={handleCancelDeletion}
+                  >
+                    {cancellingDeletion ? 'Cancelling Request...' : 'Cancel Deletion Request'}
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="sub" style={{ fontSize: '13px', marginBottom: '14px' }}>
+                    Permanently delete your account, session logs, and personal profile from PairUp. An account deletion request will be sent to the administrator for review.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => setDeleteModalOpen(true)}
+                  >
+                    Delete Account
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -654,35 +741,45 @@ export default function LearnerSettingsPage() {
       <Modal
         isOpen={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
-        title="Confirm Account Deletion"
+        title="Request Account Deletion"
       >
-        <div>
-          <p className="sub" style={{ fontSize: '13px', color: 'var(--warn)' }}>
-            This will permanently close your PairUp account, wipe all active session requests, and clear your learning history.
+        <form onSubmit={handleRequestDeletion}>
+          <p className="sub" style={{ fontSize: '13px', color: 'var(--warn)', marginTop: 0 }}>
+            Submitting this request will send an account deletion request to the platform administrator. An administrator will review and permanently delete your account, session logs, and personal data.
           </p>
+          <div className="field" style={{ marginTop: '14px' }}>
+            <label style={{ fontSize: '12.5px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+              Reason for leaving (Optional):
+            </label>
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="Please tell us why you are leaving..."
+              value={deletionReason}
+              onChange={(e) => setDeletionReason(e.target.value)}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </div>
           <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
             <button
               type="button"
               className="btn btn-ghost"
               onClick={() => setDeleteModalOpen(false)}
               style={{ flex: 1 }}
+              disabled={submittingDeletion}
             >
               Keep Account
             </button>
             <button
-              type="button"
+              type="submit"
               className="btn btn-danger"
               style={{ flex: 1 }}
-              onClick={() => {
-                toast.info('Account scheduled for deletion. Logging out.');
-                logout();
-                navigate('/');
-              }}
+              disabled={submittingDeletion}
             >
-              Confirm Delete
+              {submittingDeletion ? 'Submitting...' : 'Send Request to Admin'}
             </button>
           </div>
-        </div>
+        </form>
       </Modal>
     </PortalLayout>
   );
