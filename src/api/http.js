@@ -2,11 +2,20 @@
  * Base HTTP Client and Token Session Manager
  */
 
-const rawBase = import.meta.env.VITE_API_BASE_URL !== undefined 
-  ? import.meta.env.VITE_API_BASE_URL 
-  : (import.meta.env.DEV ? 'http://127.0.0.1:8000' : 'https://pairup.pythonanywhere.com');
+const envUrl = (import.meta.env.VITE_API_BASE_URL || '').trim();
 
-export const API_BASE = (rawBase || '').trim().replace(/\/+$/, '');
+function getBaseUrl() {
+  if (import.meta.env.DEV) {
+    return envUrl || 'http://127.0.0.1:8000';
+  }
+  // In production builds, ensure we don't accidentally send requests to localhost or empty base
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl;
+  }
+  return 'https://pairup.pythonanywhere.com';
+}
+
+export const API_BASE = getBaseUrl().replace(/\/+$/, '');
 
 export function isJwtExpired(token) {
   if (!token || typeof token !== 'string') return true;
