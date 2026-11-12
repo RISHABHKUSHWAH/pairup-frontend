@@ -837,17 +837,6 @@ export default function MentorTransactionsPage() {
       <div className="ledger-summary-strip">
         <div className="ledger-stat-card">
           <div className="ledger-stat-header">
-            <span className="ledger-stat-label">TOTAL INFLOW</span>
-            <div className="ledger-stat-icon-wrapper inflow">
-              <ArrowDownLeftIcon size={16} />
-            </div>
-          </div>
-          <div className="ledger-stat-val text-success">{formatINR(summaryMetrics.totalGross)}</div>
-          <div className="ledger-stat-sub">Gross client session billings</div>
-        </div>
-
-        <div className="ledger-stat-card">
-          <div className="ledger-stat-header">
             <span className="ledger-stat-label">ESCROW HELD</span>
             <div className="ledger-stat-icon-wrapper escrow">
               <ShieldIcon size={16} />
@@ -859,17 +848,6 @@ export default function MentorTransactionsPage() {
 
         <div className="ledger-stat-card">
           <div className="ledger-stat-header">
-            <span className="ledger-stat-label">PLATFORM FEES</span>
-            <div className="ledger-stat-icon-wrapper fee">
-              <RupeeIcon size={16} />
-            </div>
-          </div>
-          <div className="ledger-stat-val" style={{ color: 'var(--ink-muted)' }}>{formatINR(summaryMetrics.totalFees)}</div>
-          <div className="ledger-stat-sub">{effectiveMentorFeePercent}% PairUp service commission</div>
-        </div>
-
-        <div className="ledger-stat-card">
-          <div className="ledger-stat-header">
             <span className="ledger-stat-label">NET CLEARED</span>
             <div className="ledger-stat-icon-wrapper cleared">
               <CheckCircleIcon size={16} />
@@ -877,17 +855,6 @@ export default function MentorTransactionsPage() {
           </div>
           <div className="ledger-stat-val" style={{ color: 'var(--brand)' }}>{formatINR(summaryMetrics.releasedNet)}</div>
           <div className="ledger-stat-sub">Total earnings settled post-fee</div>
-        </div>
-
-        <div className="ledger-stat-card">
-          <div className="ledger-stat-header">
-            <span className="ledger-stat-label">DISBURSED</span>
-            <div className="ledger-stat-icon-wrapper disbursed">
-              <ArrowUpRightIcon size={16} />
-            </div>
-          </div>
-          <div className="ledger-stat-val text-danger">{formatINR(summaryMetrics.totalDisbursed)}</div>
-          <div className="ledger-stat-sub">Transferred to Bank / UPI</div>
         </div>
 
         <div className="ledger-stat-card highlighted">

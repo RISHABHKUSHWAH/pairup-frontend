@@ -16,6 +16,8 @@ export { default as HelpPage } from './HelpPage';
 export * from './HelpPage';
 export { default as ActivateAccountPage } from './ActivateAccountPage';
 export * from './ActivateAccountPage';
+export { default as LegalPage } from './LegalPage';
+export * from './LegalPage';
 export * from './CmsPages';
 
 

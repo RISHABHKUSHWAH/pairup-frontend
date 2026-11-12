@@ -100,48 +100,7 @@ export default function MentorProfilePage() {
     }
   }, [user, mentor]);
 
-  const handleBooking = async (e) => {
-    e.preventDefault();
-    if (!user) {
-      const mId = mentor?.user_id || mentor?.id || id;
-      const returnUrl = `/mentor/${mId}?book=true`;
-      try {
-        sessionStorage.setItem('pairup_pending_action', JSON.stringify({
-          action: 'book_session',
-          mentorId: mId,
-          mentor,
-          returnUrl,
-        }));
-      } catch (err) {}
-      navigate(`/login?redirect=${encodeURIComponent(returnUrl)}`, {
-        state: {
-          from: { pathname: `/mentor/${mId}`, search: '?book=true' },
-          action: 'book_session',
-          mentorId: mId,
-          mentor,
-        },
-      });
-      return;
-    }
-    setBookingError('');
-    setIsSubmitting(true);
-    try {
-      const rate = Number(mentor.hourly_rate || 0);
-      const price = rate > 0 ? Math.max(1, Math.round((rate * 30) / 60)) : 0;
-      await api.createBooking({
-        mentor_id: mentor.user_id,
-        topic,
-        duration_minutes: 30,
-        price,
-      });
-      toast.success('Session requested successfully! Redirecting to sessions...');
-      navigate('/learner/sessions');
-    } catch (err) {
-      setBookingError(err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+// handleBooking replaced by BookSessionModal dynamic duration engine
 
   if (loading) {
     return (

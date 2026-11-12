@@ -10,6 +10,7 @@ import { adminApi } from './admin';
 import { superadminApi } from './superadmin';
 import { notificationsApi } from './notifications';
 import { contractsApi } from './contracts';
+import { learnerApi } from './learners';
 
 export {
   authApi,
@@ -24,6 +25,7 @@ export {
   superadminApi,
   notificationsApi,
   contractsApi,
+  learnerApi,
 };
 
 /**
@@ -42,4 +44,5 @@ export const api = {
   ...superadminApi,
   ...notificationsApi,
   ...contractsApi,
+  ...learnerApi,
 };

@@ -193,7 +193,7 @@ export default function AdminAccountTrackingPage() {
   const pagination = data?.pagination || { total_count: 0, page: 1, total_pages: 1 };
 
   return (
-    <PortalLayout role="admin">
+    <PortalLayout portalType="admin" title="Account Tracking">
       <div style={{ maxWidth: 1440, margin: '0 auto', padding: '24px 20px' }}>
         {/* Category Navigation Bar */}
         <AdminCategoryNav category="users" />
@@ -1087,29 +1087,6 @@ export default function AdminAccountTrackingPage() {
                       ))}
                     </div>
                   </div>
-
-                  {/* Direct Message Link */}
-                  <Link
-                    to={`/chat?partner_id=${inspectAccount.id}`}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      borderRadius: 8,
-                      border: '1px solid #CBD5E1',
-                      background: '#FFFFFF',
-                      color: '#0F172A',
-                      textDecoration: 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      boxSizing: 'border-box',
-                    }}
-                  >
-                    <span>Send Direct Message</span>
-                    <ExternalLinkIcon size={16} />
-                  </Link>
 
                   {/* View In All Users */}
                   <Link

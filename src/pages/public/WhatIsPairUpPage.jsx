@@ -48,7 +48,7 @@ export default function WhatIsPairUpPage() {
     },
     {
       q: 'How much does a session cost?',
-      a: 'Mentors set their own transparent hourly rates (e.g. ₹500/hr to ₹5,000+/hr, or equivalent in USD). Sessions can be scheduled for 30, 45, 60, or 120 minutes with pro-rata pricing, meaning you only pay for the exact session duration you book with zero recurring subscription traps.',
+      a: 'Mentors set their own transparent hourly rates (e.g. ₹500/hr to ₹5,000+/hr in ₹ INR). Sessions can be scheduled for 30, 45, 60, or 120 minutes with pro-rata pricing, meaning you only pay for the exact session duration you book with zero recurring subscription traps.',
     },
     {
       q: 'Can I be both a learner and a mentor on the same account?',
@@ -74,7 +74,7 @@ export default function WhatIsPairUpPage() {
           <div className="container" style={{ maxWidth: '1080px' }}>
             <div className="hero-terminal-pill">
               <span className="terminal-dot"></span>
-              <span className="terminal-text">$ pairup --about-platform</span>
+              <span className="terminal-text">₹ pairup --about-platform</span>
             </div>
 
             <h1 className="about-hero-title">
@@ -155,7 +155,7 @@ export default function WhatIsPairUpPage() {
         {/* THE PROBLEM VS PAIRUP */}
         <section className="about-section about-contrast-section">
           <div className="container" style={{ maxWidth: '1080px' }}>
-            <div className="section-eyebrow">$ problem vs solution</div>
+            <div className="section-eyebrow">₹ problem vs solution</div>
             <h2 className="section-heading">Why developers need PairUp</h2>
             <p className="section-sub">
               Every developer hits roadblocks. The traditional ways of getting unblocked are broken, slow, or impersonal.
@@ -228,7 +228,7 @@ export default function WhatIsPairUpPage() {
         {/* HOW IT WORKS */}
         <section id="how-it-works" className="about-section">
           <div className="container" style={{ maxWidth: '1080px' }}>
-            <div className="section-eyebrow">$ workflow</div>
+            <div className="section-eyebrow">₹ workflow</div>
             <h2 className="section-heading">How PairUp works</h2>
             <p className="section-sub">
               From finding a mentor to solving your bug in a live pairing session, the entire journey takes just 4 simple steps.
@@ -277,7 +277,7 @@ export default function WhatIsPairUpPage() {
         {/* WHO IS IT FOR */}
         <section className="about-section about-personas-section">
           <div className="container" style={{ maxWidth: '1080px' }}>
-            <div className="section-eyebrow">$ community</div>
+            <div className="section-eyebrow">₹ community</div>
             <h2 className="section-heading">Built for every developer journey</h2>
             <p className="section-sub">
               Whether you are writing your first lines of code or architecting microservices, PairUp gives you the right human guidance.
@@ -330,7 +330,7 @@ export default function WhatIsPairUpPage() {
         {/* PLATFORM FEATURES GRID */}
         <section className="about-section">
           <div className="container" style={{ maxWidth: '1080px' }}>
-            <div className="section-eyebrow">$ platform architecture</div>
+            <div className="section-eyebrow">₹ platform architecture</div>
             <h2 className="section-heading">Enterprise-grade features, developer-first simplicity</h2>
             <p className="section-sub">
               Everything you need for productive pair programming sessions without clutter or friction.
@@ -394,7 +394,7 @@ export default function WhatIsPairUpPage() {
         {/* INTERACTIVE FAQ ACCORDION */}
         <section className="about-section about-faq-section">
           <div className="container" style={{ maxWidth: '820px' }}>
-            <div className="section-eyebrow">$ faq</div>
+            <div className="section-eyebrow">₹ faq</div>
             <h2 className="section-heading">Frequently asked questions</h2>
             <p className="section-sub">
               Have questions about how PairUp works? Here are answers to the most common questions.

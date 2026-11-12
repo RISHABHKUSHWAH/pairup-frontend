@@ -1027,8 +1027,9 @@ export default function LoginPage() {
             {mode === 'login' ? (
               <form onSubmit={handleLoginSubmit} className="auth-form">
                 <div className="field">
-                  <label>Email address</label>
+                  <label htmlFor="login-email">Email address</label>
                   <input
+                    id="login-email"
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -1039,7 +1040,7 @@ export default function LoginPage() {
                 </div>
                 <div className="field">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <label style={{ margin: 0 }}>Password</label>
+                    <label htmlFor="login-password" style={{ margin: 0 }}>Password</label>
                     <button
                       type="button"
                       className="forgot-password-link"
@@ -1064,6 +1065,7 @@ export default function LoginPage() {
                   </div>
                   <div className="password-input-wrap">
                     <input
+                      id="login-password"
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}

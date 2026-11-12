@@ -238,6 +238,8 @@ export default function ProblemRequestsPage() {
     setSubmitting(true);
     try {
       await api.submitProposal(proposalProblem.id, {
+        message: coverLetter.trim(),
+        proposed_price: Number(price),
         cover_letter: coverLetter.trim(),
         price: Number(price),
         estimated_duration_minutes: Number(duration),

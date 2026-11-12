@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
-import { api } from '../../api/client';
+import LearnerProfileModal from '../../components/LearnerProfileModal';
+import { api, initials } from '../../api/client';
 import { SearchIcon, DocumentIcon, EyeIcon, MessageIcon, XIcon, CheckIcon } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
 
@@ -15,6 +16,7 @@ export default function MyProposalsPage() {
   const [statusTab, setStatusTab] = useState('all'); // 'all' | 'pending' | 'negotiating' | 'accepted' | 'rejected'
   const [activeProposal, setActiveProposal] = useState(null);
   const [withdrawingId, setWithdrawingId] = useState(null);
+  const [selectedLearner, setSelectedLearner] = useState(null);
 
   // Counter Modal State
   const [counterModalOpen, setCounterModalOpen] = useState(false);
@@ -318,10 +320,39 @@ export default function MyProposalsPage() {
                     gap: '10px',
                   }}
                 >
-                  <div className="sub" style={{ margin: 0, fontSize: '12px', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                  <div className="sub" style={{ margin: 0, fontSize: '12px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
                     <span>Submitted: {new Date(p.created_at || Date.now()).toLocaleDateString()}</span>
                     <span>Duration: {p.estimated_duration_minutes || 60} mins</span>
-                    {p.learner_name && <span>Learner: {p.learner_name}</span>}
+                    {p.learner_name && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span>Learner:</span>
+                        <button
+                          type="button"
+                          className="user-profile-trigger"
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            color: 'var(--ink)',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            fontSize: '12px',
+                          }}
+                          onClick={() => setSelectedLearner({ id: p.learner_id, name: p.learner_name })}
+                          title="Click to view learner profile"
+                        >
+                          <div className="avatar-sm" style={{ width: '18px', height: '18px', fontSize: '9px' }}>
+                            {initials(p.learner_name || 'Learner')}
+                          </div>
+                          <strong className="user-profile-name" style={{ color: 'var(--brand, #2563eb)', textDecoration: 'underline' }}>
+                            {p.learner_name}
+                          </strong>
+                        </button>
+                      </span>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px' }}>
@@ -405,8 +436,33 @@ export default function MyProposalsPage() {
                 <h3 style={{ margin: 0, fontSize: '17px' }}>
                   {activeProposal.problem_title || `Problem Request #${activeProposal.problem || activeProposal.problem_id}`}
                 </h3>
-                <div className="sub" style={{ fontSize: '12px', marginTop: '2px' }}>
-                  Learner: {activeProposal.learner_name || 'Learner'}
+                <div className="sub" style={{ fontSize: '12px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>Learner:</span>
+                  <button
+                    type="button"
+                    className="user-profile-trigger"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      color: 'var(--ink)',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '12px',
+                    }}
+                    onClick={() => setSelectedLearner({ id: activeProposal.learner_id, name: activeProposal.learner_name })}
+                    title="Click to view learner profile"
+                  >
+                    <div className="avatar-sm" style={{ width: '18px', height: '18px', fontSize: '9px' }}>
+                      {initials(activeProposal.learner_name || 'Learner')}
+                    </div>
+                    <strong className="user-profile-name" style={{ color: 'var(--brand, #2563eb)', textDecoration: 'underline' }}>
+                      {activeProposal.learner_name || 'Learner'}
+                    </strong>
+                  </button>
                 </div>
               </div>
               <span
@@ -555,6 +611,13 @@ export default function MyProposalsPage() {
           </form>
         )}
       </Modal>
+
+      {/* Learner Profile Modal */}
+      <LearnerProfileModal
+        isOpen={Boolean(selectedLearner)}
+        onClose={() => setSelectedLearner(null)}
+        learner={selectedLearner}
+      />
     </PortalLayout>
   );
 }

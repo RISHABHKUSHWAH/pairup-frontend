@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import PortalLayout from '../../components/PortalLayout';
-import Modal from '../../components/Modal';
+import LearnerProfileModal from '../../components/LearnerProfileModal';
 import { learnerProfile, initials } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
@@ -489,49 +489,11 @@ export default function LearnerProfilePage() {
       </form>
 
       {/* Preview Card Modal */}
-      <Modal
+      <LearnerProfileModal
         isOpen={previewOpen}
         onClose={() => setPreviewOpen(false)}
-        title="Public Learner Preview"
-      >
-        <div className="card" style={{ border: '2px solid var(--accent)' }}>
-          <div className="card-top">
-            <div className="avatar-lg">
-              {profile.avatar ? (
-                <img src={profile.avatar} alt={profile.name} />
-              ) : (
-                initials(profile.name)
-              )}
-            </div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '17px' }}>{profile.name}</div>
-              <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px' }}>
-                {profile.headline}
-              </div>
-              <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '4px' }}>
-                {profile.location} • {profile.currentRole} @ {profile.organization}
-              </div>
-            </div>
-          </div>
-
-          <div className="section-label">Learning Goals</div>
-          <p className="sub" style={{ fontSize: '13px', margin: '4px 0 10px', lineHeight: 1.5 }}>
-            {profile.learningGoals}
-          </p>
-
-          <div className="section-label">Skills Learning ({profile.skillLevel})</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
-            {profile.skillsLearning.map((s) => (
-              <span key={s} className="tag">{s}</span>
-            ))}
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--grid)', paddingTop: '10px', fontSize: '12px', color: 'var(--ink-muted)' }}>
-            <span>Style: <strong>{profile.learningStyle}</strong></span>
-            <span>Language: <strong>{profile.preferredLanguage}</strong></span>
-          </div>
-        </div>
-      </Modal>
+        learner={profile}
+      />
     </PortalLayout>
   );
 }

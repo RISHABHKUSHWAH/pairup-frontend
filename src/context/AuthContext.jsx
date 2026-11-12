@@ -24,14 +24,6 @@ export function AuthProvider({ children }) {
     const currentUser = user || TokenStorage.getUser();
     const wasOnline = isOnline;
 
-    TokenStorage.clear();
-    try {
-      localStorage.removeItem('pairup_mentor_online');
-    } catch {}
-    setToken(null);
-    setUser(null);
-    setIsOnline(false);
-
     if (!skipServer && currentToken) {
       if (currentUser?.role === 'mentor' || wasOnline) {
         try {
@@ -48,6 +40,14 @@ export function AuthProvider({ children }) {
         }
       } catch (_) {}
     }
+
+    TokenStorage.clear();
+    try {
+      localStorage.removeItem('pairup_mentor_online');
+    } catch {}
+    setToken(null);
+    setUser(null);
+    setIsOnline(false);
   };
 
   useEffect(() => {

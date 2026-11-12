@@ -35,24 +35,42 @@ export default function Footer() {
           </div>
           <div className="footer-links">
             <div className="footer-col">
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontFamily: 'IBM Plex Mono, monospace', marginBottom: '2px' }}>
+                Platform
+              </span>
               <Link to="/what-is-pairup">What is PairUp?</Link>
               <Link to="/">Browse mentors</Link>
               <Link to="/become-a-mentor">Become a mentor</Link>
+              <Link to="/payments-gst">Fees, Payments &amp; GST</Link>
             </div>
             <div className="footer-col">
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontFamily: 'IBM Plex Mono, monospace', marginBottom: '2px' }}>
+                Help &amp; Trust
+              </span>
               <Link to="/help">Help &amp; support</Link>
-              <Link to="/contact">Contact</Link>
+              <Link to="/contact">Contact us</Link>
+              <Link to="/grievance-officer">Grievance Officer</Link>
+              <Link to="/data-security">Data Security</Link>
             </div>
             <div className="footer-col">
-              <Link to="/privacy">Privacy</Link>
-              <Link to="/terms">Terms</Link>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontFamily: 'IBM Plex Mono, monospace', marginBottom: '2px' }}>
+                Legal &amp; Policies
+              </span>
+              <Link to="/terms">Terms of Service</Link>
+              <Link to="/privacy">Privacy Policy</Link>
+              <Link to="/cookie-policy">Cookie Policy</Link>
+              <Link to="/cancellation-refund">Cancellation &amp; Refunds</Link>
+              <Link to="/consent-preferences">Consent Preferences</Link>
+              <Link to="/legal" style={{ color: 'var(--accent)', fontWeight: 600, marginTop: '2px' }}>
+                All 11 Policies →
+              </Link>
             </div>
           </div>
         </div>
         <div className="footer-bottom">
-          <span className="footer-copy">© {new Date().getFullYear()} PairUp. All rights reserved.</span>
+          <span className="footer-copy">© {new Date().getFullYear()} PairUp Technologies. All rights reserved.</span>
           <span className="footer-trust">
-            <span className="led-sm"></span>Escrow-protected payments
+            <span className="led-sm"></span>Escrow-protected payments &amp; DPDPA 2023 Compliant
           </span>
         </div>
       </div>

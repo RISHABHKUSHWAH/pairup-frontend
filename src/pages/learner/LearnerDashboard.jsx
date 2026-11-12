@@ -69,7 +69,7 @@ export default function LearnerDashboard() {
         try {
           const propPromises = openProbs.slice(0, 3).map((p) =>
             api.getProposals(p.id).then((props) =>
-              props.map((prop) => ({ ...prop, problem_title: p.title, problem_id: p.id }))
+              (Array.isArray(props) ? props : []).map((prop) => ({ ...prop, problem_title: p.title, problem_id: p.id }))
             ).catch(() => [])
           );
           const propResults = await Promise.all(propPromises);

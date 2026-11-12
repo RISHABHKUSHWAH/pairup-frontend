@@ -13,7 +13,6 @@ import {
   RefreshIcon,
   MailIcon,
   HelpCircleIcon,
-  MessageIcon,
   BarChartIcon,
   TrendingUpIcon,
   SlidersIcon,
@@ -54,7 +53,6 @@ export const ADMIN_CATEGORIES = {
     tabs: [
       { label: 'Mail Center', to: '/admin/mail', icon: <MailIcon size={15} /> },
       { label: 'Support Requests', to: '/admin/support', icon: <HelpCircleIcon size={15} /> },
-      { label: 'Direct Messages', to: '/chat', icon: <MessageIcon size={15} /> },
     ],
   },
   logs: {

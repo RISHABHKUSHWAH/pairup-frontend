@@ -346,7 +346,7 @@ export default function LearnerSettingsPage() {
               <label>Currency Display</label>
               <select value={currency} onChange={(e) => { setCurrency(e.target.value); showSaveSuccess(); }}>
                 <option value="INR">INR (₹ Indian Rupee)</option>
-                <option value="USD">USD ($ United States Dollar)</option>
+                <option value="USD">USD (₹ Converted INR)</option>
                 <option value="EUR">EUR (€ Euro)</option>
                 <option value="GBP">GBP (£ British Pound)</option>
               </select>

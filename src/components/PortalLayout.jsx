@@ -2,21 +2,48 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import { BellIcon, SunIcon, MoonIcon, ArrowLeftIcon, MenuIcon, CheckIcon } from './Icons';
 import { notificationsApi, learnerNotifications, mentorNotifications } from '../api/client';
 import { resolveNotificationLink } from '../utils';
 
 export default function PortalLayout({
   title,
-  portalType = 'learner',
+  portalType: explicitPortalType,
+  role,
   actions,
   showBack,
   backUrl,
   fullHeight = false,
+  hideFooter = false,
   bodyStyle = {},
   children,
 }) {
+  const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Smart resolution of portalType:
+  // 1. Explicit prop `portalType` or `role`
+  // 2. Inferred from current route path prefix
+  // 3. Inferred from authenticated user's role
+  // 4. Default fallback to 'learner'
+  const resolvedRole = explicitPortalType || role;
+  let portalType = 'learner';
+  if (resolvedRole) {
+    portalType = resolvedRole === 'superadmin' ? 'admin' : resolvedRole;
+  } else if (location.pathname.startsWith('/admin') || location.pathname.startsWith('/superadmin')) {
+    portalType = 'admin';
+  } else if (location.pathname.startsWith('/mentor')) {
+    portalType = 'mentor';
+  } else if (location.pathname.startsWith('/learner')) {
+    portalType = 'learner';
+  } else if (user?.role === 'admin' || user?.role === 'superadmin') {
+    portalType = 'admin';
+  } else if (user?.role === 'mentor') {
+    portalType = 'mentor';
+  }
   const [unreadCount, setUnreadCount] = useState(0);
   const [latestNotifs, setLatestNotifs] = useState([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -30,8 +57,6 @@ export default function PortalLayout({
     }
   });
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const navigate = useNavigate();
-  const location = useLocation();
 
   useEffect(() => {
     setMobileSidebarOpen(false);
@@ -437,6 +462,24 @@ export default function PortalLayout({
         <div className={`admin-body ${fullHeight ? 'admin-body--full-height' : ''}`} style={bodyStyle}>
           {children}
         </div>
+        {!fullHeight && !hideFooter && (
+          <footer className="portal-footer" role="contentinfo">
+            <div className="portal-footer-inner">
+              <div className="portal-footer-copy">
+                &copy; {new Date().getFullYear()} PairUp. All rights reserved.
+              </div>
+              <div className="portal-footer-links">
+                <Link to="/terms" className="portal-footer-link" title="Terms of Service">
+                  Terms
+                </Link>
+                <span className="portal-footer-dot" aria-hidden="true">&bull;</span>
+                <Link to="/privacy" className="portal-footer-link" title="Privacy Policy">
+                  Privacy
+                </Link>
+              </div>
+            </div>
+          </footer>
+        )}
       </main>
     </div>
   );

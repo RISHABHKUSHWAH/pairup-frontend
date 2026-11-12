@@ -60,7 +60,7 @@ export default function BecomeMentorPage() {
         {!user ? (
           <div style={{ maxWidth: '540px' }}>
             <div style={{ fontFamily: 'IBM Plex Mono', color: 'var(--accent)', fontSize: '12.5px', marginBottom: '8px' }}>
-              $ for developers
+              ₹ for developers
             </div>
             <h1>
               Become a <span className="accent">mentor</span>
@@ -83,7 +83,7 @@ export default function BecomeMentorPage() {
         ) : (
           <div style={{ maxWidth: '540px' }}>
             <div style={{ fontFamily: 'IBM Plex Mono', color: 'var(--accent)', fontSize: '12.5px', marginBottom: '8px' }}>
-              $ for developers
+              ₹ for developers
             </div>
             <h1>
               Become a <span className="accent">mentor</span>

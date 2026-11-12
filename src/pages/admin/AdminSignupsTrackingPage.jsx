@@ -176,7 +176,7 @@ export default function AdminSignupsTrackingPage() {
   }, [dailyTrends]);
 
   return (
-    <PortalLayout role="admin">
+    <PortalLayout portalType="admin" title="Signup & Activation Tracking">
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 20px' }}>
         {/* Category Navigation Bar */}
         <AdminCategoryNav category="users" />

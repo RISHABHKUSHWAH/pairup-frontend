@@ -43,7 +43,7 @@ import PairUpLogo from './PairUpLogo';
 import { useTour } from '../context/TourContext';
 
 export default function Sidebar({
-  portalType = 'learner',
+  portalType: rawPortalType = 'learner',
   unreadCount = 0,
   collapsed: controlledCollapsed,
   onToggle,
@@ -54,8 +54,19 @@ export default function Sidebar({
   const { toast } = useToast();
   const { startTour } = useTour();
   const navigate = useNavigate();
-
   const location = useLocation();
+
+  // Defensively resolve effective portalType:
+  let portalType = rawPortalType;
+  if (!portalType || portalType === 'learner') {
+    if (location.pathname.startsWith('/admin') || location.pathname.startsWith('/superadmin')) {
+      portalType = 'admin';
+    } else if (location.pathname.startsWith('/mentor')) {
+      portalType = 'mentor';
+    } else if (user?.role === 'admin' || user?.role === 'superadmin') {
+      portalType = 'admin';
+    }
+  }
 
   const [onlineLoading, setOnlineLoading] = useState(false);
 
@@ -268,7 +279,6 @@ export default function Sidebar({
       subitems: [
         { label: 'Mail Center', to: '/admin/mail' },
         { label: 'Support Requests', to: '/admin/support' },
-        { label: 'Direct Messages', to: '/chat' },
       ],
     },
     { to: '/admin/reviews', label: 'Reviews', icon: <StarIcon size={20} /> },
@@ -817,16 +827,15 @@ export default function Sidebar({
             <div className="admin-user-name" title={user?.name || 'User'}>
               {user?.name || 'User'}
             </div>
-            <div className="admin-user-role" style={{ display: 'flex', alignItems: 'center' }}>
+            <div className="admin-user-role" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span>{user?.role || ''}</span>
               {(portalType === 'mentor' || user?.role === 'mentor') && (
                 <span
-                  className={`admin-user-avail-status ${isOnline ? 'online' : 'offline'}`}
-                  title={isOnline ? 'Available for sessions (Online)' : 'Offline'}
-                >
-                  <span className={`avail-dot ${isOnline ? 'online' : 'offline'}`}></span>
-                  {isOnline ? 'Available' : 'Offline'}
-                </span>
+                  className={`avail-dot ${isOnline ? 'online' : 'offline'}`}
+                  data-tooltip={isOnline ? 'Available for sessions (Online)' : 'Offline'}
+                  data-tooltip-pos="top"
+                  aria-label={isOnline ? 'Available for sessions (Online)' : 'Offline'}
+                />
               )}
             </div>
           </div>

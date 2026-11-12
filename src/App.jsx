@@ -12,6 +12,7 @@ import {
   ContactPage,
   PrivacyPage,
   TermsPage,
+  LegalPage,
   ActivateAccountPage,
 } from './pages/public';
 
@@ -77,7 +78,8 @@ import {
   AdminSupportRequestsPage,
   AdminMailPage,
   AdminSignupsTrackingPage,
-  AdminAccountTrackingPage,
+  AdminAccountTrackingPage,
+
 
   SuperadminPage,
 } from './pages/admin';
@@ -102,8 +104,23 @@ export default function App() {
       <Route path="/activate" element={<ActivateAccountPage />} />
       <Route path="/help" element={<HelpPage />} />
       <Route path="/contact" element={<ContactPage />} />
-      <Route path="/privacy" element={<PrivacyPage />} />
-      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<LegalPage slug="privacy" />} />
+      <Route path="/terms" element={<LegalPage slug="terms" />} />
+      <Route path="/legal" element={<LegalPage />} />
+      <Route path="/legal/:slug" element={<LegalPage />} />
+      <Route path="/cookie-policy" element={<LegalPage slug="cookie-policy" />} />
+      <Route path="/cookies" element={<LegalPage slug="cookie-policy" />} />
+      <Route path="/consent-preferences" element={<LegalPage slug="consent-preferences" />} />
+      <Route path="/grievance-officer" element={<LegalPage slug="grievance-officer" />} />
+      <Route path="/cancellation-refund" element={<LegalPage slug="cancellation-refund" />} />
+      <Route path="/cancellation-refund-policy" element={<LegalPage slug="cancellation-refund" />} />
+      <Route path="/refunds" element={<LegalPage slug="cancellation-refund" />} />
+      <Route path="/payments-gst" element={<LegalPage slug="payments-gst" />} />
+      <Route path="/platform-fees" element={<LegalPage slug="payments-gst" />} />
+      <Route path="/children-privacy" element={<LegalPage slug="children-privacy" />} />
+      <Route path="/data-security" element={<LegalPage slug="data-security" />} />
+      <Route path="/data-deletion" element={<LegalPage slug="data-deletion" />} />
+      <Route path="/data-retention" element={<LegalPage slug="data-retention" />} />
 
       {/* Interactions */}
       <Route
@@ -429,14 +446,22 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/admin/account-tracking"
-        element={
-          <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
-            <AdminAccountTrackingPage />
-          </ProtectedRoute>
-        }
-      />
+      <Route
+
+        path="/admin/account-tracking"
+
+        element={
+
+          <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
+
+            <AdminAccountTrackingPage />
+
+          </ProtectedRoute>
+
+        }
+
+      />
+
       <Route
         path="/admin/mentors"
         element={
@@ -535,11 +560,7 @@ export default function App() {
       />
       <Route
         path="/admin/messages"
-        element={
-          <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
-            <ChatPage />
-          </ProtectedRoute>
-        }
+        element={<Navigate to="/admin/mail" replace />}
       />
 
       <Route

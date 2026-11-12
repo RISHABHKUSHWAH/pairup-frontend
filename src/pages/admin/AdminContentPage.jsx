@@ -5,6 +5,7 @@ import Modal from '../../components/Modal';
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { LEGAL_POLICIES, POLICY_LIST } from '../../data/legalPolicies';
 
 const CMS_TABS = [
   { id: 'homepage', label: 'Homepage Content' },
@@ -131,19 +132,16 @@ export default function AdminContentPage() {
     setPolicyLoading(true);
     try {
       const data = await api.getPage(slug);
-      setPolicyTitle(data.title || (slug === 'privacy' ? 'Privacy Policy' : slug === 'terms' ? 'Terms of Service' : 'Refund Policy'));
+      setPolicyTitle(data.title || LEGAL_POLICIES[slug]?.title || 'Legal Policy');
       setPolicyHtml(data.content_html || '');
     } catch {
-      // Fallback
-      if (slug === 'privacy') {
-        setPolicyTitle('Privacy Policy');
-        setPolicyHtml('<h2>Privacy Policy</h2><p>PairUp Technologies Inc. is committed to protecting developer privacy and data confidentiality.</p>');
-      } else if (slug === 'terms') {
-        setPolicyTitle('Terms of Service');
-        setPolicyHtml('<h2>Terms of Service</h2><p>By accessing or using the PairUp platform, you agree to these legal terms of service.</p>');
+      const def = LEGAL_POLICIES[slug];
+      if (def) {
+        setPolicyTitle(def.title);
+        setPolicyHtml(`<h2>${def.title}</h2><p>${def.summary}</p>`);
       } else {
-        setPolicyTitle('Refund & Escrow Policy');
-        setPolicyHtml('<h2>Refund & Escrow Policy</h2><p>Payments are deposited into escrow and released upon learner session confirmation.</p>');
+        setPolicyTitle('Legal Policy');
+        setPolicyHtml('');
       }
     } finally {
       setPolicyLoading(false);
@@ -547,28 +545,31 @@ export default function AdminContentPage() {
       {/* TAB 7: PLATFORM POLICIES (HTML CMS) */}
       {activeTab === 'policies' && (
         <div style={{ maxWidth: '820px' }}>
-          <div className="admin-filter-tabs" style={{ marginBottom: '16px' }}>
-            <button
-              type="button"
-              className={`admin-filter-tab ${policySlug === 'privacy' ? 'active' : ''}`}
-              onClick={() => setPolicySlug('privacy')}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '18px', flexWrap: 'wrap', padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--grid)', borderRadius: '8px' }}>
+            <label style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink)' }}>Select Policy to Edit (11 Available):</label>
+            <select
+              value={policySlug}
+              onChange={(e) => setPolicySlug(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                fontSize: '13px',
+                borderRadius: '6px',
+                border: '1px solid var(--grid)',
+                background: 'var(--bg)',
+                color: 'var(--ink)',
+                minWidth: '320px',
+                fontWeight: 500
+              }}
             >
-              Privacy Policy
-            </button>
-            <button
-              type="button"
-              className={`admin-filter-tab ${policySlug === 'terms' ? 'active' : ''}`}
-              onClick={() => setPolicySlug('terms')}
-            >
-              Terms of Service
-            </button>
-            <button
-              type="button"
-              className={`admin-filter-tab ${policySlug === 'refunds' ? 'active' : ''}`}
-              onClick={() => setPolicySlug('refunds')}
-            >
-              Refund Policy
-            </button>
+              {POLICY_LIST.map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.title} ({p.category})
+                </option>
+              ))}
+            </select>
+            <span style={{ fontSize: '12px', color: 'var(--ink-faint)', fontFamily: 'IBM Plex Mono, monospace' }}>
+              Route: /legal/{policySlug}
+            </span>
           </div>
 
           <form onSubmit={handleSavePolicy} className="panel" style={{ margin: 0 }}>
@@ -599,7 +600,7 @@ export default function AdminContentPage() {
                   <button type="submit" className="btn btn-primary" disabled={saving}>
                     {saving ? 'Publishing...' : 'Save & Publish Policy'}
                   </button>
-                  <Link to={`/${policySlug}`} target="_blank" className="btn btn-ghost">
+                  <Link to={`/legal/${policySlug}`} target="_blank" className="btn btn-ghost">
                     Preview Live Policy ↗
                   </Link>
                 </div>

@@ -37,6 +37,16 @@ export const learnerProfile = {
         if (defaultUser?.name && (!saved.name || saved.name === 'Jane Doe')) saved.name = defaultUser.name;
         if (defaultUser?.email && (!saved.email || saved.email === 'learner@example.com')) saved.email = defaultUser.email;
         if (saved.avatar === undefined && defaultUser?.avatar) saved.avatar = defaultUser.avatar;
+        const isSarahSaved =
+          defaultUser?.email === 'sarah@example.com' ||
+          (defaultUser?.name && defaultUser.name.toLowerCase().includes('sarah')) ||
+          String(defaultUser?.id) === '7' ||
+          String(defaultUser?.id) === '1' ||
+          String(defaultUser?.id) === '2';
+        if (saved.totalSpend === undefined) saved.totalSpend = isSarahSaved ? 53571 : 0;
+        if (saved.totalSessions === undefined) saved.totalSessions = isSarahSaved ? 70 : 0;
+        if (saved.totalProblems === undefined) saved.totalProblems = isSarahSaved ? 7 : 0;
+        if (saved.totalContracts === undefined) saved.totalContracts = isSarahSaved ? 21 : 0;
         return saved;
       }
     } catch {}
@@ -45,6 +55,7 @@ export const learnerProfile = {
     const isSarah =
       defaultUser?.email === 'sarah@example.com' ||
       (defaultUser?.name && defaultUser.name.toLowerCase().includes('sarah')) ||
+      String(defaultUser?.id) === '7' ||
       String(defaultUser?.id) === '1' ||
       String(defaultUser?.id) === '2';
 
@@ -69,6 +80,10 @@ export const learnerProfile = {
         portfolioUrl: 'https://github.com/sarahconnor',
         learningStyle: 'Hands-on Coding & Pair Programming',
         preferredLanguage: 'English',
+        totalSpend: 53571,
+        totalSessions: 70,
+        totalProblems: 7,
+        totalContracts: 21,
       };
     }
 
@@ -93,6 +108,10 @@ export const learnerProfile = {
       portfolioUrl: '',
       learningStyle: 'Hands-on Coding & Pair Programming',
       preferredLanguage: 'English',
+      totalSpend: 0,
+      totalSessions: 0,
+      totalProblems: 0,
+      totalContracts: 0,
     };
   },
   saveProfile: (data, userId) => {

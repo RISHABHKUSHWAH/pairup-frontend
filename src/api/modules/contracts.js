@@ -26,6 +26,12 @@ export const contractsApi = {
       body: data,
     }),
 
+  acceptContract: (id) =>
+    apiFetch(`/api/contracts/${id}/accept`, {
+      method: 'POST',
+      auth: true,
+    }),
+
   completeContractByMentor: (id) =>
     apiFetch(`/api/contracts/${id}/complete-by-mentor`, {
       method: 'POST',

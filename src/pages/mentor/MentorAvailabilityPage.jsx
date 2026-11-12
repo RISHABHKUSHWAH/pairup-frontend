@@ -32,7 +32,6 @@ export default function MentorAvailabilityPage() {
   const [durations, setDurations] = useState([30, 60, 90]);
   const [bufferTime, setBufferTimeState] = useState(15);
   const [blockedDates, setBlockedDates] = useState([]);
-  const [calendarSync, setCalendarSyncState] = useState({ google: true, apple: false });
 
   // Add block date form
   const [newBlockDate, setNewBlockDate] = useState('');
@@ -89,7 +88,6 @@ export default function MentorAvailabilityPage() {
     loadAvail();
     setBlockedDates(mentorCalendarSettings.getBlockedDates());
     setBufferTimeState(mentorCalendarSettings.getBufferTime());
-    setCalendarSyncState(mentorCalendarSettings.getCalendarSync());
     setTimezone(mentorCalendarSettings.getTimezone());
     setDurations(mentorCalendarSettings.getDurations());
   }, [user]);
@@ -202,7 +200,6 @@ export default function MentorAvailabilityPage() {
 
       await api.setAvailability(slots);
       mentorCalendarSettings.setBufferTime(bufferTime);
-      mentorCalendarSettings.setCalendarSync(calendarSync);
       mentorCalendarSettings.setTimezone(timezone);
       mentorCalendarSettings.setDurations(durations);
 
@@ -314,12 +311,15 @@ export default function MentorAvailabilityPage() {
                         type="time"
                         value={day.start_time}
                         onChange={(e) => handleTimeChange(idx, 'start_time', e.target.value)}
+                        className="input"
                         style={{
                           padding: '6px 10px',
                           borderRadius: '6px',
                           border: '1px solid var(--border)',
                           background: 'var(--panel-bg)',
+                          color: 'var(--ink)',
                           fontSize: '13px',
+                          fontWeight: 500,
                         }}
                       />
                       <span className="sub" style={{ margin: 0, fontSize: '12px' }}>to</span>
@@ -327,12 +327,15 @@ export default function MentorAvailabilityPage() {
                         type="time"
                         value={day.end_time}
                         onChange={(e) => handleTimeChange(idx, 'end_time', e.target.value)}
+                        className="input"
                         style={{
                           padding: '6px 10px',
                           borderRadius: '6px',
                           border: '1px solid var(--border)',
                           background: 'var(--panel-bg)',
+                          color: 'var(--ink)',
                           fontSize: '13px',
+                          fontWeight: 500,
                         }}
                       />
                     </div>
@@ -437,15 +440,27 @@ export default function MentorAvailabilityPage() {
           <form onSubmit={handleAddBlockedDate} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: '10px', marginBottom: '16px' }}>
             <input
               type="date"
+              className="input"
               value={newBlockDate}
               onChange={(e) => setNewBlockDate(e.target.value)}
+              style={{
+                color: 'var(--ink)',
+                background: 'var(--panel-bg)',
+                border: '1px solid var(--border)',
+              }}
               required
             />
             <input
               type="text"
+              className="input"
               placeholder="Reason (e.g. Vacation, Conference, Holiday)"
               value={newBlockReason}
               onChange={(e) => setNewBlockReason(e.target.value)}
+              style={{
+                color: 'var(--ink)',
+                background: 'var(--panel-bg)',
+                border: '1px solid var(--border)',
+              }}
             />
             <button type="submit" className="btn btn-secondary" style={{ fontSize: '12.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
               <PlusIcon size={14} /> Block Date
@@ -487,49 +502,6 @@ export default function MentorAvailabilityPage() {
               ))}
             </div>
           )}
-        </div>
-
-        {/* External Calendar Sync */}
-        <div className="panel" style={{ margin: 0 }}>
-          <div className="section-label" style={{ marginTop: 0 }}>External Calendar Synchronization</div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginTop: '10px' }}>
-            <div style={{ padding: '14px', background: 'var(--card-bg, #1a1a24)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <CalendarIcon size={20} />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>Google Calendar</div>
-                  <div className="sub" style={{ fontSize: '11px' }}>2-way real-time calendar sync</div>
-                </div>
-              </div>
-              <button
-                type="button"
-                className={`btn ${calendarSync.google ? 'btn-ghost' : 'btn-secondary'}`}
-                style={{ fontSize: '12px' }}
-                onClick={() => setCalendarSyncState((s) => ({ ...s, google: !s.google }))}
-              >
-                {calendarSync.google ? 'Connected' : 'Connect'}
-              </button>
-            </div>
-
-            <div style={{ padding: '14px', background: 'var(--card-bg, #1a1a24)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <CalendarIcon size={20} />
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>Apple Calendar (iCal)</div>
-                  <div className="sub" style={{ fontSize: '11px' }}>Feed export URL subscription</div>
-                </div>
-              </div>
-              <button
-                type="button"
-                className={`btn ${calendarSync.apple ? 'btn-ghost' : 'btn-secondary'}`}
-                style={{ fontSize: '12px' }}
-                onClick={() => setCalendarSyncState((s) => ({ ...s, apple: !s.apple }))}
-              >
-                {calendarSync.apple ? 'Subscribed' : 'Subscribe'}
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Save button */}

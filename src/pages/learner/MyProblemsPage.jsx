@@ -55,15 +55,16 @@ export default function MyProblemsPage() {
     setLoading(true);
     try {
       const data = await api.getMyProblems();
-      setProblems(data);
+      const problemList = Array.isArray(data) ? data : [];
+      setProblems(problemList);
 
       // Load proposal counts for problems
       const counts = {};
       await Promise.all(
-        data.map(async (p) => {
+        problemList.map(async (p) => {
           try {
             const props = await api.getProposals(p.id);
-            counts[p.id] = props.length;
+            counts[p.id] = Array.isArray(props) ? props.length : 0;
           } catch {
             counts[p.id] = 0;
           }

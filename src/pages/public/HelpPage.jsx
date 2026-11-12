@@ -322,7 +322,7 @@ export default function HelpPage() {
         <div>
           <h4>1. Setting Your Hourly Rate</h4>
           <p>
-            Mentors have 100% freedom to set their hourly rate (e.g. ₹800/hr to ₹6,000+/hr, or international USD equivalent). Rates are calculated pro-rata per minute during sessions.
+            Mentors have 100% freedom to set their hourly rate (e.g. ₹800/hr to ₹6,000+/hr). Rates are calculated pro-rata per minute during sessions.
           </p>
           <h4>2. The "Online" Status Toggle (Instant Pairing)</h4>
           <p>
@@ -726,7 +726,7 @@ export default function HelpPage() {
           <div className="container" style={{ maxWidth: '980px', textAlign: 'center' }}>
             <div className="hero-terminal-pill" style={{ margin: '0 auto 16px' }}>
               <span className="terminal-dot"></span>
-              <span className="terminal-text">$ pairup --help-center &amp; user-guide</span>
+              <span className="terminal-text">₹ pairup --help-center &amp; user-guide</span>
             </div>
 
             <h1 className="help-hero-title">
@@ -960,7 +960,7 @@ export default function HelpPage() {
         {/* COMPARISON / UPWORK WORKFLOW CHEAT SHEET */}
         <section className="help-cheatsheet-section">
           <div className="container" style={{ maxWidth: '1080px' }}>
-            <div className="section-eyebrow">$ workflow comparison</div>
+            <div className="section-eyebrow">₹ workflow comparison</div>
             <h2 className="section-heading">PairUp vs Upwork: Feature &amp; Workflow Map</h2>
             <p className="section-sub">
               Familiar with Upwork? Here is how PairUp maps the best of Upwork to live, real-time developer pair debugging.

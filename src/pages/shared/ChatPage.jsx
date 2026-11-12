@@ -3,7 +3,7 @@ import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
-import { api, initials, API_BASE } from '../../api/client';
+import { api, initials, resolveImageUrl, API_BASE } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import {
   CalendarIcon,
@@ -105,6 +105,14 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+
+  useEffect(() => {
+    if (isAdmin) {
+      toast.warning('Direct messaging is restricted to learners and mentors. Please use Mail Center or Support Tickets.');
+      navigate('/admin/mail', { replace: true });
+    }
+  }, [isAdmin, navigate, toast]);
 
   const rawWith = searchParams.get('with');
   const otherId = (rawWith && rawWith !== 'undefined' && rawWith !== 'null' && rawWith !== 'NaN') ? rawWith : null;
@@ -306,6 +314,7 @@ export default function ChatPage() {
     const uname = c.name || c.other_name || 'User';
     const urole = c.role || c.other_role || 'learner';
     const isOnline = Boolean(c.online || c.is_online || c.online_status);
+    const uavatar = (c.photo_url || (typeof c.avatar === 'string' && (c.avatar.includes('/') || c.avatar.startsWith('http') || c.avatar.startsWith('data:')) ? c.avatar : null)) || null;
     return {
       ...c,
       user_id: uid,
@@ -314,6 +323,8 @@ export default function ChatPage() {
       other_name: uname,
       role: urole,
       other_role: urole,
+      avatar: uavatar,
+      photo_url: uavatar,
       online: isOnline,
       is_online: isOnline,
       online_status: isOnline ? 1 : 0,
@@ -410,6 +421,11 @@ export default function ChatPage() {
 
   // Load conversations list
   useEffect(() => {
+    if (isAdmin) {
+      setLoadingConv(false);
+      return;
+    }
+
     async function loadConversations() {
       try {
         const data = await api.getConversations();
@@ -470,6 +486,8 @@ export default function ChatPage() {
             role: 'mentor',
             title: m.title || 'Technical Mentor',
             hourly_rate: m.hourly_rate !== undefined && m.hourly_rate !== null ? Number(m.hourly_rate) : undefined,
+            avatar: m.photo_url || m.avatar || null,
+            photo_url: m.photo_url || m.avatar || null,
           });
         } else {
           setPartnerProfile(null);
@@ -496,6 +514,12 @@ export default function ChatPage() {
     activeConvo?.other_role ||
     (partnerProfile && String(partnerProfile.id) === String(otherId) ? partnerProfile.role : null) ||
     'user';
+
+  const otherAvatar =
+    (partnerProfile && String(partnerProfile.id) === String(otherId) ? (partnerProfile.photo_url || partnerProfile.avatar) : null) ||
+    activeConvo?.photo_url ||
+    (typeof activeConvo?.avatar === 'string' && (activeConvo.avatar.includes('/') || activeConvo.avatar.startsWith('http') || activeConvo.avatar.startsWith('data:')) ? activeConvo.avatar : null) ||
+    null;
 
   const isPlatformAdmin = otherRole === 'admin' || otherRole === 'superadmin' || activeConvo?.role === 'admin' || activeConvo?.role === 'superadmin';
   const isPartnerOnline = Boolean(activeConvo?.online || activeConvo?.is_online || activeConvo?.online_status || partnerProfile?.online);
@@ -560,6 +584,7 @@ export default function ChatPage() {
 
   // Poll messages every 3.5 seconds when a conversation partner is selected
   useEffect(() => {
+    if (isAdmin) return;
     setMessages([]);
     if (!otherId || isNaN(Number(otherId))) return;
 
@@ -1544,6 +1569,36 @@ export default function ChatPage() {
     );
   };
 
+  if (isAdmin) {
+    return (
+      <PortalLayout title="Direct Messages" portalType="admin" showBack={true}>
+        <div className="container" style={{ padding: '60px 20px', textAlign: 'center', maxWidth: 540, margin: '40px auto' }}>
+          <div style={{
+            background: 'var(--surface, #ffffff)',
+            borderRadius: 16,
+            padding: '36px 28px',
+            border: '1px solid var(--border, #E2E8F0)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.06)'
+          }}>
+            <ShieldIcon size={48} style={{ color: 'var(--brand, #0284C7)', marginBottom: 16 }} />
+            <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px', color: 'var(--text, #0F172A)' }}>Direct Messaging Restricted</h2>
+            <p style={{ color: 'var(--text-muted, #64748B)', fontSize: '14px', lineHeight: 1.6, marginBottom: '24px' }}>
+              Direct chat is reserved exclusively between learners and mentors. Platform administrators communicate with users through the Mail Center or official Support Tickets.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <Link to="/admin/mail" className="btn btn-primary" style={{ padding: '10px 20px', fontSize: '13px' }}>
+                Open Mail Center
+              </Link>
+              <Link to="/admin/support" className="btn btn-ghost" style={{ padding: '10px 20px', fontSize: '13px' }}>
+                Support Requests
+              </Link>
+            </div>
+          </div>
+        </div>
+      </PortalLayout>
+    );
+  }
+
   return (
     <PortalLayout title="Messages" portalType={user?.role || 'learner'} showBack={true} fullHeight={true}>
         <div
@@ -1700,6 +1755,7 @@ export default function ChatPage() {
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
+                            overflow: 'hidden',
                             background: c.contract_id
                               ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)'
                               : undefined,
@@ -1707,7 +1763,26 @@ export default function ChatPage() {
                             border: c.contract_id ? '1px solid rgba(99, 102, 241, 0.3)' : undefined,
                           }}
                         >
-                          {c.contract_id ? <DocumentIcon size={18} /> : initials(displayName)}
+                          {c.contract_id ? (
+                            <DocumentIcon size={18} />
+                          ) : (c.photo_url || c.avatar) && typeof (c.photo_url || c.avatar) === 'string' && ((c.photo_url || c.avatar).includes('/') || (c.photo_url || c.avatar).startsWith('http') || (c.photo_url || c.avatar).startsWith('data:')) ? (
+                            <img
+                              src={resolveImageUrl(c.photo_url || c.avatar)}
+                              alt={displayName}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                if (e.currentTarget.nextElementSibling) {
+                                  e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                                }
+                              }}
+                            />
+                          ) : null}
+                          {!c.contract_id && (
+                            <span style={{ display: (c.photo_url || c.avatar) && typeof (c.photo_url || c.avatar) === 'string' && ((c.photo_url || c.avatar).includes('/') || (c.photo_url || c.avatar).startsWith('http') || (c.photo_url || c.avatar).startsWith('data:')) ? 'none' : 'inline-block' }}>
+                              {initials(displayName)}
+                            </span>
+                          )}
                         </div>
                         <span
                           title={c.is_online ? 'Online' : 'Offline'}
@@ -1826,6 +1901,7 @@ export default function ChatPage() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
+                        overflow: 'hidden',
                         background: searchContractId
                           ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)'
                           : undefined,
@@ -1833,7 +1909,26 @@ export default function ChatPage() {
                         border: searchContractId ? '1px solid rgba(99, 102, 241, 0.3)' : undefined,
                       }}
                     >
-                      {searchContractId ? <DocumentIcon size={20} /> : initials(otherName)}
+                      {searchContractId ? (
+                        <DocumentIcon size={20} />
+                      ) : otherAvatar ? (
+                        <img
+                          src={resolveImageUrl(otherAvatar)}
+                          alt={otherName}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            if (e.currentTarget.nextElementSibling) {
+                              e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                            }
+                          }}
+                        />
+                      ) : null}
+                      {!searchContractId && (
+                        <span style={{ display: otherAvatar ? 'none' : 'inline-block' }}>
+                          {initials(otherName)}
+                        </span>
+                      )}
                     </div>
                     <span
                       title={isPartnerOnline ? 'Online' : 'Offline'}
@@ -2409,29 +2504,53 @@ export default function ChatPage() {
                               </button>
                             </div>
 
-                            <div
-                              className="avatar"
-                              style={{
-                                width: '36px',
-                                height: '36px',
-                                fontSize: '12.5px',
-                                flexShrink: 0,
-                                background: isMine
-                                  ? 'var(--accent)'
-                                  : isAdminMsg
-                                  ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
-                                  : 'var(--surface-hover, #232733)',
-                                color: '#fff',
-                                fontWeight: 700,
-                                borderRadius: '8px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                marginTop: '2px',
-                              }}
-                            >
-                              {initials(senderDisplayName)}
-                            </div>
+                            {(() => {
+                              const msgAvatar = isMine
+                                ? (user?.avatar || user?.photo_url || null)
+                                : (m.sender_photo || m.sender_avatar || (String(m.sender_id) === String(otherId) ? otherAvatar : null));
+
+                              return (
+                                <div
+                                  className="avatar"
+                                  style={{
+                                    width: '36px',
+                                    height: '36px',
+                                    fontSize: '12.5px',
+                                    flexShrink: 0,
+                                    background: isMine
+                                      ? 'var(--accent)'
+                                      : isAdminMsg
+                                      ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+                                      : 'var(--surface-hover, #232733)',
+                                    color: '#fff',
+                                    fontWeight: 700,
+                                    borderRadius: '8px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    overflow: 'hidden',
+                                    marginTop: '2px',
+                                  }}
+                                >
+                                  {msgAvatar ? (
+                                    <img
+                                      src={resolveImageUrl(msgAvatar)}
+                                      alt={senderDisplayName}
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                      onError={(e) => {
+                                        e.currentTarget.style.display = 'none';
+                                        if (e.currentTarget.nextElementSibling) {
+                                          e.currentTarget.nextElementSibling.style.display = 'inline-block';
+                                        }
+                                      }}
+                                    />
+                                  ) : null}
+                                  <span style={{ display: msgAvatar ? 'none' : 'inline-block' }}>
+                                    {initials(senderDisplayName)}
+                                  </span>
+                                </div>
+                              );
+                            })()}
 
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
