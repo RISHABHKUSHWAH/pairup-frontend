@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useParams, useNavigate, Link } from 'react-router-dom';
-import { Room, RoomEvent, Track, VideoPresets } from 'livekit-client';
+import AgoraRTC from 'agora-rtc-sdk-ng';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import { bookingApi, initials, formatCurrency } from '../../api/client';
@@ -21,14 +21,27 @@ import {
 } from '../../components/Icons';
 import { useToast } from '../../context';
 
-// Public free Google STUN servers for WebRTC P2P NAT traversal
+// Free Google STUN + Open Relay TURN servers for fallback direct NAT traversal
 const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
 };
 
@@ -52,15 +65,21 @@ export default function SessionRoomPage() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [mediaPermissionDenied, setMediaPermissionDenied] = useState(false);
 
-  // WebRTC & LiveKit Live Video Connection states
+  // Agora Live Video Connection states
   const [connectionStatus, setConnectionStatus] = useState('initializing'); // 'initializing' | 'waiting' | 'connecting' | 'connected'
-  const [connectionMode, setConnectionMode] = useState('livekit'); // 'livekit' | 'p2p'
+  const [connectionMode, setConnectionMode] = useState('agora'); // 'agora' | 'p2p'
   const [hasRemoteVideo, setHasRemoteVideo] = useState(false);
   const [isRemoteCamOff, setIsRemoteCamOff] = useState(false);
   const [isRemoteMuted, setIsRemoteMuted] = useState(false);
   const [isRemoteScreenSharing, setIsRemoteScreenSharing] = useState(false);
   const [testLoopbackActive, setTestLoopbackActive] = useState(false);
-  const roomRef = useRef(null);
+
+  // Agora Refs
+  const agoraClientRef = useRef(null);
+  const localAudioTrackRef = useRef(null);
+  const localVideoTrackRef = useRef(null);
+  const localScreenTrackRef = useRef(null);
+  const remoteUserRef = useRef(null);
 
   // Active sidebar tab: 'notes' | 'chat' | 'files'
   const [activeTab, setActiveTab] = useState('notes');
@@ -88,19 +107,70 @@ export default function SessionRoomPage() {
   const [actionItems, setActionItems] = useState('');
   const [completing, setCompleting] = useState(false);
 
-  // Video & Stream DOM Refs
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const screenVideoRef = useRef(null);
+  // Video & Stream DOM Container Refs (Agora attaches to DOM containers)
+  const localVideoContainerRef = useRef(null);
+  const remoteVideoContainerRef = useRef(null);
+  const screenVideoContainerRef = useRef(null);
   const chatBottomRef = useRef(null);
 
-  // WebRTC Core Refs
+  // WebRTC Fallback Core Refs
   const localStreamRef = useRef(null);
-  const screenStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const pendingIceCandidatesRef = useRef([]);
   const peerConnectionRef = useRef(null);
   const lastSignalIdRef = useRef(0);
   const signalingIntervalRef = useRef(null);
   const isInitiatorRef = useRef(false);
+
+  // Helper callback ref to ensure remote video plays promptly when DOM container appears
+  const attachRemoteContainer = (el) => {
+    if (!el) return;
+    remoteVideoContainerRef.current = el;
+
+    if (remoteUserRef.current?.videoTrack) {
+      try {
+        remoteUserRef.current.videoTrack.play(el);
+      } catch (e) {
+        console.warn('Could not play Agora remote video:', e);
+      }
+    } else if (remoteStreamRef.current) {
+      const vid = el.querySelector('video') || document.createElement('video');
+      vid.style.width = '100%';
+      vid.style.height = '100%';
+      vid.style.objectFit = 'cover';
+      vid.autoplay = true;
+      vid.playsInline = true;
+      if (vid.srcObject !== remoteStreamRef.current) {
+        vid.srcObject = remoteStreamRef.current;
+      }
+      if (!el.contains(vid)) el.appendChild(vid);
+      vid.play().catch(() => {});
+    }
+  };
+
+  const attachLocalContainer = (el) => {
+    if (!el) return;
+    localVideoContainerRef.current = el;
+    if (localVideoTrackRef.current && !isCamOff) {
+      try {
+        localVideoTrackRef.current.play(el);
+      } catch (e) {
+        console.warn('Could not play Agora local video:', e);
+      }
+    }
+  };
+
+  const attachScreenContainer = (el) => {
+    if (!el) return;
+    screenVideoContainerRef.current = el;
+    if (localScreenTrackRef.current) {
+      try {
+        localScreenTrackRef.current.play(el);
+      } catch (e) {
+        console.warn('Could not play Agora screen share:', e);
+      }
+    }
+  };
 
   // 1. Initialize session metadata
   useEffect(() => {
@@ -113,7 +183,7 @@ export default function SessionRoomPage() {
     async function initSession() {
       try {
         const [tokenRes, notesRes, filesRes, summaryRes] = await Promise.all([
-          bookingApi.getLiveKitToken(bookingId),
+          bookingApi.getAgoraToken(bookingId),
           bookingApi.getNotes(bookingId).catch(() => ({ notes: '' })),
           bookingApi.getSessionFiles(bookingId).catch(() => []),
           bookingApi.getSessionSummary(bookingId).catch(() => ({ summary_text: '', action_items: '' })),
@@ -144,7 +214,6 @@ export default function SessionRoomPage() {
         setSummaryText(summaryRes.summary_text || '');
         setActionItems(summaryRes.action_items || '');
 
-        // Learners initiate WebRTC handshake by default
         isInitiatorRef.current = !tokenRes.is_mentor;
 
         setChatMessages([
@@ -152,7 +221,7 @@ export default function SessionRoomPage() {
             id: 1,
             sender: 'PairUp System',
             isSystem: true,
-            text: `WebRTC Live Room "${tokenRes.room_name}" established. Real-time P2P video, audio, screen share, and data channel ready.`,
+            text: `Agora RTC Live Room "${tokenRes.channel_name || tokenRes.room_name}" established over Agora SD-RTN. In-call video, audio, screen share, and collaboration active.`,
             time: 'Just now',
           },
         ]);
@@ -166,361 +235,264 @@ export default function SessionRoomPage() {
     initSession();
   }, [bookingId]);
 
-  // 2. Initialize LiveKit Room & Local Media
+  // 2. Initialize Agora RTC Client and Local Tracks
   useEffect(() => {
     let active = true;
 
-    async function initLiveKitAndMedia() {
-      // 1. First get user local media stream preview
+    async function initAgora() {
+      if (typeof window !== 'undefined' && window.isSecureContext === false && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        toast.warning('Browser camera/microphone requires HTTPS on remote devices. If video does not start, ensure you are accessing via HTTPS.');
+      }
+
       try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 1280, max: 1920 },
-              height: { ideal: 720, max: 1080 },
-              frameRate: { ideal: 30 },
-            },
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-          });
+        setConnectionStatus('connecting');
+
+        // Create Agora RTC client
+        const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+        agoraClientRef.current = client;
+
+        // Register Agora Event Listeners
+        client.on('user-published', async (remoteUser, mediaType) => {
+          await client.subscribe(remoteUser, mediaType);
+          console.log('>>> Agora user-published:', remoteUser.uid, mediaType);
+
+          if (mediaType === 'video') {
+            remoteUserRef.current = remoteUser;
+            setHasRemoteVideo(true);
+            setIsRemoteCamOff(false);
+            setConnectionStatus('connected');
+            setTimeout(() => {
+              if (remoteVideoContainerRef.current && remoteUser.videoTrack) {
+                remoteUser.videoTrack.play(remoteVideoContainerRef.current);
+              }
+            }, 50);
+          }
+          if (mediaType === 'audio') {
+            remoteUser.audioTrack?.play();
+            setIsRemoteMuted(false);
+          }
+        });
+
+        client.on('user-unpublished', (remoteUser, mediaType) => {
+          console.log('>>> Agora user-unpublished:', remoteUser.uid, mediaType);
+          if (mediaType === 'video') {
+            setHasRemoteVideo(false);
+            setIsRemoteCamOff(true);
+          }
+          if (mediaType === 'audio') {
+            setIsRemoteMuted(true);
+          }
+        });
+
+        client.on('user-joined', (remoteUser) => {
+          console.log('>>> Agora user-joined:', remoteUser.uid);
+          setConnectionStatus('connected');
+          toast.info(`${sessionData?.other_name || 'Counterpart'} joined the session room`);
+        });
+
+        client.on('user-left', (remoteUser) => {
+          console.log('>>> Agora user-left:', remoteUser.uid);
+          setHasRemoteVideo(false);
+          setConnectionStatus('waiting');
+          toast.info(`${sessionData?.other_name || 'Participant'} left the call`);
+        });
+
+        // Create local microphone & camera tracks
+        try {
+          const [audioTrack, videoTrack] = await Promise.all([
+            AgoraRTC.createMicrophoneAudioTrack({
+              AEC: true,
+              ANS: true,
+              AGC: true,
+            }).catch((err) => {
+              console.warn('Microphone error:', err);
+              return null;
+            }),
+            AgoraRTC.createCameraVideoTrack({
+              encoderConfig: '720p_2',
+            }).catch((err) => {
+              console.warn('Camera error:', err);
+              setMediaPermissionDenied(true);
+              return null;
+            }),
+          ]);
 
           if (!active) {
-            stream.getTracks().forEach((t) => t.stop());
+            audioTrack?.close();
+            videoTrack?.close();
             return;
           }
 
-          localStreamRef.current = stream;
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = stream;
+          localAudioTrackRef.current = audioTrack;
+          localVideoTrackRef.current = videoTrack;
+
+          // Play local video preview in PIP
+          if (videoTrack && localVideoContainerRef.current) {
+            videoTrack.play(localVideoContainerRef.current);
           }
-        }
-      } catch (err) {
-        console.warn('Camera/Microphone access denied or unavailable:', err);
-        setMediaPermissionDenied(true);
-      }
 
-      // 2. Connect to LiveKit Room if credentials are present
-      if (sessionData?.token && sessionData?.server_url) {
-        try {
-          setConnectionStatus('connecting');
-          const room = new Room({
-            adaptiveStream: true,
-            dynacast: true,
-            videoCaptureDefaults: {
-              resolution: VideoPresets.h720.resolution,
-            },
+          // Join Agora Channel
+          const appId = sessionData?.app_id || 'test_agora_app_id';
+          const channelName = sessionData?.channel_name || `pairup-session-${bookingId}`;
+          const token = sessionData?.token || null;
+          const uid = sessionData?.uid || Number(user?.id) || Math.floor(Math.random() * 100000);
+
+          await client.join(appId, channelName, token, uid);
+          console.log('>>> Agora joined channel:', channelName, 'UID:', uid);
+
+          // Publish local tracks
+          const tracksToPublish = [];
+          if (audioTrack) tracksToPublish.push(audioTrack);
+          if (videoTrack) tracksToPublish.push(videoTrack);
+
+          if (tracksToPublish.length > 0) {
+            await client.publish(tracksToPublish);
+          }
+
+          setConnectionMode('agora');
+          setConnectionStatus(client.remoteUsers.length > 0 ? 'connected' : 'waiting');
+
+          // If remote users already present, subscribe
+          client.remoteUsers.forEach(async (ru) => {
+            if (ru.hasVideo) {
+              await client.subscribe(ru, 'video');
+              remoteUserRef.current = ru;
+              setHasRemoteVideo(true);
+              if (remoteVideoContainerRef.current && ru.videoTrack) {
+                ru.videoTrack.play(remoteVideoContainerRef.current);
+              }
+            }
+            if (ru.hasAudio) {
+              await client.subscribe(ru, 'audio');
+              ru.audioTrack?.play();
+            }
           });
-          roomRef.current = room;
-
-          room
-            .on(RoomEvent.Connected, async () => {
-              console.log('>>> LiveKit connected to room:', room.name);
-              setConnectionMode('livekit');
-              setConnectionStatus('connected');
-              // Publish microphone & camera tracks to LiveKit SFU
-              try {
-                await room.localParticipant.enableCameraAndMicrophone();
-                const pub = Array.from(room.localParticipant.videoTrackPublications.values())[0];
-                if (pub?.videoTrack && localVideoRef.current) {
-                  pub.videoTrack.attach(localVideoRef.current);
-                }
-              } catch (e) {
-                console.warn('LiveKit local participant media publish warning:', e);
-              }
-            })
-            .on(RoomEvent.Disconnected, () => {
-              console.log('>>> LiveKit room disconnected');
-              setConnectionStatus('waiting');
-            })
-            .on(RoomEvent.ParticipantConnected, (participant) => {
-              console.log('>>> LiveKit participant joined:', participant.identity);
-              toast.info(`${participant.name || 'Participant'} joined the room`);
-              setConnectionStatus('connected');
-            })
-            .on(RoomEvent.ParticipantDisconnected, (participant) => {
-              console.log('>>> LiveKit participant left:', participant.identity);
-              toast.info(`${participant.name || 'Participant'} left the room`);
-              setHasRemoteVideo(false);
-              setConnectionStatus('waiting');
-            })
-            .on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-              console.log('>>> LiveKit TrackSubscribed:', track.kind, track.source);
-              if (track.kind === Track.Kind.Video) {
-                if (track.source === Track.Source.ScreenShare) {
-                  setIsRemoteScreenSharing(true);
-                  if (screenVideoRef.current) {
-                    track.attach(screenVideoRef.current);
-                  }
-                } else {
-                  setHasRemoteVideo(true);
-                  setIsRemoteCamOff(false);
-                  if (remoteVideoRef.current) {
-                    track.attach(remoteVideoRef.current);
-                  }
-                }
-                setConnectionStatus('connected');
-              } else if (track.kind === Track.Kind.Audio) {
-                const audioEl = document.createElement('audio');
-                audioEl.autoplay = true;
-                track.attach(audioEl);
-              }
-            })
-            .on(RoomEvent.TrackUnsubscribed, (track) => {
-              track.detach();
-              if (track.source === Track.Source.ScreenShare) {
-                setIsRemoteScreenSharing(false);
-              } else if (track.kind === Track.Kind.Video) {
-                setHasRemoteVideo(false);
-              }
-            })
-            .on(RoomEvent.TrackMuted, (pub) => {
-              if (pub.kind === Track.Kind.Audio) setIsRemoteMuted(true);
-              if (pub.kind === Track.Kind.Video) setIsRemoteCamOff(true);
-            })
-            .on(RoomEvent.TrackUnmuted, (pub) => {
-              if (pub.kind === Track.Kind.Audio) setIsRemoteMuted(false);
-              if (pub.kind === Track.Kind.Video) setIsRemoteCamOff(false);
-            })
-            .on(RoomEvent.DataReceived, (payload, participant) => {
-              try {
-                const text = new TextDecoder().decode(payload);
-                const data = JSON.parse(text);
-                setChatMessages((prev) => [
-                  ...prev,
-                  {
-                    id: Date.now() + Math.random(),
-                    sender: participant?.name || 'Counterpart',
-                    isMe: false,
-                    text: data.text || text,
-                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                  },
-                ]);
-              } catch (_) {
-                const text = new TextDecoder().decode(payload);
-                setChatMessages((prev) => [
-                  ...prev,
-                  {
-                    id: Date.now() + Math.random(),
-                    sender: participant?.name || 'Counterpart',
-                    isMe: false,
-                    text,
-                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                  },
-                ]);
-              }
-            });
-
-          await room.connect(sessionData.server_url, sessionData.token);
-        } catch (lkErr) {
-          console.warn('LiveKit SFU connection unreachable, fallback to P2P signaling:', lkErr);
-          setConnectionMode('p2p');
-          setConnectionStatus('waiting');
-          startWebRTCSignaling();
+        } catch (mediaErr) {
+          console.warn('Agora media join warning:', mediaErr);
         }
-      } else {
+
+        // Also start session signaling for chat, notes, and file synchronization
+        startSignalingSync();
+      } catch (agoraErr) {
+        console.warn('Agora SD-RTN connection error, enabling P2P signaling fallback:', agoraErr);
         setConnectionMode('p2p');
         setConnectionStatus('waiting');
-        startWebRTCSignaling();
+        startWebRTCSignalingFallback();
       }
     }
 
     if (sessionData && !tooEarlyInfo) {
-      initLiveKitAndMedia();
+      initAgora();
     }
 
     return () => {
       active = false;
-      if (roomRef.current) {
-        roomRef.current.disconnect();
-        roomRef.current = null;
+      if (localAudioTrackRef.current) {
+        localAudioTrackRef.current.close();
+        localAudioTrackRef.current = null;
       }
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((t) => t.stop());
+      if (localVideoTrackRef.current) {
+        localVideoTrackRef.current.close();
+        localVideoTrackRef.current = null;
+      }
+      if (localScreenTrackRef.current) {
+        localScreenTrackRef.current.close();
+        localScreenTrackRef.current = null;
+      }
+      if (agoraClientRef.current) {
+        agoraClientRef.current.leave().catch(() => {});
+        agoraClientRef.current = null;
       }
       if (signalingIntervalRef.current) {
         clearInterval(signalingIntervalRef.current);
       }
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
       }
     };
   }, [sessionData, tooEarlyInfo]);
 
-  // 3. WebRTC PeerConnection and Signaling Engine
-  const createPeerConnection = () => {
-    if (peerConnectionRef.current) {
-      return peerConnectionRef.current;
+  // Re-play remote video if state changes or container re-mounts
+  useEffect(() => {
+    if (hasRemoteVideo && !isRemoteCamOff && remoteUserRef.current?.videoTrack && remoteVideoContainerRef.current) {
+      try {
+        remoteUserRef.current.videoTrack.play(remoteVideoContainerRef.current);
+      } catch (e) {
+        console.warn('Agora remote video play:', e);
+      }
     }
+  }, [hasRemoteVideo, isRemoteCamOff, isRemoteScreenSharing]);
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
-    peerConnectionRef.current = pc;
-
-    // Attach local audio & video tracks to PeerConnection
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current);
-      });
+  // Re-play local video in PIP container
+  useEffect(() => {
+    if (!isCamOff && localVideoTrackRef.current && localVideoContainerRef.current) {
+      try {
+        localVideoTrackRef.current.play(localVideoContainerRef.current);
+      } catch (e) {
+        console.warn('Agora local video play:', e);
+      }
     }
+  }, [isCamOff]);
 
-    // ICE Candidate Generation: send to signaling endpoint
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        bookingApi
-          .sendSessionSignal(bookingId, 'candidate', event.candidate.toJSON())
-          .catch((e) => console.warn('Signal send candidate failed:', e));
-      }
-    };
-
-    // Remote Track Received: Attach to Remote Video Element
-    pc.ontrack = (event) => {
-      console.log('>>> WebRTC ontrack received:', event.track.kind, event.streams);
-      const [stream] = event.streams;
-      if (stream) {
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
-        }
-        setHasRemoteVideo(true);
-        setConnectionStatus('connected');
-      }
-    };
-
-    // Connection State Change
-    pc.onconnectionstatechange = () => {
-      console.log('>>> WebRTC Connection State:', pc.connectionState);
-      if (pc.connectionState === 'connected') {
-        setConnectionStatus('connected');
-      } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        setConnectionStatus('waiting');
-        setHasRemoteVideo(false);
-      }
-    };
-
-    return pc;
-  };
-
-  // Start polling signals from the backend signaling endpoint
-  const startWebRTCSignaling = async () => {
-    // Send initial join announce
-    try {
-      await bookingApi.sendSessionSignal(bookingId, 'join', {
-        user_name: user?.name || 'Participant',
-        is_mentor: sessionData?.is_mentor,
-      });
-    } catch (_) {}
-
-    // Clear any previous interval
+  // 3. Signaling Polling for chat messages & status events
+  const startSignalingSync = () => {
     if (signalingIntervalRef.current) clearInterval(signalingIntervalRef.current);
 
-    // Poll every 1000ms for incoming signals from counterparty
     signalingIntervalRef.current = setInterval(async () => {
       try {
         const res = await bookingApi.getSessionSignals(bookingId, lastSignalIdRef.current);
         const incoming = res.signals || [];
         for (const sig of incoming) {
           lastSignalIdRef.current = Math.max(lastSignalIdRef.current, sig.id);
-          await handleIncomingSignal(sig);
+          handleSignalMessage(sig);
         }
-      } catch (err) {
-        // Silent poll error
-      }
+      } catch (_) {}
     }, 1000);
   };
 
-  // Process incoming WebRTC signal
-  const handleIncomingSignal = async (sig) => {
+  const handleSignalMessage = (sig) => {
     const { signal_type, data } = sig;
-    console.log('>>> WebRTC Signal received:', signal_type);
-
-    if (signal_type === 'join') {
-      // Counterparty joined!
+    if (signal_type === 'chat') {
       setChatMessages((prev) => [
         ...prev,
         {
-          id: Date.now(),
-          sender: 'PairUp System',
-          isSystem: true,
-          text: `👋 ${data?.user_name || 'Participant'} joined the video room. Establishing direct WebRTC connection...`,
+          id: sig.id || Date.now(),
+          sender: data.sender_name || sessionData?.other_name || 'Counterpart',
+          isMe: false,
+          text: data.text || '',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
-
-      // If we are the designated caller / initiator, create and dispatch the offer
-      if (isInitiatorRef.current) {
-        const pc = createPeerConnection();
-        setConnectionStatus('connecting');
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-        });
-        await pc.setLocalDescription(offer);
-        await bookingApi.sendSessionSignal(bookingId, 'offer', offer);
-      }
-    } else if (signal_type === 'offer') {
-      // Counterparty sent an offer: set remote description, create and dispatch answer
-      const pc = createPeerConnection();
-      setConnectionStatus('connecting');
-      await pc.setRemoteDescription(new RTCSessionDescription(data));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await bookingApi.sendSessionSignal(bookingId, 'answer', answer);
-    } else if (signal_type === 'answer') {
-      // Counterparty answered our offer
-      const pc = peerConnectionRef.current;
-      if (pc && pc.signalingState !== 'stable') {
-        await pc.setRemoteDescription(new RTCSessionDescription(data));
-      }
-    } else if (signal_type === 'candidate') {
-      // Counterparty ICE Candidate
-      const pc = peerConnectionRef.current;
-      if (pc && data) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(data));
-        } catch (err) {
-          console.warn('Could not add ICE candidate:', err);
-        }
-      }
+      setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     } else if (signal_type === 'state') {
-      // Media state sync
       if (data.isCamOff !== undefined) setIsRemoteCamOff(data.isCamOff);
       if (data.isMuted !== undefined) setIsRemoteMuted(data.isMuted);
       if (data.isScreenSharing !== undefined) setIsRemoteScreenSharing(data.isScreenSharing);
     } else if (signal_type === 'leave') {
       setHasRemoteVideo(false);
       setConnectionStatus('waiting');
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          sender: 'PairUp System',
-          isSystem: true,
-          text: `ℹ️ Participant left the call.`,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
     }
   };
 
-  // 4. Mic & Camera Toggles (LiveKit + WebRTC)
+  // 4. WebRTC P2P Fallback Engine (active if Agora cloud is unreachable)
+  const startWebRTCSignalingFallback = () => {
+    startSignalingSync();
+  };
+
+  // 5. Mic & Camera Toggles (Agora RTC)
   const handleToggleMic = async () => {
     const newMuted = !isMuted;
     setIsMuted(newMuted);
 
-    if (roomRef.current && roomRef.current.state === 'connected') {
+    if (localAudioTrackRef.current) {
       try {
-        await roomRef.current.localParticipant.setMicrophoneEnabled(!newMuted);
+        await localAudioTrackRef.current.setEnabled(!newMuted);
       } catch (e) {
-        console.warn('LiveKit setMicrophoneEnabled error:', e);
+        console.warn('Agora setEnabled audio error:', e);
       }
-    } else if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach((t) => {
-        t.enabled = !newMuted;
-      });
     }
 
-    // Broadcast state to remote peer
     bookingApi
       .sendSessionSignal(bookingId, 'state', {
         isMuted: newMuted,
@@ -534,23 +506,17 @@ export default function SessionRoomPage() {
     const newCamOff = !isCamOff;
     setIsCamOff(newCamOff);
 
-    if (roomRef.current && roomRef.current.state === 'connected') {
+    if (localVideoTrackRef.current) {
       try {
-        await roomRef.current.localParticipant.setCameraEnabled(!newCamOff);
-        if (!newCamOff && localVideoRef.current) {
-          const pub = Array.from(roomRef.current.localParticipant.videoTrackPublications.values())[0];
-          if (pub?.videoTrack) pub.videoTrack.attach(localVideoRef.current);
+        await localVideoTrackRef.current.setEnabled(!newCamOff);
+        if (!newCamOff && localVideoContainerRef.current) {
+          localVideoTrackRef.current.play(localVideoContainerRef.current);
         }
       } catch (e) {
-        console.warn('LiveKit setCameraEnabled error:', e);
+        console.warn('Agora setEnabled video error:', e);
       }
-    } else if (localStreamRef.current) {
-      localStreamRef.current.getVideoTracks().forEach((t) => {
-        t.enabled = !newCamOff;
-      });
     }
 
-    // Broadcast state to remote peer
     bookingApi
       .sendSessionSignal(bookingId, 'state', {
         isMuted,
@@ -560,7 +526,7 @@ export default function SessionRoomPage() {
       .catch(() => {});
   };
 
-  // 5. Screen Share Track Handling (LiveKit + WebRTC)
+  // 6. Screen Share Track Handling (Agora RTC)
   const handleToggleScreenShare = async () => {
     if (isScreenSharing) {
       handleStopScreenShare();
@@ -568,111 +534,102 @@ export default function SessionRoomPage() {
     }
 
     try {
-      if (roomRef.current && roomRef.current.state === 'connected') {
-        await roomRef.current.localParticipant.setScreenShareEnabled(true);
-        setIsScreenSharing(true);
-        const screenPub = Array.from(roomRef.current.localParticipant.trackPublications.values()).find(
-          (p) => p.source === Track.Source.ScreenShare
-        );
-        if (screenPub?.videoTrack && screenVideoRef.current) {
-          screenPub.videoTrack.attach(screenVideoRef.current);
-        }
-      } else {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-          toast.warning('Screen sharing is not supported on this device/browser.');
-          return;
-        }
-
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { cursor: 'always' },
-          audio: false,
-        });
-
-        screenStreamRef.current = stream;
-        setIsScreenSharing(true);
-
-        if (screenVideoRef.current) {
-          screenVideoRef.current.srcObject = stream;
-        }
-
-        // Replace WebRTC video track with screen track
-        const screenTrack = stream.getVideoTracks()[0];
-        const pc = peerConnectionRef.current;
-        if (pc) {
-          const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-          if (sender) {
-            sender.replaceTrack(screenTrack);
-          }
-        }
-
-        screenTrack.onended = () => {
-          handleStopScreenShare();
-        };
+      const client = agoraClientRef.current;
+      if (!client) {
+        toast.warning('Audio/video client is not ready.');
+        return;
       }
 
-      // Broadcast screen share state
+      // Create Agora screen video track
+      const screenTrack = await AgoraRTC.createScreenVideoTrack({
+        encoderConfig: '1080p_1',
+      }, 'enable');
+
+      localScreenTrackRef.current = screenTrack;
+      setIsScreenSharing(true);
+
+      // Unpublish camera track, publish screen track
+      if (localVideoTrackRef.current) {
+        await client.unpublish(localVideoTrackRef.current);
+      }
+      await client.publish(screenTrack);
+
+      if (screenVideoContainerRef.current) {
+        screenTrack.play(screenVideoContainerRef.current);
+      }
+
+      screenTrack.on('track-ended', () => {
+        handleStopScreenShare();
+      });
+
       bookingApi.sendSessionSignal(bookingId, 'state', {
         isScreenSharing: true,
         isCamOff,
         isMuted,
       }).catch(() => {});
     } catch (err) {
-      console.warn('Screen sharing cancelled or error:', err);
+      console.warn('Agora screen sharing cancelled or error:', err);
       setIsScreenSharing(false);
     }
   };
 
   const handleStopScreenShare = async () => {
-    if (roomRef.current && roomRef.current.state === 'connected') {
-      try {
-        await roomRef.current.localParticipant.setScreenShareEnabled(false);
-      } catch (_) {}
-    }
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current = null;
+    const client = agoraClientRef.current;
+    if (localScreenTrackRef.current) {
+      if (client) {
+        try {
+          await client.unpublish(localScreenTrackRef.current);
+        } catch (_) {}
+      }
+      localScreenTrackRef.current.close();
+      localScreenTrackRef.current = null;
     }
     setIsScreenSharing(false);
 
-    // Restore camera track to WebRTC sender
-    const pc = peerConnectionRef.current;
-    if (pc && localStreamRef.current) {
-      const camTrack = localStreamRef.current.getVideoTracks()[0];
-      const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video');
-      if (sender && camTrack) {
-        sender.replaceTrack(camTrack);
+    // Re-publish camera track
+    if (localVideoTrackRef.current && client) {
+      try {
+        await client.publish(localVideoTrackRef.current);
+        if (localVideoContainerRef.current && !isCamOff) {
+          localVideoTrackRef.current.play(localVideoContainerRef.current);
+        }
+      } catch (e) {
+        console.warn('Agora camera re-publish warning:', e);
       }
     }
 
-    // Broadcast state
     bookingApi.sendSessionSignal(bookingId, 'state', {
       isScreenSharing: false,
       isCamOff,
       isMuted,
-    });
+    }).catch(() => {});
   };
 
-  // 6. Test Loopback Mode (for single user testing in one window)
+  // 7. Test Loopback Mode (simulates counterpart view on single computer)
   const handleToggleLoopback = () => {
     if (testLoopbackActive) {
       setTestLoopbackActive(false);
       setHasRemoteVideo(false);
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = null;
+      if (remoteVideoContainerRef.current) {
+        remoteVideoContainerRef.current.innerHTML = '';
       }
     } else {
-      if (localStreamRef.current && remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = localStreamRef.current;
+      if (localVideoTrackRef.current) {
         setHasRemoteVideo(true);
         setTestLoopbackActive(true);
         setConnectionStatus('connected');
+        setTimeout(() => {
+          if (remoteVideoContainerRef.current && localVideoTrackRef.current) {
+            localVideoTrackRef.current.play(remoteVideoContainerRef.current);
+          }
+        }, 50);
       } else {
-        toast.info('Please allow camera access first to test loopback.');
+        toast.info('Please allow camera access first to test dual video view.');
       }
     }
   };
 
-  // 7. Session Elapsed Timer (counts active call time only while connected or testing dual video)
+  // 8. Session Elapsed Timer
   useEffect(() => {
     if (!sessionData || (connectionStatus !== 'connected' && !testLoopbackActive)) return;
     const interval = setInterval(() => {
@@ -681,7 +638,7 @@ export default function SessionRoomPage() {
     return () => clearInterval(interval);
   }, [sessionData, connectionStatus, testLoopbackActive]);
 
-  // 8. Notes auto-save
+  // 9. Notes auto-save
   const handleNotesChange = (e) => {
     const val = e.target.value;
     setNotes(val);
@@ -698,7 +655,7 @@ export default function SessionRoomPage() {
     }, 800);
   };
 
-  // 9. In-Call Chat Send (LiveKit Data Channel + WebRTC Signal)
+  // 10. In-Call Chat Send
   const handleSendMessage = (e) => {
     e.preventDefault();
     const text = chatInput.trim();
@@ -715,17 +672,6 @@ export default function SessionRoomPage() {
     setChatMessages((prev) => [...prev, newMsg]);
     setChatInput('');
 
-    // If LiveKit room is connected, publish via LiveKit Data Channel
-    if (roomRef.current && roomRef.current.state === 'connected') {
-      try {
-        const payload = new TextEncoder().encode(JSON.stringify({ text }));
-        roomRef.current.localParticipant.publishData(payload, { reliable: true });
-      } catch (err) {
-        console.warn('LiveKit publishData error:', err);
-      }
-    }
-
-    // Also send via session signal for persistence & P2P fallback
     bookingApi
       .sendSessionSignal(bookingId, 'chat', {
         text,
@@ -736,7 +682,7 @@ export default function SessionRoomPage() {
     setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
-  // 10. File Sharing Upload
+  // 11. File Sharing Upload
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -755,7 +701,6 @@ export default function SessionRoomPage() {
       const uploaded = await bookingApi.uploadSessionFile(bookingId, formData);
       setFiles((prev) => [uploaded, ...prev]);
 
-      // Announce file upload in chat
       setChatMessages((prev) => [
         ...prev,
         {
@@ -774,7 +719,7 @@ export default function SessionRoomPage() {
     }
   };
 
-  // 11. Session Completion Handler
+  // 12. Session Completion Handler
   const handleCompleteSession = async () => {
     setCompleting(true);
     try {
@@ -785,7 +730,6 @@ export default function SessionRoomPage() {
         complete_session: true,
       });
 
-      // Broadcast leave signal
       bookingApi.sendSessionSignal(bookingId, 'leave', {}).catch(() => {});
 
       toast.success('Session marked complete! Escrow funds released to mentor balance.');
@@ -815,7 +759,7 @@ export default function SessionRoomPage() {
         <Navbar />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '16px' }}>
           <div style={{ width: '40px', height: '40px', border: '3px solid #334155', borderTopColor: '#0EA5E9', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-          <p style={{ color: '#94A3B8' }}>Connecting to Live WebRTC Session Room...</p>
+          <p style={{ color: '#94A3B8' }}>Connecting to Agora RTC Live Session Room...</p>
         </div>
         <Footer />
         <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
@@ -899,55 +843,49 @@ export default function SessionRoomPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm('Leave this live session room and go back?')) {
-                    if (window.history.state && window.history.state.idx > 0) {
-                      navigate(-1);
-                    } else {
-                      navigate(isMentor ? '/mentor/sessions' : '/learner/sessions');
-                    }
+                  if (window.confirm('Leave the session room? You can return anytime while the session is active.')) {
+                    navigate(isMentor ? '/mentor/sessions' : '/learner/sessions');
                   }
                 }}
-                className="portal-back-btn"
                 style={{
-                  background: 'rgba(255,255,255,0.08)',
-                  borderColor: '#475569',
-                  color: '#F8FAFC',
+                  background: 'transparent',
+                  border: '1px solid #475569',
+                  color: '#94A3B8',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
                 }}
-                title="Leave room and return"
               >
-                <ArrowLeftIcon size={15} />
-                <span>Back</span>
+                <ArrowLeftIcon size={14} /> Exit
               </button>
-              <div
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  background: connectionStatus === 'connected' ? '#22C55E' : '#F59E0B',
-                  boxShadow: `0 0 10px ${connectionStatus === 'connected' ? '#22C55E' : '#F59E0B'}`,
-                  animation: connectionStatus !== 'connected' ? 'pulse 1.5s infinite' : 'none',
-                }}
-              />
+
               <div>
-                <div style={{ color: '#F8FAFC', fontWeight: 800, fontSize: '15px' }}>
-                  Live Session: {sessionData.topic}
-                </div>
-                <div style={{ color: '#94A3B8', fontSize: '12px', marginTop: '2px' }}>
-                  Pairing with <strong style={{ color: '#38BDF8' }}>{otherName}</strong> · Room:{' '}
-                  <span style={{ fontFamily: 'monospace', color: '#CBD5E1' }}>{sessionData.room_name}</span> · ₹{sessionData.price}
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>{sessionData.topic || 'Mentorship Session'}</span>
+                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(14, 165, 233, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
+                    {sessionData.duration_minutes || 60}m · {formatCurrency(sessionData.price || 0)}
+                  </span>
+                </h2>
+                <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px' }}>
+                  With <strong style={{ color: '#E2E8F0' }}>{otherName}</strong> ({isMentor ? 'Learner' : 'Mentor'}) · Room: <code style={{ color: '#38BDF8', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 5px', borderRadius: '4px' }}>{sessionData.channel_name || sessionData.room_name}</code>
                 </div>
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              {/* Connection Status Badge */}
+              {/* Connection Status Pill */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  background: connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                  border: `1px solid ${connectionStatus === 'connected' ? '#22C55E' : '#F59E0B'}`,
+                  background: connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                  border: `1px solid ${connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(234, 179, 8, 0.4)'}`,
                   borderRadius: '10px',
                   padding: '6px 12px',
                   fontSize: '12px',
@@ -957,11 +895,9 @@ export default function SessionRoomPage() {
               >
                 <span>
                   {connectionStatus === 'connected'
-                    ? connectionMode === 'livekit'
-                      ? '● LiveKit Room Connected'
-                      : '● WebRTC Connected'
+                    ? '● Agora SD-RTN Connected'
                     : connectionStatus === 'connecting'
-                    ? 'Connecting to LiveKit…'
+                    ? 'Connecting to Agora…'
                     : 'Waiting for Peer…'}
                 </span>
               </div>
@@ -1063,14 +999,12 @@ export default function SessionRoomPage() {
                   minHeight: '480px',
                 }}
               >
-                {/* 1. Remote Screen Share Display (If remote user is sharing screen) */}
-                {isRemoteScreenSharing ? (
+                {/* 1. Screen Share Display */}
+                {isScreenSharing ? (
                   <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
-                    <video
-                      ref={remoteVideoRef}
-                      autoPlay
-                      playsInline
-                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    <div
+                      ref={attachScreenContainer}
+                      style={{ width: '100%', height: '100%' }}
                     />
                     <div
                       style={{
@@ -1087,48 +1021,18 @@ export default function SessionRoomPage() {
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
-                      }}
-                    >
-                      <ScreenShareIcon size={14} /> {otherName} is Sharing Screen
-                    </div>
-                  </div>
-                ) : isScreenSharing ? (
-                  /* 2. Local Screen Share Preview (If you are sharing screen) */
-                  <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
-                    <video
-                      ref={screenVideoRef}
-                      autoPlay
-                      playsInline
-                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                    />
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '16px',
-                        left: '16px',
-                        background: 'rgba(15, 23, 42, 0.85)',
-                        padding: '6px 12px',
-                        borderRadius: '8px',
-                        color: '#38BDF8',
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        border: '1px solid #38BDF8',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
+                        zIndex: 5,
                       }}
                     >
                       <ScreenShareIcon size={14} /> You are sharing your screen
                     </div>
                   </div>
                 ) : hasRemoteVideo && !isRemoteCamOff ? (
-                  /* 3. REAL REMOTE LIVE VIDEO STREAM */
+                  /* 2. REAL REMOTE LIVE VIDEO STREAM (Agora Container) */
                   <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
-                    <video
-                      ref={remoteVideoRef}
-                      autoPlay
-                      playsInline
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    <div
+                      ref={attachRemoteContainer}
+                      style={{ width: '100%', height: '100%' }}
                     />
                     <div
                       style={{
@@ -1144,6 +1048,7 @@ export default function SessionRoomPage() {
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
+                        zIndex: 5,
                       }}
                     >
                       <span>{otherName}</span>
@@ -1151,7 +1056,7 @@ export default function SessionRoomPage() {
                     </div>
                   </div>
                 ) : (
-                  /* 4. Remote Participant Waiting or Camera Off State */
+                  /* 3. Remote Participant Waiting or Camera Off State */
                   <div style={{ textAlign: 'center', padding: '40px', maxWidth: '420px' }}>
                     <div
                       style={{
@@ -1203,7 +1108,7 @@ export default function SessionRoomPage() {
                           )}
                           <br />
                           <span style={{ fontSize: '11.5px', color: '#64748B', display: 'inline-block', marginTop: '4px' }}>
-                            Video, audio, and session timer will start automatically when both of you are connected.
+                            Video, audio, and session timer start automatically when both participants are connected.
                           </span>
                         </p>
                         <div
@@ -1253,7 +1158,7 @@ export default function SessionRoomPage() {
                   </div>
                 )}
 
-                {/* Local Camera PIP (Picture-In-Picture) */}
+                {/* Local Camera PIP (Picture-In-Picture Container) */}
                 <div
                   style={{
                     position: 'absolute',
@@ -1287,12 +1192,9 @@ export default function SessionRoomPage() {
                       <span>{mediaPermissionDenied ? 'No Camera' : 'Camera Off'}</span>
                     </div>
                   ) : (
-                    <video
-                      ref={localVideoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    <div
+                      ref={attachLocalContainer}
+                      style={{ width: '100%', height: '100%' }}
                     />
                   )}
                   <div
@@ -1300,50 +1202,52 @@ export default function SessionRoomPage() {
                       position: 'absolute',
                       bottom: '6px',
                       left: '8px',
-                      background: 'rgba(0,0,0,0.6)',
+                      background: 'rgba(15, 23, 42, 0.75)',
                       padding: '2px 6px',
                       borderRadius: '4px',
                       fontSize: '10px',
-                      color: '#fff',
-                      fontWeight: 700,
+                      color: '#E2E8F0',
+                      fontWeight: 600,
+                      zIndex: 2,
                     }}
                   >
-                    You {isMuted && '(Muted)'}
+                    You {isMuted && '· Muted'}
                   </div>
                 </div>
               </div>
 
-              {/* Bottom Call Control Bar */}
+              {/* Bottom Media Controls Bar */}
               <div
                 style={{
                   background: '#1E293B',
-                  borderRadius: '14px',
-                  padding: '12px 24px',
+                  borderRadius: '16px',
+                  padding: '12px 20px',
                   display: 'flex',
-                  justifyContent: 'center',
                   alignItems: 'center',
+                  justifyContent: 'center',
                   gap: '16px',
                   border: '1px solid #334155',
+                  flexWrap: 'wrap',
                 }}
               >
-                {/* Mic Toggle */}
+                {/* Mute/Unmute */}
                 <button
                   type="button"
                   onClick={handleToggleMic}
-                  title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
                   style={{
-                    width: '48px',
-                    height: '48px',
+                    width: '44px',
+                    height: '44px',
                     borderRadius: '50%',
-                    border: 'none',
                     background: isMuted ? '#EF4444' : '#334155',
                     color: '#fff',
+                    border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
                     transition: 'all 0.2s',
                   }}
+                  title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
                 >
                   {isMuted ? <MicOffIcon size={20} /> : <MicIcon size={20} />}
                 </button>
@@ -1352,93 +1256,75 @@ export default function SessionRoomPage() {
                 <button
                   type="button"
                   onClick={handleToggleCamera}
-                  title={isCamOff ? 'Turn camera on' : 'Turn camera off'}
                   style={{
-                    width: '48px',
-                    height: '48px',
+                    width: '44px',
+                    height: '44px',
                     borderRadius: '50%',
-                    border: 'none',
                     background: isCamOff ? '#EF4444' : '#334155',
                     color: '#fff',
+                    border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
                     transition: 'all 0.2s',
                   }}
+                  title={isCamOff ? 'Turn Camera On' : 'Turn Camera Off'}
                 >
                   {isCamOff ? <CameraOffIcon size={20} /> : <CameraIcon size={20} />}
                 </button>
 
-                {/* Screen Share Toggle */}
+                {/* Screen Share */}
                 <button
                   type="button"
                   onClick={handleToggleScreenShare}
-                  title={isScreenSharing ? 'Stop screen sharing' : 'Share screen'}
                   style={{
-                    width: '48px',
-                    height: '48px',
+                    width: '44px',
+                    height: '44px',
                     borderRadius: '50%',
-                    border: 'none',
                     background: isScreenSharing ? '#0284C7' : '#334155',
                     color: '#fff',
+                    border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
                     transition: 'all 0.2s',
                   }}
+                  title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen'}
                 >
                   <ScreenShareIcon size={20} />
                 </button>
 
-                {/* Open Chat Tab button */}
+                {/* Leave Session Call */}
                 <button
                   type="button"
-                  onClick={() => setActiveTab('chat')}
-                  title="In-call chat"
+                  onClick={() => {
+                    if (window.confirm('Leave call room?')) {
+                      navigate(isMentor ? '/mentor/sessions' : '/learner/sessions');
+                    }
+                  }}
                   style={{
-                    width: '48px',
-                    height: '48px',
+                    width: '44px',
+                    height: '44px',
                     borderRadius: '50%',
-                    border: 'none',
-                    background: activeTab === 'chat' ? '#0284C7' : '#334155',
+                    background: '#B91C1C',
                     color: '#fff',
+                    border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    transition: 'all 0.2s',
+                    marginLeft: '8px',
                   }}
-                >
-                  <MessageIcon size={20} />
-                </button>
-
-                {/* End Call Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowCompleteModal(true)}
-                  title="End session"
-                  style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '50%',
-                    border: 'none',
-                    background: '#DC2626',
-                    color: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    marginLeft: '16px',
-                  }}
+                  title="Leave Call"
                 >
                   <PhoneOffIcon size={20} />
                 </button>
               </div>
             </div>
 
-            {/* Right Column: Collaboration Sidebar (Notes, In-Call Chat, Files) */}
+            {/* Right Column: Collaboration Sidebar (Notes, Chat, Shared Files) */}
             <div
               style={{
                 background: '#1E293B',
@@ -1447,179 +1333,154 @@ export default function SessionRoomPage() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
+                minHeight: '600px',
               }}
             >
-              {/* Sidebar Navigation Tabs */}
-              <div style={{ display: 'flex', borderBottom: '1px solid #334155', background: '#0F172A' }}>
+              {/* Tab Navigation */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid #334155', background: '#0F172A' }}>
                 <button
                   type="button"
                   onClick={() => setActiveTab('notes')}
                   style={{
-                    flex: 1,
-                    padding: '12px',
-                    border: 'none',
+                    padding: '12px 8px',
                     background: activeTab === 'notes' ? '#1E293B' : 'transparent',
-                    color: activeTab === 'notes' ? '#38BDF8' : '#94A3B8',
-                    fontWeight: 700,
+                    border: 'none',
+                    borderBottom: activeTab === 'notes' ? '2px solid #0284C7' : 'none',
+                    color: activeTab === 'notes' ? '#F8FAFC' : '#94A3B8',
                     fontSize: '13px',
+                    fontWeight: 700,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '6px',
-                    borderBottom: activeTab === 'notes' ? '2px solid #38BDF8' : 'none',
                   }}
                 >
                   <DocumentIcon size={16} /> Notes
                 </button>
+
                 <button
                   type="button"
                   onClick={() => setActiveTab('chat')}
                   style={{
-                    flex: 1,
-                    padding: '12px',
-                    border: 'none',
+                    padding: '12px 8px',
                     background: activeTab === 'chat' ? '#1E293B' : 'transparent',
-                    color: activeTab === 'chat' ? '#38BDF8' : '#94A3B8',
-                    fontWeight: 700,
+                    border: 'none',
+                    borderBottom: activeTab === 'chat' ? '2px solid #0284C7' : 'none',
+                    color: activeTab === 'chat' ? '#F8FAFC' : '#94A3B8',
                     fontSize: '13px',
+                    fontWeight: 700,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '6px',
-                    borderBottom: activeTab === 'chat' ? '2px solid #38BDF8' : 'none',
                   }}
                 >
                   <MessageIcon size={16} /> Chat
+                  {chatMessages.length > 1 && (
+                    <span style={{ fontSize: '10px', background: '#0284C7', color: '#fff', padding: '1px 5px', borderRadius: '10px' }}>
+                      {chatMessages.length}
+                    </span>
+                  )}
                 </button>
+
                 <button
                   type="button"
                   onClick={() => setActiveTab('files')}
                   style={{
-                    flex: 1,
-                    padding: '12px',
-                    border: 'none',
+                    padding: '12px 8px',
                     background: activeTab === 'files' ? '#1E293B' : 'transparent',
-                    color: activeTab === 'files' ? '#38BDF8' : '#94A3B8',
-                    fontWeight: 700,
+                    border: 'none',
+                    borderBottom: activeTab === 'files' ? '2px solid #0284C7' : 'none',
+                    color: activeTab === 'files' ? '#F8FAFC' : '#94A3B8',
                     fontSize: '13px',
+                    fontWeight: 700,
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '6px',
-                    borderBottom: activeTab === 'files' ? '2px solid #38BDF8' : 'none',
                   }}
                 >
-                  <PaperclipIcon size={16} /> Files ({files.length})
+                  <PaperclipIcon size={16} /> Files
+                  {files.length > 0 && (
+                    <span style={{ fontSize: '10px', background: '#334155', color: '#fff', padding: '1px 5px', borderRadius: '10px' }}>
+                      {files.length}
+                    </span>
+                  )}
                 </button>
               </div>
 
-              {/* Tab 1: Private Notes */}
+              {/* TAB 1: Real-time Notes */}
               {activeTab === 'notes' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '12px', color: '#94A3B8' }}>{notesStatus}</span>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', gap: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#CBD5E1' }}>Session Workspace Notes</span>
+                    <span style={{ fontSize: '11px', color: '#64748B' }}>{notesStatus}</span>
                   </div>
                   <textarea
                     value={notes}
                     onChange={handleNotesChange}
-                    placeholder="Take session notes, code snippets, debug commands, or solutions here..."
+                    placeholder="Type code snippets, discussion bullet points, architecture diagrams, or next steps here..."
                     style={{
                       flex: 1,
                       width: '100%',
                       background: '#0F172A',
+                      color: '#F8FAFC',
                       border: '1px solid #334155',
                       borderRadius: '10px',
                       padding: '12px',
-                      color: '#F8FAFC',
+                      fontFamily: 'monospace',
                       fontSize: '13px',
-                      lineHeight: '1.6',
+                      lineHeight: 1.6,
                       resize: 'none',
                       outline: 'none',
-                      fontFamily: 'inherit',
                     }}
                   />
+                  <div style={{ fontSize: '11px', color: '#64748B' }}>
+                    💡 Notes are preserved across reconnects and auto-saved to your profile.
+                  </div>
                 </div>
               )}
 
-              {/* Tab 2: In-Call Real-Time Chat */}
+              {/* TAB 2: In-Call Chat */}
               {activeTab === 'chat' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
                   <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {chatMessages.map((msg) => (
                       <div
                         key={msg.id}
                         style={{
                           alignSelf: msg.isSystem ? 'center' : msg.isMe ? 'flex-end' : 'flex-start',
-                          maxWidth: msg.isSystem ? '100%' : '80%',
+                          maxWidth: msg.isSystem ? '95%' : '80%',
+                          background: msg.isSystem ? 'rgba(56, 189, 248, 0.08)' : msg.isMe ? '#0284C7' : '#334155',
+                          border: msg.isSystem ? '1px dashed rgba(56, 189, 248, 0.3)' : 'none',
+                          borderRadius: '10px',
+                          padding: '8px 12px',
+                          fontSize: '12.5px',
                         }}
                       >
-                        {msg.isSystem ? (
-                          <div
-                            style={{
-                              background: '#0F172A',
-                              padding: '6px 12px',
-                              borderRadius: '8px',
-                              color: '#94A3B8',
-                              fontSize: '11px',
-                              textAlign: 'center',
-                              border: '1px solid #334155',
-                            }}
-                          >
-                            {msg.text}
-                          </div>
-                        ) : (
-                          <div>
-                            <div
-                              style={{
-                                fontSize: '11px',
-                                color: '#94A3B8',
-                                marginBottom: '2px',
-                                textAlign: msg.isMe ? 'right' : 'left',
-                              }}
-                            >
-                              {msg.sender} · {msg.time}
-                            </div>
-                            <div
-                              style={{
-                                background: msg.isMe ? '#0284C7' : '#334155',
-                                color: '#fff',
-                                padding: '8px 12px',
-                                borderRadius: '12px',
-                                fontSize: '13px',
-                                lineHeight: '1.4',
-                                wordBreak: 'break-word',
-                              }}
-                            >
-                              {msg.text}
-                            </div>
+                        {!msg.isSystem && (
+                          <div style={{ fontSize: '10.5px', opacity: 0.7, marginBottom: '2px', fontWeight: 600 }}>
+                            {msg.sender} · {msg.time}
                           </div>
                         )}
+                        <div style={{ color: msg.isSystem ? '#38BDF8' : '#fff', lineHeight: 1.4 }}>{msg.text}</div>
                       </div>
                     ))}
                     <div ref={chatBottomRef} />
                   </div>
 
-                  <form
-                    onSubmit={handleSendMessage}
-                    style={{
-                      padding: '12px',
-                      borderTop: '1px solid #334155',
-                      background: '#0F172A',
-                      display: 'flex',
-                      gap: '8px',
-                    }}
-                  >
+                  <form onSubmit={handleSendMessage} style={{ padding: '12px', borderTop: '1px solid #334155', display: 'flex', gap: '8px' }}>
                     <input
                       type="text"
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
-                      placeholder="Send in-call message..."
+                      placeholder="Send message or link..."
                       style={{
                         flex: 1,
-                        background: '#1E293B',
+                        background: '#0F172A',
                         border: '1px solid #334155',
                         borderRadius: '8px',
                         padding: '8px 12px',
@@ -1630,15 +1491,16 @@ export default function SessionRoomPage() {
                     />
                     <button
                       type="submit"
+                      disabled={!chatInput.trim()}
                       style={{
-                        background: '#0284C7',
+                        background: chatInput.trim() ? '#0284C7' : '#334155',
                         color: '#fff',
                         border: 'none',
-                        padding: '8px 14px',
                         borderRadius: '8px',
-                        fontWeight: 700,
-                        fontSize: '13px',
-                        cursor: 'pointer',
+                        padding: '8px 14px',
+                        fontSize: '12.5px',
+                        fontWeight: 600,
+                        cursor: chatInput.trim() ? 'pointer' : 'default',
                       }}
                     >
                       Send
@@ -1647,27 +1509,26 @@ export default function SessionRoomPage() {
                 </div>
               )}
 
-              {/* Tab 3: Session Shared Files */}
+              {/* TAB 3: Shared Files */}
               {activeTab === 'files' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: 700, color: '#F8FAFC' }}>Shared Attachments</span>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', gap: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#CBD5E1' }}>Session Attachments</span>
                     <label
                       style={{
-                        background: uploadingFile ? '#334155' : '#0284C7',
+                        background: '#0284C7',
                         color: '#fff',
                         padding: '6px 12px',
                         borderRadius: '8px',
                         fontSize: '12px',
                         fontWeight: 600,
-                        cursor: uploadingFile ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '4px',
+                        gap: '6px',
                       }}
                     >
-                      <PaperclipIcon size={14} />
-                      {uploadingFile ? 'Uploading…' : 'Share File'}
+                      <PaperclipIcon size={14} /> {uploadingFile ? 'Uploading…' : 'Share File'}
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -1680,11 +1541,8 @@ export default function SessionRoomPage() {
 
                   <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {files.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '40px 16px', color: '#94A3B8', fontSize: '13px' }}>
-                        No files shared in this call yet.
-                        <p style={{ fontSize: '11px', color: '#64748B', marginTop: '4px' }}>
-                          Upload logs, architectural diagrams, or code samples (up to 25MB).
-                        </p>
+                      <div style={{ textAlign: 'center', padding: '40px 16px', color: '#64748B', fontSize: '12.5px' }}>
+                        No files shared in this call yet. Upload logs, zip archives, or specifications (up to 25MB).
                       </div>
                     ) : (
                       files.map((file) => (
@@ -1693,49 +1551,44 @@ export default function SessionRoomPage() {
                           style={{
                             background: '#0F172A',
                             border: '1px solid #334155',
-                            borderRadius: '8px',
+                            borderRadius: '10px',
                             padding: '10px 12px',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
+                            gap: '8px',
                           }}
                         >
-                          <div style={{ overflow: 'hidden', marginRight: '8px' }}>
-                            <div
-                              style={{
-                                color: '#F8FAFC',
-                                fontSize: '13px',
-                                fontWeight: 600,
-                                textOverflow: 'ellipsis',
-                                overflow: 'hidden',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {file.filename}
-                            </div>
-                            <div style={{ color: '#94A3B8', fontSize: '11px', marginTop: '2px' }}>
-                              {(file.file_size / 1024).toFixed(1)} KB · by {file.uploader_name}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                            <DocumentIcon size={18} className="text-sky-400 shrink-0" />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#F8FAFC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {file.filename}
+                              </div>
+                              <div style={{ fontSize: '10.5px', color: '#64748B' }}>
+                                By {file.uploader_name} · {(file.file_size / 1024).toFixed(1)} KB
+                              </div>
                             </div>
                           </div>
-                          {file.file_url ? (
+                          {file.file_url && (
                             <a
                               href={file.file_url}
                               target="_blank"
                               rel="noreferrer"
-                              download
+                              download={file.filename}
                               style={{
                                 background: '#334155',
                                 color: '#38BDF8',
-                                textDecoration: 'none',
                                 padding: '4px 10px',
                                 borderRadius: '6px',
                                 fontSize: '11px',
                                 fontWeight: 700,
+                                textDecoration: 'none',
                               }}
                             >
                               Download
                             </a>
-                          ) : null}
+                          )}
                         </div>
                       ))
                     )}
@@ -1747,17 +1600,18 @@ export default function SessionRoomPage() {
         </div>
       </main>
 
-      {/* Complete Session Modal */}
+      {/* SESSION COMPLETION MODAL */}
       {showCompleteModal && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
             background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1000,
+            zIndex: 999,
             padding: '20px',
           }}
         >
@@ -1766,69 +1620,80 @@ export default function SessionRoomPage() {
               background: '#1E293B',
               border: '1px solid #334155',
               borderRadius: '16px',
-              padding: '24px',
               maxWidth: '520px',
               width: '100%',
+              padding: '28px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
             }}
           >
-            <h3 style={{ color: '#F8FAFC', margin: '0 0 8px', fontSize: '18px', fontWeight: 800 }}>
-              Complete Mentoring Session
-            </h3>
-            <p style={{ color: '#94A3B8', fontSize: '13px', margin: '0 0 20px', lineHeight: '1.5' }}>
-              Wrapping up this session archives notes and action items, releases locked escrow funds (₹{sessionData.price}) to
-              the mentor, and prompts for feedback.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(13, 148, 136, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#14B8A6' }}>
+                <CheckCircleIcon size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', color: '#F8FAFC', fontWeight: 700 }}>
+                  Complete Mentorship Session
+                </h3>
+                <span style={{ fontSize: '12px', color: '#94A3B8' }}>
+                  Total Duration: {elapsedMinStr}:{elapsedSecStr} ({totalMinutes}m planned)
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#CBD5E1', lineHeight: 1.5, marginBottom: '16px' }}>
+              Marking this session complete will conclude the video room and release escrow payment of{' '}
+              <strong style={{ color: '#38BDF8' }}>{formatCurrency(sessionData.price || 0)}</strong> to the mentor balance.
             </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#CBD5E1', marginBottom: '6px' }}>
-                  Session Summary / Takeaways
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94A3B8', marginBottom: '4px' }}>
+                  Session Summary / Key Takeaways
                 </label>
                 <textarea
                   value={summaryText}
                   onChange={(e) => setSummaryText(e.target.value)}
-                  placeholder="Outline key solutions provided, architecture changes made, or topics debugged..."
+                  placeholder="Summary of bugs resolved, topics covered, or concepts taught..."
+                  rows={3}
                   style={{
                     width: '100%',
-                    height: '80px',
                     background: '#0F172A',
                     border: '1px solid #334155',
                     borderRadius: '8px',
-                    padding: '10px',
+                    padding: '8px 12px',
                     color: '#fff',
                     fontSize: '13px',
-                    resize: 'none',
                     outline: 'none',
+                    resize: 'vertical',
                   }}
                 />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#CBD5E1', marginBottom: '6px' }}>
-                  Recommended Action Items / Next Steps
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94A3B8', marginBottom: '4px' }}>
+                  Recommended Next Steps / Action Items (Optional)
                 </label>
                 <textarea
                   value={actionItems}
                   onChange={(e) => setActionItems(e.target.value)}
-                  placeholder="Next steps for learner (e.g. read docs on React memoization, apply migration)..."
+                  placeholder="Follow-up tasks, documentation links, or practice exercises for the learner..."
+                  rows={2}
                   style={{
                     width: '100%',
-                    height: '60px',
                     background: '#0F172A',
                     border: '1px solid #334155',
                     borderRadius: '8px',
-                    padding: '10px',
+                    padding: '8px 12px',
                     color: '#fff',
                     fontSize: '13px',
-                    resize: 'none',
                     outline: 'none',
+                    resize: 'vertical',
                   }}
                 />
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 onClick={() => setShowCompleteModal(false)}
@@ -1837,15 +1702,16 @@ export default function SessionRoomPage() {
                   background: 'transparent',
                   border: '1px solid #475569',
                   color: '#94A3B8',
-                  padding: '8px 16px',
+                  padding: '9px 16px',
                   borderRadius: '8px',
-                  fontWeight: 600,
                   fontSize: '13px',
+                  fontWeight: 600,
                   cursor: 'pointer',
                 }}
               >
                 Cancel
               </button>
+
               <button
                 type="button"
                 onClick={handleCompleteSession}
@@ -1854,14 +1720,15 @@ export default function SessionRoomPage() {
                   background: '#0D9488',
                   color: '#fff',
                   border: 'none',
-                  padding: '8px 20px',
+                  padding: '9px 20px',
                   borderRadius: '8px',
-                  fontWeight: 700,
                   fontSize: '13px',
-                  cursor: completing ? 'not-allowed' : 'pointer',
+                  fontWeight: 700,
+                  cursor: completing ? 'default' : 'pointer',
+                  opacity: completing ? 0.7 : 1,
                 }}
               >
-                {completing ? 'Completing Session…' : 'Save & Release Payout'}
+                {completing ? 'Releasing Escrow…' : 'Confirm & Complete'}
               </button>
             </div>
           </div>
@@ -1869,12 +1736,6 @@ export default function SessionRoomPage() {
       )}
 
       <Footer />
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(1.15); }
-        }
-      `}</style>
     </div>
   );
 }

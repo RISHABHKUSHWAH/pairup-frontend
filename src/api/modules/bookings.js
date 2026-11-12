@@ -53,8 +53,11 @@ export const bookingApi = {
   saveNotes: (id, notes) =>
     apiFetch(`/api/bookings/${id}/notes`, { method: 'PUT', auth: true, body: { notes } }),
 
+  getAgoraToken: (id) =>
+    apiFetch(`/api/bookings/${id}/agora-token`, { auth: true }),
+
   getLiveKitToken: (id) =>
-    apiFetch(`/api/bookings/${id}/livekit-token`, { auth: true }),
+    apiFetch(`/api/bookings/${id}/agora-token`, { auth: true }),
 
   getSessionFiles: (id) =>
     apiFetch(`/api/bookings/${id}/files`, { auth: true }),

@@ -57,6 +57,8 @@ export default function AdminSettingsPage() {
       max_session_duration: '120',
       buffer_time_minutes: '10',
       auto_cancellation_grace_mins: '15',
+      agora_app_id: '',
+      agora_app_certificate: '',
       livekit_url: 'wss://pairup-livekit.cloud',
       livekit_api_key: 'pairup_livekit_api_key',
       livekit_api_secret: 'pairup_livekit_secret_token_1234567890',
@@ -365,54 +367,46 @@ export default function AdminSettingsPage() {
                 </div>
               </div>
 
-              {/* LiveKit WebRTC Infrastructure Configuration */}
+              {/* Agora RTC Infrastructure Configuration */}
               <div style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                   <div>
                     <div className="section-label" style={{ margin: 0, fontSize: '14.5px' }}>
-                      LiveKit WebRTC Media Server
+                      Agora RTC Media Infrastructure
                     </div>
                     <span className="sub" style={{ fontSize: '12px' }}>
-                      Powers high-definition in-platform video, crystal-clear audio, and screen sharing across learner-mentor sessions.
+                      Powers high-definition in-platform video, crystal-clear audio, and screen sharing across learner-mentor sessions via Agora SD-RTN.
                     </span>
                   </div>
                   <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(34, 197, 94, 0.15)', color: '#22C55E', fontWeight: 700 }}>
-                    LiveKit Active
+                    Agora Active
                   </span>
                 </div>
 
                 <div className="field">
-                  <label>LiveKit WebSocket Server URL</label>
+                  <label>Agora App ID</label>
                   <input
                     type="text"
-                    value={settings.livekit_url || ''}
-                    onChange={(e) => handleChange('livekit_url', e.target.value)}
-                    placeholder="wss://your-project.livekit.cloud or ws://127.0.0.1:7880"
+                    value={settings.agora_app_id || ''}
+                    onChange={(e) => handleChange('agora_app_id', e.target.value)}
+                    placeholder="e.g. 970ca35de60c44645bbae8a215061408"
                   />
                   <span className="sub" style={{ fontSize: '11px', marginTop: '2px', display: 'block' }}>
-                    Standard LiveKit server WebSocket endpoint used by frontend participants to stream audio &amp; video.
+                    Obtain your App ID from the Agora Console (<a href="https://console.agora.io" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>console.agora.io</a>).
                   </span>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '12px' }}>
-                  <div className="field">
-                    <label>LiveKit API Key</label>
-                    <input
-                      type="text"
-                      value={settings.livekit_api_key || ''}
-                      onChange={(e) => handleChange('livekit_api_key', e.target.value)}
-                      placeholder="API Key"
-                    />
-                  </div>
-                  <div className="field">
-                    <label>LiveKit API Secret</label>
-                    <input
-                      type="password"
-                      value={settings.livekit_api_secret || ''}
-                      onChange={(e) => handleChange('livekit_api_secret', e.target.value)}
-                      placeholder="API Secret"
-                    />
-                  </div>
+                <div className="field" style={{ marginTop: '12px' }}>
+                  <label>Agora App Certificate (Primary Certificate)</label>
+                  <input
+                    type="password"
+                    value={settings.agora_app_certificate || ''}
+                    onChange={(e) => handleChange('agora_app_certificate', e.target.value)}
+                    placeholder="App Certificate (leave blank if project is in Testing Mode without certificate)"
+                  />
+                  <span className="sub" style={{ fontSize: '11px', marginTop: '2px', display: 'block' }}>
+                    Required for production token authentication. Leave empty if your Agora project is in Testing mode (App ID only).
+                  </span>
                 </div>
               </div>
             </div>
