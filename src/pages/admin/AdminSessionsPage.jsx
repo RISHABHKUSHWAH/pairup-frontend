@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import PortalLayout from '../../components/PortalLayout';
 import AdminCategoryNav from '../../components/AdminCategoryNav';
 import Modal from '../../components/Modal';
+import RescheduleModal from '../../components/RescheduleModal';
 import { api, initials } from '../../api/client';
 import {
   CalendarIcon,
@@ -1175,40 +1176,29 @@ export default function AdminSessionsPage() {
       )}
 
       {/* Reschedule Modal */}
-      {showRescheduleModal && (
-        <Modal
-          title={`Reschedule Session #${selectedSession?.id}`}
-          onClose={() => setShowRescheduleModal(false)}
-          maxWidth="440px"
-        >
-          <form onSubmit={handleReschedule}>
-            <p className="sub" style={{ fontSize: '12.5px', marginBottom: '14px' }}>
-              Select a new calendar time slot for both {selectedSession?.learner_name} and {selectedSession?.mentor_name}.
-            </p>
-            <div className="field">
-              <label>New Date &amp; Time (IST)</label>
-              <input
-                type="datetime-local"
-                value={rescheduleDateTime}
-                onChange={(e) => setRescheduleDateTime(e.target.value)}
-                required
-              />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px' }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setShowRescheduleModal(false)}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary">
-                Save New Time
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
+      <RescheduleModal
+        isOpen={showRescheduleModal}
+        onClose={() => setShowRescheduleModal(false)}
+        booking={selectedSession}
+        userRole="admin"
+        onSuccess={(res, targetIso) => {
+          setBookings((prev) =>
+            prev.map((b) =>
+              b.id === selectedSession.id
+                ? { ...b, scheduled_at: targetIso, scheduled_time: targetIso, status: 'accepted' }
+                : b
+            )
+          );
+          setSelectedSession((prev) => ({
+            ...prev,
+            scheduled_at: targetIso,
+            scheduled_time: targetIso,
+            status: 'accepted',
+          }));
+          setShowRescheduleModal(false);
+          loadSessions();
+        }}
+      />
 
       {/* Cancel Session Modal */}
       {showCancelModal && (

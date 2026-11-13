@@ -69,17 +69,19 @@ export const mentorApi = {
   setAvailability: (slots) =>
     apiFetch('/api/mentors/me/availability', { method: 'PUT', auth: true, body: { slots } }),
 
-  getAvailableDates: (mentorId, duration = 60, days = 14) => {
+  getAvailableDates: (mentorId, duration = 60, days = 14, excludeBookingId = null) => {
     const qs = new URLSearchParams();
     if (duration) qs.append('duration', duration);
     if (days) qs.append('days', days);
+    if (excludeBookingId) qs.append('exclude_booking_id', excludeBookingId);
     return apiFetch(`/api/mentors/${mentorId}/available-dates?${qs.toString()}`);
   },
 
-  getAvailableSlots: (mentorId, date = '', duration = 60) => {
+  getAvailableSlots: (mentorId, date = '', duration = 60, excludeBookingId = null) => {
     const qs = new URLSearchParams();
     if (date) qs.append('date', date);
     if (duration) qs.append('duration', duration);
+    if (excludeBookingId) qs.append('exclude_booking_id', excludeBookingId);
     return apiFetch(`/api/mentors/${mentorId}/available-slots?${qs.toString()}`);
   },
 

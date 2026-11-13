@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
+import RescheduleModal from '../../components/RescheduleModal';
 import { api, initials, stars } from '../../api/client';
 import {
   SearchIcon,
@@ -49,8 +50,6 @@ export default function LearnerSessionsPage() {
   const [disputeReason, setDisputeReason] = useState('');
 
   const [rescheduleModalBooking, setRescheduleModalBooking] = useState(null);
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleNote, setRescheduleNote] = useState('');
 
   const [cancelModalBooking, setCancelModalBooking] = useState(null);
   const [cancelReason, setCancelReason] = useState('');
@@ -151,23 +150,6 @@ export default function LearnerSessionsPage() {
       loadBookings();
     } catch (err) {
       toast.error('Error: ' + err.message);
-    } finally {
-      setSubmittingAction(false);
-    }
-  };
-
-  const handleReschedule = async (e) => {
-    e.preventDefault();
-    if (!rescheduleModalBooking || !rescheduleDate) return;
-    setSubmittingAction(true);
-    try {
-      const res = await api.rescheduleBooking(rescheduleModalBooking.id, rescheduleDate, rescheduleNote.trim());
-      toast.success(res?.message || `Session rescheduled to ${new Date(rescheduleDate).toLocaleString()}`);
-      setRescheduleModalBooking(null);
-      setRescheduleNote('');
-      loadBookings();
-    } catch (err) {
-      toast.error('Could not reschedule: ' + err.message);
     } finally {
       setSubmittingAction(false);
     }
@@ -529,13 +511,6 @@ export default function LearnerSessionsPage() {
                       style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                       onClick={() => {
                         setRescheduleModalBooking(b);
-                        const existing = b.scheduled_at || b.scheduled_time;
-                        if (existing && !isNaN(new Date(existing).getTime())) {
-                          setRescheduleDate(new Date(existing).toISOString().slice(0, 16));
-                        } else {
-                          setRescheduleDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
-                        }
-                        setRescheduleNote('');
                       }}
                     >
                       <CalendarIcon size={13} /> Reschedule
@@ -586,7 +561,6 @@ export default function LearnerSessionsPage() {
                       style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                       onClick={() => {
                         setRescheduleModalBooking(b);
-                        setRescheduleDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
                       }}
                     >
                       <CalendarIcon size={13} /> Reschedule
@@ -895,47 +869,16 @@ export default function LearnerSessionsPage() {
       </Modal>
 
       {/* Reschedule Modal */}
-      <Modal
-        isOpen={!!rescheduleModalBooking}
+      <RescheduleModal
+        isOpen={Boolean(rescheduleModalBooking)}
         onClose={() => setRescheduleModalBooking(null)}
-        title={`Reschedule Session with ${rescheduleModalBooking?.mentor_name || ''}`}
-      >
-        {rescheduleModalBooking && (
-          <form onSubmit={handleReschedule}>
-            <div className="field">
-              <label>New Preferred Date &amp; Time</label>
-              <input
-                type="datetime-local"
-                value={rescheduleDate}
-                onChange={(e) => setRescheduleDate(e.target.value)}
-                required
-              />
-            </div>
-            <div className="field">
-              <label>Reason / Note to Mentor</label>
-              <textarea
-                value={rescheduleNote}
-                onChange={(e) => setRescheduleNote(e.target.value)}
-                placeholder="Let the mentor know why you need to reschedule..."
-                rows={3}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setRescheduleModalBooking(null)}
-                style={{ flex: 1 }}
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>
-                Send Reschedule Request
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
+        booking={rescheduleModalBooking}
+        userRole="learner"
+        onSuccess={() => {
+          setRescheduleModalBooking(null);
+          loadBookings();
+        }}
+      />
 
       {/* Cancel Modal */}
       <Modal
