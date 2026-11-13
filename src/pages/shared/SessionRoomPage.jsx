@@ -152,7 +152,8 @@ export default function SessionRoomPage() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Session Completion Modal
+  // Leave & Completion Modals
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [actionItems, setActionItems] = useState('');
@@ -1138,11 +1139,7 @@ export default function SessionRoomPage() {
 
               <button
                 type="button"
-                onClick={() => {
-                  if (window.confirm('Leave the session room? You can return anytime while the session is active.')) {
-                    navigate(isMentor ? '/mentor/sessions' : '/learner/sessions');
-                  }
-                }}
+                onClick={() => setShowLeaveModal(true)}
                 style={{
                   background: 'transparent',
                   border: '1px solid #475569',
@@ -1644,11 +1641,7 @@ export default function SessionRoomPage() {
                 {/* Leave Session Call */}
                 <button
                   type="button"
-                  onClick={() => {
-                    if (window.confirm('Leave call room?')) {
-                      navigate(isMentor ? '/mentor/sessions' : '/learner/sessions');
-                    }
-                  }}
+                  onClick={() => setShowLeaveModal(true)}
                   style={{
                     width: '38px',
                     height: '38px',
@@ -1662,7 +1655,7 @@ export default function SessionRoomPage() {
                     cursor: 'pointer',
                     marginLeft: '4px',
                   }}
-                  title="Leave Call"
+                  title="Leave or End Call"
                 >
                   <PhoneOffIcon size={18} />
                 </button>
@@ -2128,6 +2121,246 @@ export default function SessionRoomPage() {
           </div>
         </div>
       </main>
+
+      {/* REDESIGNED LEAVE & COMPLETE CONFIRMATION MODAL */}
+      {showLeaveModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '16px',
+          }}
+          onClick={() => setShowLeaveModal(false)}
+        >
+          <div
+            style={{
+              background: '#1E293B',
+              border: '1px solid #334155',
+              borderRadius: '16px',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.65)',
+              position: 'relative',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Top Close Button */}
+            <button
+              type="button"
+              onClick={() => setShowLeaveModal(false)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '16px',
+                background: 'transparent',
+                border: 'none',
+                color: '#94A3B8',
+                cursor: 'pointer',
+                padding: '4px',
+                borderRadius: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#F8FAFC';
+                e.currentTarget.style.background = '#334155';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#94A3B8';
+                e.currentTarget.style.background = 'transparent';
+              }}
+              title="Close"
+            >
+              <XIcon size={18} />
+            </button>
+
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '12px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#EF4444',
+                  flexShrink: 0,
+                }}
+              >
+                <PhoneOffIcon size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#F8FAFC' }}>
+                  Leave Session?
+                </h3>
+                <p style={{ margin: '3px 0 0', fontSize: '12.5px', color: '#94A3B8' }}>
+                  Choose how you want to exit this call
+                </p>
+              </div>
+            </div>
+
+            {/* Options List */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+              {/* Option 1: End & Complete */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLeaveModal(false);
+                  setShowCompleteModal(true);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(13, 148, 136, 0.18), rgba(13, 148, 136, 0.08))',
+                  border: '1px solid #0D9488',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(13, 148, 136, 0.28)';
+                  e.currentTarget.style.borderColor = '#14B8A6';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'linear-gradient(135deg, rgba(13, 148, 136, 0.18), rgba(13, 148, 136, 0.08))';
+                  e.currentTarget.style.borderColor = '#0D9488';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      background: '#0D9488',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fff',
+                      flexShrink: 0,
+                      marginTop: '2px',
+                    }}
+                  >
+                    <CheckCircleIcon size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      End & Complete Session
+                      <span style={{ fontSize: '10px', background: 'rgba(20, 184, 166, 0.2)', color: '#2DD4BF', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                        Conclude Call
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px', lineHeight: 1.4 }}>
+                      Mark session complete, save takeaways, and release escrow payment.
+                    </div>
+                  </div>
+                </div>
+              </button>
+
+              {/* Option 2: Just Leave Call Room */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLeaveModal(false);
+                  navigate(isMentor ? '/mentor/sessions' : '/learner/sessions');
+                }}
+                style={{
+                  background: 'rgba(15, 23, 42, 0.6)',
+                  border: '1px solid #334155',
+                  borderRadius: '12px',
+                  padding: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)';
+                  e.currentTarget.style.borderColor = '#EF4444';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(15, 23, 42, 0.6)';
+                  e.currentTarget.style.borderColor = '#334155';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <div
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      background: '#B91C1C',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fff',
+                      flexShrink: 0,
+                      marginTop: '2px',
+                    }}
+                  >
+                    <PhoneOffIcon size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#F8FAFC' }}>
+                      Leave Call Room
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px', lineHeight: 1.4 }}>
+                      Step out of the call. You can return anytime while the session is active.
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+
+            {/* Bottom Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setShowLeaveModal(false)}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #475569',
+                  color: '#CBD5E1',
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#334155';
+                  e.currentTarget.style.color = '#fff';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = '#CBD5E1';
+                }}
+              >
+                Stay in Call
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SESSION COMPLETION MODAL */}
       {showCompleteModal && (
