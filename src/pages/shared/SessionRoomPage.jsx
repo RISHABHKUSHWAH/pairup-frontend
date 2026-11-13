@@ -97,6 +97,14 @@ export default function SessionRoomPage() {
     } else {
       setActiveTab(tab);
       setIsSidebarOpen(true);
+      if (tab === 'files') {
+        bookingApi
+          .getSessionFiles(bookingId)
+          .then((res) => {
+            if (Array.isArray(res)) setFiles(res);
+          })
+          .catch(() => {});
+      }
     }
   };
 
@@ -533,9 +541,11 @@ export default function SessionRoomPage() {
     }
   }, [isCamOff]);
 
-  // 3. Signaling Polling for chat messages & status events
+  // 3. Signaling Polling for chat messages, file sharing & status events
   const startSignalingSync = () => {
     if (signalingIntervalRef.current) clearInterval(signalingIntervalRef.current);
+
+    let pollCounter = 0;
 
     signalingIntervalRef.current = setInterval(async () => {
       try {
@@ -546,6 +556,25 @@ export default function SessionRoomPage() {
           handleSignalMessage(sig);
         }
       } catch (_) {}
+
+      // Background periodic fallback: auto-sync session files every 4 seconds without manual refresh
+      pollCounter++;
+      if (pollCounter % 4 === 0) {
+        try {
+          const freshFiles = await bookingApi.getSessionFiles(bookingId);
+          if (Array.isArray(freshFiles)) {
+            setFiles((prev) => {
+              if (
+                freshFiles.length !== prev.length ||
+                freshFiles.some((f, idx) => prev[idx]?.id !== f.id)
+              ) {
+                return freshFiles;
+              }
+              return prev;
+            });
+          }
+        } catch (_) {}
+      }
     }, 1000);
   };
 
@@ -558,11 +587,29 @@ export default function SessionRoomPage() {
           id: sig.id || Date.now(),
           sender: data.sender_name || sessionData?.other_name || 'Counterpart',
           isMe: false,
+          isSystem: Boolean(data.isSystem),
           text: data.text || '',
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
       setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    } else if (signal_type === 'file') {
+      // Counterpart shared a file attachment: update files immediately
+      const fileData = data;
+      if (fileData) {
+        setFiles((prev) => {
+          if (prev.some((f) => f.id === fileData.id)) return prev;
+          return [fileData, ...prev];
+        });
+        toast.info(`📎 ${fileData.uploader_name || sessionData?.other_name || 'Counterpart'} shared a file: ${fileData.filename}`);
+      }
+      // Guarantee full list sync from server
+      bookingApi
+        .getSessionFiles(bookingId)
+        .then((res) => {
+          if (Array.isArray(res)) setFiles(res);
+        })
+        .catch(() => {});
     } else if (signal_type === 'state') {
       if (data.isCamOff !== undefined) setIsRemoteCamOff(data.isCamOff);
       if (data.isMuted !== undefined) setIsRemoteMuted(data.isMuted);
@@ -854,7 +901,28 @@ export default function SessionRoomPage() {
 
     try {
       const uploaded = await bookingApi.uploadSessionFile(bookingId, formData);
-      setFiles((prev) => [uploaded, ...prev]);
+      const fileData = uploaded?.data || uploaded;
+
+      if (fileData) {
+        setFiles((prev) => {
+          if (prev.some((f) => f.id === fileData.id)) return prev;
+          return [fileData, ...prev];
+        });
+
+        // Broadcast real-time signal to counterpart so file displays immediately without page refresh
+        bookingApi
+          .sendSessionSignal(bookingId, 'file', fileData)
+          .catch((err) => console.warn('Could not broadcast file signal:', err));
+
+        // Also broadcast chat notice to counterpart
+        bookingApi
+          .sendSessionSignal(bookingId, 'chat', {
+            text: `📎 ${user?.name || 'A user'} shared a file: "${fileData.filename || file.name}" (${(((fileData.file_size || file.size) || 0) / 1024).toFixed(1)} KB)`,
+            sender_name: 'PairUp System',
+            isSystem: true,
+          })
+          .catch(() => {});
+      }
 
       setChatMessages((prev) => [
         ...prev,
@@ -862,10 +930,19 @@ export default function SessionRoomPage() {
           id: Date.now(),
           sender: 'PairUp System',
           isSystem: true,
-          text: `📎 ${user?.name || 'A user'} shared a file: "${file.name}" (${(file.size / 1024).toFixed(1)} KB)`,
+          text: `📎 ${user?.name || 'You'} shared a file: "${file.name}" (${(file.size / 1024).toFixed(1)} KB)`,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
+      toast.success(`File "${file.name}" shared successfully`);
+
+      // Refetch files in background to ensure database-level consistency
+      bookingApi
+        .getSessionFiles(bookingId)
+        .then((res) => {
+          if (Array.isArray(res)) setFiles(res);
+        })
+        .catch(() => {});
     } catch (err) {
       toast.error('Failed to upload file: ' + err.message);
     } finally {
@@ -1797,7 +1874,15 @@ export default function SessionRoomPage() {
 
                     <button
                       type="button"
-                      onClick={() => setActiveTab('files')}
+                      onClick={() => {
+                        setActiveTab('files');
+                        bookingApi
+                          .getSessionFiles(bookingId)
+                          .then((res) => {
+                            if (Array.isArray(res)) setFiles(res);
+                          })
+                          .catch(() => {});
+                      }}
                       style={{
                         padding: '9px 6px',
                         background: activeTab === 'files' ? '#1E293B' : 'transparent',
