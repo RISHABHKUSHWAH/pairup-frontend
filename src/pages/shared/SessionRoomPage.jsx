@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useParams, useNavigate, Link } from 'react-router-dom';
 import AgoraRTC from 'agora-rtc-sdk-ng';
+import { buildAgoraToken, DEFAULT_AGORA_APP_ID, DEFAULT_AGORA_APP_CERTIFICATE } from '../../api/modules/agoraTokenBuilder';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
+import PairUpLogo from '../../components/PairUpLogo';
 import { bookingApi, initials, formatCurrency } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -18,6 +20,9 @@ import {
   CheckCircleIcon,
   DocumentIcon,
   ArrowLeftIcon,
+  XIcon,
+  MaximizeIcon,
+  MinimizeIcon,
 } from '../../components/Icons';
 import { useToast } from '../../context';
 
@@ -79,10 +84,48 @@ export default function SessionRoomPage() {
   const localAudioTrackRef = useRef(null);
   const localVideoTrackRef = useRef(null);
   const localScreenTrackRef = useRef(null);
+  const localScreenAudioTrackRef = useRef(null);
   const remoteUserRef = useRef(null);
 
   // Active sidebar tab: 'notes' | 'chat' | 'files'
   const [activeTab, setActiveTab] = useState('notes');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  const handleToggleSidebarTab = (tab) => {
+    if (isSidebarOpen && activeTab === tab) {
+      setIsSidebarOpen(false);
+    } else {
+      setActiveTab(tab);
+      setIsSidebarOpen(true);
+    }
+  };
+
+  // Fullscreen state & handler
+  const [isFullscreen, setIsFullscreen] = useState(
+    typeof document !== 'undefined' ? Boolean(document.fullscreenElement) : false
+  );
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  const handleToggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.warn('Error entering fullscreen:', err);
+      });
+    } else if (document.exitFullscreen) {
+      document.exitFullscreen().catch((err) => {
+        console.warn('Error exiting fullscreen:', err);
+      });
+    }
+  };
 
   // Notes state
   const [notes, setNotes] = useState('');
@@ -235,6 +278,30 @@ export default function SessionRoomPage() {
     initSession();
   }, [bookingId]);
 
+  // Ensure the session room takes 100% full screen width & height without zoom offset
+  useEffect(() => {
+    document.documentElement.classList.add('in-session-room');
+    document.body.classList.add('in-session-room');
+    const origZoom = document.documentElement.style.zoom;
+    const origBg = document.body.style.background;
+    const origBgImg = document.body.style.backgroundImage;
+    const origOverflow = document.body.style.overflow;
+
+    document.documentElement.style.zoom = '1';
+    document.body.style.background = '#0B1120';
+    document.body.style.backgroundImage = 'none';
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.documentElement.classList.remove('in-session-room');
+      document.body.classList.remove('in-session-room');
+      document.documentElement.style.zoom = origZoom;
+      document.body.style.background = origBg;
+      document.body.style.backgroundImage = origBgImg;
+      document.body.style.overflow = origOverflow;
+    };
+  }, []);
+
   // 2. Initialize Agora RTC Client and Local Tracks
   useEffect(() => {
     let active = true;
@@ -331,14 +398,30 @@ export default function SessionRoomPage() {
             videoTrack.play(localVideoContainerRef.current);
           }
 
-          // Join Agora Channel
-          const appId = sessionData?.app_id || 'test_agora_app_id';
-          const channelName = sessionData?.channel_name || `pairup-session-${bookingId}`;
-          const token = sessionData?.token || null;
-          const uid = sessionData?.uid || Number(user?.id) || Math.floor(Math.random() * 100000);
+          // Join Agora Channel with verified App ID and Token
+          const appId =
+            sessionData?.app_id && sessionData.app_id !== 'test_agora_app_id'
+              ? sessionData.app_id
+              : (import.meta.env.VITE_AGORA_APP_ID || DEFAULT_AGORA_APP_ID);
+          const appCertificate =
+            sessionData?.app_certificate ||
+            import.meta.env.VITE_AGORA_APP_CERTIFICATE ||
+            DEFAULT_AGORA_APP_CERTIFICATE;
+          const channelName = sessionData?.channel_name || sessionData?.room_name || `pairup-session-${bookingId}`;
+          const uid = Number(sessionData?.uid || user?.id || Math.floor(Math.random() * 100000));
 
-          await client.join(appId, channelName, token, uid);
-          console.log('>>> Agora joined channel:', channelName, 'UID:', uid);
+          let token = sessionData?.token;
+          if (!token || String(token).startsWith('eyJ') || String(token) === 'test_token') {
+            try {
+              token = await buildAgoraToken(appId, appCertificate, channelName, uid);
+            } catch (tokenBuildErr) {
+              console.warn('Browser buildAgoraToken warning:', tokenBuildErr);
+              token = null;
+            }
+          }
+
+          await client.join(appId, channelName, token || null, uid);
+          console.log('>>> Agora successfully joined channel:', channelName, 'UID:', uid);
 
           // Publish local tracks
           const tracksToPublish = [];
@@ -399,6 +482,10 @@ export default function SessionRoomPage() {
         localScreenTrackRef.current.close();
         localScreenTrackRef.current = null;
       }
+      if (localScreenAudioTrackRef.current) {
+        localScreenAudioTrackRef.current.close();
+        localScreenAudioTrackRef.current = null;
+      }
       if (agoraClientRef.current) {
         agoraClientRef.current.leave().catch(() => {});
         agoraClientRef.current = null;
@@ -413,9 +500,9 @@ export default function SessionRoomPage() {
     };
   }, [sessionData, tooEarlyInfo]);
 
-  // Re-play remote video if state changes or container re-mounts
+  // Re-play remote video or screen share if state changes or container re-mounts
   useEffect(() => {
-    if (hasRemoteVideo && !isRemoteCamOff && remoteUserRef.current?.videoTrack && remoteVideoContainerRef.current) {
+    if ((isRemoteScreenSharing || (hasRemoteVideo && !isRemoteCamOff)) && remoteUserRef.current?.videoTrack && remoteVideoContainerRef.current) {
       try {
         remoteUserRef.current.videoTrack.play(remoteVideoContainerRef.current);
       } catch (e) {
@@ -423,6 +510,17 @@ export default function SessionRoomPage() {
       }
     }
   }, [hasRemoteVideo, isRemoteCamOff, isRemoteScreenSharing]);
+
+  // Re-play local screen share in main stage if container re-mounts
+  useEffect(() => {
+    if (isScreenSharing && localScreenTrackRef.current && screenVideoContainerRef.current) {
+      try {
+        localScreenTrackRef.current.play(screenVideoContainerRef.current);
+      } catch (e) {
+        console.warn('Agora local screen share play:', e);
+      }
+    }
+  }, [isScreenSharing]);
 
   // Re-play local video in PIP container
   useEffect(() => {
@@ -529,7 +627,7 @@ export default function SessionRoomPage() {
   // 6. Screen Share Track Handling (Agora RTC)
   const handleToggleScreenShare = async () => {
     if (isScreenSharing) {
-      handleStopScreenShare();
+      await handleStopScreenShare();
       return;
     }
 
@@ -540,28 +638,55 @@ export default function SessionRoomPage() {
         return;
       }
 
-      // Create Agora screen video track
-      const screenTrack = await AgoraRTC.createScreenVideoTrack({
-        encoderConfig: '1080p_1',
-      }, 'enable');
+      // Create Agora screen video track (with optional audio)
+      // Passing 'auto' cleanly handles sharing with or without system audio across all browsers
+      const screenResult = await AgoraRTC.createScreenVideoTrack(
+        {
+          encoderConfig: '1080p_1',
+          optimizationMode: 'detail',
+        },
+        'auto'
+      );
 
-      localScreenTrackRef.current = screenTrack;
+      // Handle return type: array [videoTrack, audioTrack] or single videoTrack
+      const screenVideoTrack = Array.isArray(screenResult) ? screenResult[0] : screenResult;
+      const screenAudioTrack = Array.isArray(screenResult) ? screenResult[1] : null;
+
+      localScreenTrackRef.current = screenVideoTrack;
+      localScreenAudioTrackRef.current = screenAudioTrack;
       setIsScreenSharing(true);
 
-      // Unpublish camera track, publish screen track
+      // Unpublish camera track so screen track takes center stage
       if (localVideoTrackRef.current) {
-        await client.unpublish(localVideoTrackRef.current);
+        try {
+          await client.unpublish(localVideoTrackRef.current);
+        } catch (unpubErr) {
+          console.warn('Agora local camera unpublish warning:', unpubErr);
+        }
       }
-      await client.publish(screenTrack);
 
+      // Publish screen video track and optional audio track
+      const tracksToPublish = [screenVideoTrack];
+      if (screenAudioTrack) {
+        tracksToPublish.push(screenAudioTrack);
+      }
+      await client.publish(tracksToPublish);
+
+      // Render local preview on the stage
       if (screenVideoContainerRef.current) {
-        screenTrack.play(screenVideoContainerRef.current);
+        try {
+          screenVideoTrack.play(screenVideoContainerRef.current);
+        } catch (playErr) {
+          console.warn('Could not play screen track locally:', playErr);
+        }
       }
 
-      screenTrack.on('track-ended', () => {
+      // Automatically stop sharing when user clicks native browser "Stop sharing" bar
+      screenVideoTrack.on('track-ended', () => {
         handleStopScreenShare();
       });
 
+      // Broadcast screen share state to counterpart
       bookingApi.sendSessionSignal(bookingId, 'state', {
         isScreenSharing: true,
         isCamOff,
@@ -570,27 +695,57 @@ export default function SessionRoomPage() {
     } catch (err) {
       console.warn('Agora screen sharing cancelled or error:', err);
       setIsScreenSharing(false);
+      if (localScreenTrackRef.current) {
+        try {
+          localScreenTrackRef.current.close();
+        } catch (_) {}
+        localScreenTrackRef.current = null;
+      }
+      if (localScreenAudioTrackRef.current) {
+        try {
+          localScreenAudioTrackRef.current.close();
+        } catch (_) {}
+        localScreenAudioTrackRef.current = null;
+      }
     }
   };
 
   const handleStopScreenShare = async () => {
     const client = agoraClientRef.current;
-    if (localScreenTrackRef.current) {
-      if (client) {
-        try {
-          await client.unpublish(localScreenTrackRef.current);
-        } catch (_) {}
+
+    const tracksToUnpublish = [];
+    if (localScreenTrackRef.current) tracksToUnpublish.push(localScreenTrackRef.current);
+    if (localScreenAudioTrackRef.current) tracksToUnpublish.push(localScreenAudioTrackRef.current);
+
+    if (client && tracksToUnpublish.length > 0) {
+      try {
+        await client.unpublish(tracksToUnpublish);
+      } catch (err) {
+        console.warn('Error unpublishing screen tracks:', err);
       }
-      localScreenTrackRef.current.close();
+    }
+
+    if (localScreenTrackRef.current) {
+      try {
+        localScreenTrackRef.current.close();
+      } catch (_) {}
       localScreenTrackRef.current = null;
     }
+
+    if (localScreenAudioTrackRef.current) {
+      try {
+        localScreenAudioTrackRef.current.close();
+      } catch (_) {}
+      localScreenAudioTrackRef.current = null;
+    }
+
     setIsScreenSharing(false);
 
-    // Re-publish camera track
-    if (localVideoTrackRef.current && client) {
+    // Re-publish camera track if available and camera is not turned off
+    if (localVideoTrackRef.current && client && !isCamOff) {
       try {
         await client.publish(localVideoTrackRef.current);
-        if (localVideoContainerRef.current && !isCamOff) {
+        if (localVideoContainerRef.current) {
           localVideoTrackRef.current.play(localVideoContainerRef.current);
         }
       } catch (e) {
@@ -832,14 +987,78 @@ export default function SessionRoomPage() {
   const isMentor = sessionData.is_mentor;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0B1120', color: '#F8FAFC', display: 'flex', flexDirection: 'column' }}>
-      <Navbar />
+    <div
+      className="session-room-fullscreen"
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        width: '100vw',
+        height: '100vh',
+        maxWidth: '100vw',
+        maxHeight: '100vh',
+        background: '#0B1120',
+        color: '#F8FAFC',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        zIndex: 99999,
+        margin: 0,
+        padding: 0,
+        boxSizing: 'border-box',
+      }}
+    >
+      <main
+        style={{
+          flex: 1,
+          minHeight: 0,
+          padding: '8px 12px 10px',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          width: '100%',
+          height: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '100%',
+            width: '100%',
+            height: '100%',
+            margin: 0,
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* Top Bar: PairUp Logo, Session Info, Connection Status, Timer, Actions */}
+          <div
+            style={{
+              background: '#1E293B',
+              borderRadius: '12px',
+              padding: '6px 14px',
+              marginBottom: '8px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              border: '1px solid #334155',
+              flexWrap: 'wrap',
+              gap: '8px',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '2px' }}>
+                <PairUpLogo size={20} />
+                <span style={{ fontWeight: 800, fontSize: '14.5px', color: '#F8FAFC', letterSpacing: '-0.3px' }}>PairUp</span>
+              </div>
 
-      <main style={{ flex: 1, padding: '16px 24px 32px' }}>
-        <div style={{ maxWidth: '1440px', margin: '0 auto' }}>
-          {/* Top Bar: Session Info, Connection Status, Timer, Actions */}
-          <div style={{ background: '#1E293B', borderRadius: '16px', padding: '14px 20px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #334155', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '1px', height: '18px', background: '#334155' }} />
+
               <button
                 type="button"
                 onClick={() => {
@@ -851,13 +1070,13 @@ export default function SessionRoomPage() {
                   background: 'transparent',
                   border: '1px solid #475569',
                   color: '#94A3B8',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
+                  padding: '5px 10px',
+                  borderRadius: '6px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px',
-                  fontSize: '12.5px',
+                  gap: '5px',
+                  fontSize: '12px',
                   fontWeight: 600,
                 }}
               >
@@ -865,30 +1084,30 @@ export default function SessionRoomPage() {
               </button>
 
               <div>
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h2 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span>{sessionData.topic || 'Mentorship Session'}</span>
-                  <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '6px', background: 'rgba(14, 165, 233, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
+                  <span style={{ fontSize: '11px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(14, 165, 233, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
                     {sessionData.duration_minutes || 60}m · {formatCurrency(sessionData.price || 0)}
                   </span>
                 </h2>
-                <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px' }}>
+                <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '1px' }}>
                   With <strong style={{ color: '#E2E8F0' }}>{otherName}</strong> ({isMentor ? 'Learner' : 'Mentor'}) · Room: <code style={{ color: '#38BDF8', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 5px', borderRadius: '4px' }}>{sessionData.channel_name || sessionData.room_name}</code>
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               {/* Connection Status Pill */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px',
+                  gap: '5px',
                   background: connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)',
                   border: `1px solid ${connectionStatus === 'connected' ? 'rgba(34, 197, 94, 0.4)' : 'rgba(234, 179, 8, 0.4)'}`,
-                  borderRadius: '10px',
-                  padding: '6px 12px',
-                  fontSize: '12px',
+                  borderRadius: '8px',
+                  padding: '4px 10px',
+                  fontSize: '11.5px',
                   fontWeight: 700,
                   color: connectionStatus === 'connected' ? '#4ADE80' : '#FBBF24',
                 }}
@@ -911,9 +1130,9 @@ export default function SessionRoomPage() {
                   background: testLoopbackActive ? '#0284C7' : '#334155',
                   color: '#fff',
                   border: 'none',
-                  padding: '6px 12px',
-                  borderRadius: '10px',
-                  fontSize: '12px',
+                  padding: '5px 10px',
+                  borderRadius: '8px',
+                  fontSize: '11.5px',
                   fontWeight: 600,
                   cursor: 'pointer',
                 }}
@@ -926,18 +1145,18 @@ export default function SessionRoomPage() {
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
+                  gap: '6px',
                   background: isTimeOver ? '#450A0A' : isEndingSoon ? '#422006' : '#0F172A',
-                  padding: '6px 14px',
-                  borderRadius: '10px',
+                  padding: '4px 10px',
+                  borderRadius: '8px',
                   border: `1px solid ${isTimeOver ? '#EF4444' : isEndingSoon ? '#F59E0B' : '#334155'}`,
                 }}
               >
-                <ClockIcon size={16} className={isTimeOver ? 'text-red-400' : isEndingSoon ? 'text-amber-400' : 'text-slate-400'} />
+                <ClockIcon size={14} className={isTimeOver ? 'text-red-400' : isEndingSoon ? 'text-amber-400' : 'text-slate-400'} />
                 <span
                   style={{
                     fontFamily: 'monospace',
-                    fontSize: '14px',
+                    fontSize: '13px',
                     fontWeight: 700,
                     color: isTimeOver ? '#F87171' : isEndingSoon ? '#FBBF24' : '#F8FAFC',
                   }}
@@ -947,13 +1166,13 @@ export default function SessionRoomPage() {
                     : `00:00 / ${totalMinutes}:00`}
                 </span>
                 {(connectionStatus === 'connected' || testLoopbackActive) && isEndingSoon && !isTimeOver && (
-                  <span style={{ fontSize: '11px', color: '#FBBF24', fontWeight: 700, marginLeft: '4px' }}>5m left</span>
+                  <span style={{ fontSize: '10.5px', color: '#FBBF24', fontWeight: 700, marginLeft: '2px' }}>5m left</span>
                 )}
                 {(connectionStatus === 'connected' || testLoopbackActive) && isTimeOver && (
-                  <span style={{ fontSize: '11px', color: '#F87171', fontWeight: 700, marginLeft: '4px' }}>Overtime</span>
+                  <span style={{ fontSize: '10.5px', color: '#F87171', fontWeight: 700, marginLeft: '2px' }}>Overtime</span>
                 )}
                 {connectionStatus !== 'connected' && !testLoopbackActive && (
-                  <span style={{ fontSize: '11px', color: '#94A3B8', fontWeight: 500, marginLeft: '4px' }}>Ready · Timer Paused</span>
+                  <span style={{ fontSize: '10.5px', color: '#94A3B8', fontWeight: 500, marginLeft: '2px' }}>Ready · Paused</span>
                 )}
               </div>
 
@@ -965,38 +1184,56 @@ export default function SessionRoomPage() {
                   background: '#0D9488',
                   color: '#fff',
                   border: 'none',
-                  padding: '8px 16px',
-                  borderRadius: '10px',
-                  fontSize: '13px',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
                   fontWeight: 700,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px',
+                  gap: '5px',
                 }}
               >
-                <CheckCircleIcon size={16} />
+                <CheckCircleIcon size={14} />
                 End & Complete
               </button>
             </div>
           </div>
 
           {/* Main Layout: Video Stage (Left) & Collaboration Sidebar (Right) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: '16px', minHeight: '620px' }}>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'grid',
+              gridTemplateColumns: isSidebarOpen ? 'minmax(0, 1fr) 340px' : 'minmax(0, 1fr)',
+              gap: isSidebarOpen ? '10px' : '0',
+              height: '100%',
+              transition: 'grid-template-columns 0.2s ease',
+            }}
+          >
             {/* Left Column: Video Stage & Controls */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                height: '100%',
+                minHeight: 0,
+              }}
+            >
               <div
                 style={{
                   flex: 1,
                   background: '#060A12',
-                  borderRadius: '16px',
+                  borderRadius: '12px',
                   position: 'relative',
                   overflow: 'hidden',
                   border: '1px solid #1E293B',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  minHeight: '480px',
+                  minHeight: 0,
                 }}
               >
                 {/* 1. Screen Share Display */}
@@ -1027,8 +1264,8 @@ export default function SessionRoomPage() {
                       <ScreenShareIcon size={14} /> You are sharing your screen
                     </div>
                   </div>
-                ) : hasRemoteVideo && !isRemoteCamOff ? (
-                  /* 2. REAL REMOTE LIVE VIDEO STREAM (Agora Container) */
+                ) : isRemoteScreenSharing || (hasRemoteVideo && !isRemoteCamOff) ? (
+                  /* 2. REAL REMOTE LIVE VIDEO STREAM / SCREEN SHARE (Agora Container) */
                   <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
                     <div
                       ref={attachRemoteContainer}
@@ -1051,33 +1288,42 @@ export default function SessionRoomPage() {
                         zIndex: 5,
                       }}
                     >
-                      <span>{otherName}</span>
-                      {isRemoteMuted && <span style={{ color: '#EF4444' }}>(Muted)</span>}
+                      {isRemoteScreenSharing ? (
+                        <>
+                          <ScreenShareIcon size={14} style={{ color: '#38BDF8' }} />
+                          <span>{otherName}'s Screen</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>{otherName}</span>
+                          {isRemoteMuted && <span style={{ color: '#EF4444' }}>(Muted)</span>}
+                        </>
+                      )}
                     </div>
                   </div>
                 ) : (
                   /* 3. Remote Participant Waiting or Camera Off State */
-                  <div style={{ textAlign: 'center', padding: '40px', maxWidth: '420px' }}>
+                  <div style={{ textAlign: 'center', padding: '16px', maxWidth: '380px' }}>
                     <div
                       style={{
-                        width: '104px',
-                        height: '104px',
+                        width: '68px',
+                        height: '68px',
                         borderRadius: '50%',
                         background: 'linear-gradient(135deg, #0284C7, #0369A1)',
-                        margin: '0 auto 16px',
+                        margin: '0 auto 10px',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         color: '#fff',
-                        fontSize: '34px',
+                        fontSize: '24px',
                         fontWeight: 800,
-                        border: '3px solid #38BDF8',
-                        boxShadow: '0 0 30px rgba(56, 189, 248, 0.3)',
+                        border: '2px solid #38BDF8',
+                        boxShadow: '0 0 20px rgba(56, 189, 248, 0.25)',
                       }}
                     >
                       {initials(otherName)}
                     </div>
-                    <h4 style={{ color: '#F8FAFC', margin: '0 0 6px', fontSize: '18px', fontWeight: 700 }}>
+                    <h4 style={{ color: '#F8FAFC', margin: '0 0 4px', fontSize: '15px', fontWeight: 700 }}>
                       {otherName} ({isMentor ? 'Learner' : 'Mentor'})
                     </h4>
                     {hasRemoteVideo && isRemoteCamOff ? (
@@ -1087,48 +1333,48 @@ export default function SessionRoomPage() {
                           alignItems: 'center',
                           gap: '6px',
                           background: '#1E293B',
-                          padding: '6px 14px',
-                          borderRadius: '20px',
-                          fontSize: '12px',
+                          padding: '4px 12px',
+                          borderRadius: '16px',
+                          fontSize: '11.5px',
                           color: '#94A3B8',
                         }}
                       >
-                        <CameraOffIcon size={14} className="text-amber-400" />
+                        <CameraOffIcon size={13} className="text-amber-400" />
                         Camera paused · Audio active
                       </div>
                     ) : (
                       <div>
-                        <p style={{ color: '#94A3B8', fontSize: '13px', margin: '8px 0 14px', lineHeight: 1.6 }}>
+                        <p style={{ color: '#94A3B8', fontSize: '12px', margin: '6px 0 10px', lineHeight: 1.45 }}>
                           Waiting for <strong>{otherName}</strong> ({isMentor ? 'Learner' : 'Mentor'}) to enter the session room.
                           <br />
                           {sessionData?.scheduled_at && (
-                            <span style={{ color: '#38BDF8', display: 'inline-block', marginTop: '4px' }}>
-                              📅 Scheduled Time: {new Date(sessionData.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                            <span style={{ color: '#38BDF8', display: 'inline-block', marginTop: '2px' }}>
+                              📅 Scheduled: {new Date(sessionData.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
                             </span>
                           )}
                           <br />
-                          <span style={{ fontSize: '11.5px', color: '#64748B', display: 'inline-block', marginTop: '4px' }}>
-                            Video, audio, and session timer start automatically when both participants are connected.
+                          <span style={{ fontSize: '11px', color: '#64748B', display: 'inline-block', marginTop: '2px' }}>
+                            Media and session timer start when both join.
                           </span>
                         </p>
                         <div
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '8px',
+                            gap: '6px',
                             background: '#1E293B',
                             border: '1px solid #334155',
-                            padding: '6px 14px',
-                            borderRadius: '20px',
-                            fontSize: '12px',
+                            padding: '4px 12px',
+                            borderRadius: '16px',
+                            fontSize: '11px',
                             color: '#38BDF8',
-                            marginBottom: '16px',
+                            marginBottom: '10px',
                           }}
                         >
                           <div
                             style={{
-                              width: '8px',
-                              height: '8px',
+                              width: '7px',
+                              height: '7px',
                               borderRadius: '50%',
                               background: '#38BDF8',
                               animation: 'pulse 1.5s infinite',
@@ -1136,7 +1382,26 @@ export default function SessionRoomPage() {
                           />
                           Room Ready · Waiting for {otherName}…
                         </div>
-                        <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            onClick={handleToggleLoopback}
+                            style={{
+                              background: '#0284C7',
+                              color: '#fff',
+                              border: 'none',
+                              padding: '5px 12px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            🧪 Test Dual Video View
+                          </button>
                           <button
                             type="button"
                             onClick={() => navigate(isMentor ? '/mentor/sessions' : '/learner/sessions')}
@@ -1144,14 +1409,17 @@ export default function SessionRoomPage() {
                               background: 'transparent',
                               border: '1px solid #475569',
                               color: '#CBD5E1',
-                              padding: '6px 16px',
-                              borderRadius: '8px',
-                              fontSize: '12px',
+                              padding: '5px 12px',
+                              borderRadius: '6px',
+                              fontSize: '11.5px',
                               cursor: 'pointer',
                             }}
                           >
-                            ← Return to Sessions (Join Later)
+                            ← Return to Sessions
                           </button>
+                        </div>
+                        <div style={{ marginTop: '8px', fontSize: '10.5px', color: '#64748B' }}>
+                          💡 Multi-device testing: Open in another window/device logged in as <strong>{otherName}</strong>.
                         </div>
                       </div>
                     )}
@@ -1162,15 +1430,15 @@ export default function SessionRoomPage() {
                 <div
                   style={{
                     position: 'absolute',
-                    bottom: '16px',
-                    right: '16px',
-                    width: '180px',
-                    height: '120px',
-                    borderRadius: '12px',
+                    bottom: '10px',
+                    right: '10px',
+                    width: '150px',
+                    height: '100px',
+                    borderRadius: '10px',
                     background: '#1E293B',
                     border: '2px solid #334155',
                     overflow: 'hidden',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                    boxShadow: '0 6px 18px rgba(0,0,0,0.6)',
                     zIndex: 10,
                   }}
                 >
@@ -1184,11 +1452,11 @@ export default function SessionRoomPage() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         color: '#94A3B8',
-                        fontSize: '12px',
-                        gap: '4px',
+                        fontSize: '11px',
+                        gap: '3px',
                       }}
                     >
-                      <CameraOffIcon size={22} />
+                      <CameraOffIcon size={18} />
                       <span>{mediaPermissionDenied ? 'No Camera' : 'Camera Off'}</span>
                     </div>
                   ) : (
@@ -1200,12 +1468,12 @@ export default function SessionRoomPage() {
                   <div
                     style={{
                       position: 'absolute',
-                      bottom: '6px',
-                      left: '8px',
-                      background: 'rgba(15, 23, 42, 0.75)',
-                      padding: '2px 6px',
+                      bottom: '4px',
+                      left: '6px',
+                      background: 'rgba(15, 23, 42, 0.8)',
+                      padding: '1px 5px',
                       borderRadius: '4px',
-                      fontSize: '10px',
+                      fontSize: '9.5px',
                       color: '#E2E8F0',
                       fontWeight: 600,
                       zIndex: 2,
@@ -1220,14 +1488,14 @@ export default function SessionRoomPage() {
               <div
                 style={{
                   background: '#1E293B',
-                  borderRadius: '16px',
-                  padding: '12px 20px',
+                  borderRadius: '12px',
+                  padding: '6px 16px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '16px',
+                  gap: '12px',
                   border: '1px solid #334155',
-                  flexWrap: 'wrap',
+                  flexShrink: 0,
                 }}
               >
                 {/* Mute/Unmute */}
@@ -1235,8 +1503,8 @@ export default function SessionRoomPage() {
                   type="button"
                   onClick={handleToggleMic}
                   style={{
-                    width: '44px',
-                    height: '44px',
+                    width: '38px',
+                    height: '38px',
                     borderRadius: '50%',
                     background: isMuted ? '#EF4444' : '#334155',
                     color: '#fff',
@@ -1249,7 +1517,7 @@ export default function SessionRoomPage() {
                   }}
                   title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
                 >
-                  {isMuted ? <MicOffIcon size={20} /> : <MicIcon size={20} />}
+                  {isMuted ? <MicOffIcon size={18} /> : <MicIcon size={18} />}
                 </button>
 
                 {/* Camera Toggle */}
@@ -1257,8 +1525,8 @@ export default function SessionRoomPage() {
                   type="button"
                   onClick={handleToggleCamera}
                   style={{
-                    width: '44px',
-                    height: '44px',
+                    width: '38px',
+                    height: '38px',
                     borderRadius: '50%',
                     background: isCamOff ? '#EF4444' : '#334155',
                     color: '#fff',
@@ -1271,7 +1539,7 @@ export default function SessionRoomPage() {
                   }}
                   title={isCamOff ? 'Turn Camera On' : 'Turn Camera Off'}
                 >
-                  {isCamOff ? <CameraOffIcon size={20} /> : <CameraIcon size={20} />}
+                  {isCamOff ? <CameraOffIcon size={18} /> : <CameraIcon size={18} />}
                 </button>
 
                 {/* Screen Share */}
@@ -1279,8 +1547,8 @@ export default function SessionRoomPage() {
                   type="button"
                   onClick={handleToggleScreenShare}
                   style={{
-                    width: '44px',
-                    height: '44px',
+                    width: '38px',
+                    height: '38px',
                     borderRadius: '50%',
                     background: isScreenSharing ? '#0284C7' : '#334155',
                     color: '#fff',
@@ -1293,7 +1561,7 @@ export default function SessionRoomPage() {
                   }}
                   title={isScreenSharing ? 'Stop Screen Sharing' : 'Share Screen'}
                 >
-                  <ScreenShareIcon size={20} />
+                  <ScreenShareIcon size={18} />
                 </button>
 
                 {/* Leave Session Call */}
@@ -1305,8 +1573,8 @@ export default function SessionRoomPage() {
                     }
                   }}
                   style={{
-                    width: '44px',
-                    height: '44px',
+                    width: '38px',
+                    height: '38px',
                     borderRadius: '50%',
                     background: '#B91C1C',
                     color: '#fff',
@@ -1315,109 +1583,283 @@ export default function SessionRoomPage() {
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    marginLeft: '8px',
+                    marginLeft: '4px',
                   }}
                   title="Leave Call"
                 >
-                  <PhoneOffIcon size={20} />
+                  <PhoneOffIcon size={18} />
                 </button>
-              </div>
-            </div>
 
-            {/* Right Column: Collaboration Sidebar (Notes, Chat, Shared Files) */}
-            <div
-              style={{
-                background: '#1E293B',
-                borderRadius: '16px',
-                border: '1px solid #334155',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                minHeight: '600px',
-              }}
-            >
-              {/* Tab Navigation */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid #334155', background: '#0F172A' }}>
+                {/* Divider between Call Controls and Collaboration Tools */}
+                <div style={{ width: '1px', height: '22px', background: '#334155', margin: '0 4px' }} />
+
+                {/* Notes Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => setActiveTab('notes')}
+                  onClick={() => handleToggleSidebarTab('notes')}
                   style={{
-                    padding: '12px 8px',
-                    background: activeTab === 'notes' ? '#1E293B' : 'transparent',
-                    border: 'none',
-                    borderBottom: activeTab === 'notes' ? '2px solid #0284C7' : 'none',
-                    color: activeTab === 'notes' ? '#F8FAFC' : '#94A3B8',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    background: isSidebarOpen && activeTab === 'notes' ? '#0284C7' : '#334155',
+                    color: '#fff',
+                    border: isSidebarOpen && activeTab === 'notes' ? '1px solid #38BDF8' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
                   }}
+                  title={isSidebarOpen && activeTab === 'notes' ? 'Hide Notes' : 'Open Workspace Notes'}
                 >
-                  <DocumentIcon size={16} /> Notes
+                  <DocumentIcon size={18} />
                 </button>
 
+                {/* Chat Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => setActiveTab('chat')}
+                  onClick={() => handleToggleSidebarTab('chat')}
                   style={{
-                    padding: '12px 8px',
-                    background: activeTab === 'chat' ? '#1E293B' : 'transparent',
-                    border: 'none',
-                    borderBottom: activeTab === 'chat' ? '2px solid #0284C7' : 'none',
-                    color: activeTab === 'chat' ? '#F8FAFC' : '#94A3B8',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    background: isSidebarOpen && activeTab === 'chat' ? '#0284C7' : '#334155',
+                    color: '#fff',
+                    border: isSidebarOpen && activeTab === 'chat' ? '1px solid #38BDF8' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    position: 'relative',
                   }}
+                  title={isSidebarOpen && activeTab === 'chat' ? 'Hide Chat' : 'Open In-Call Chat'}
                 >
-                  <MessageIcon size={16} /> Chat
+                  <MessageIcon size={18} />
                   {chatMessages.length > 1 && (
-                    <span style={{ fontSize: '10px', background: '#0284C7', color: '#fff', padding: '1px 5px', borderRadius: '10px' }}>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '-3px',
+                        right: '-3px',
+                        fontSize: '9px',
+                        background: '#0284C7',
+                        color: '#fff',
+                        padding: '1px 5px',
+                        borderRadius: '10px',
+                        border: '2px solid #1E293B',
+                        fontWeight: 700,
+                      }}
+                    >
                       {chatMessages.length}
                     </span>
                   )}
                 </button>
 
+                {/* Files Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => setActiveTab('files')}
+                  onClick={() => handleToggleSidebarTab('files')}
                   style={{
-                    padding: '12px 8px',
-                    background: activeTab === 'files' ? '#1E293B' : 'transparent',
-                    border: 'none',
-                    borderBottom: activeTab === 'files' ? '2px solid #0284C7' : 'none',
-                    color: activeTab === 'files' ? '#F8FAFC' : '#94A3B8',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    background: isSidebarOpen && activeTab === 'files' ? '#0284C7' : '#334155',
+                    color: '#fff',
+                    border: isSidebarOpen && activeTab === 'files' ? '1px solid #38BDF8' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '6px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    position: 'relative',
                   }}
+                  title={isSidebarOpen && activeTab === 'files' ? 'Hide Files' : 'Open Shared Attachments'}
                 >
-                  <PaperclipIcon size={16} /> Files
+                  <PaperclipIcon size={18} />
                   {files.length > 0 && (
-                    <span style={{ fontSize: '10px', background: '#334155', color: '#fff', padding: '1px 5px', borderRadius: '10px' }}>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '-3px',
+                        right: '-3px',
+                        fontSize: '9px',
+                        background: '#38BDF8',
+                        color: '#0F172A',
+                        padding: '1px 5px',
+                        borderRadius: '10px',
+                        border: '2px solid #1E293B',
+                        fontWeight: 800,
+                      }}
+                    >
                       {files.length}
                     </span>
                   )}
                 </button>
+
+                {/* Fullscreen Toggle Button */}
+                <button
+                  type="button"
+                  onClick={handleToggleFullscreen}
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    background: isFullscreen ? '#0284C7' : '#334155',
+                    color: '#fff',
+                    border: isFullscreen ? '1px solid #38BDF8' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  title={isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
+                >
+                  {isFullscreen ? <MinimizeIcon size={18} /> : <MaximizeIcon size={18} />}
+                </button>
               </div>
+            </div>
+
+            {/* Right Column: Collaboration Sidebar (Notes, Chat, Shared Files) */}
+            {isSidebarOpen && (
+              <div
+                style={{
+                  background: '#1E293B',
+                  borderRadius: '12px',
+                  border: '1px solid #334155',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  height: '100%',
+                  minHeight: 0,
+                }}
+              >
+                {/* Tab Navigation with Close X Icon */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderBottom: '1px solid #334155',
+                    background: '#0F172A',
+                    flexShrink: 0,
+                    paddingRight: '6px',
+                  }}
+                >
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', flex: 1 }}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('notes')}
+                      style={{
+                        padding: '9px 6px',
+                        background: activeTab === 'notes' ? '#1E293B' : 'transparent',
+                        border: 'none',
+                        borderBottom: activeTab === 'notes' ? '2px solid #0284C7' : 'none',
+                        color: activeTab === 'notes' ? '#F8FAFC' : '#94A3B8',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '5px',
+                      }}
+                    >
+                      <DocumentIcon size={15} /> Notes
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('chat')}
+                      style={{
+                        padding: '9px 6px',
+                        background: activeTab === 'chat' ? '#1E293B' : 'transparent',
+                        border: 'none',
+                        borderBottom: activeTab === 'chat' ? '2px solid #0284C7' : 'none',
+                        color: activeTab === 'chat' ? '#F8FAFC' : '#94A3B8',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '5px',
+                      }}
+                    >
+                      <MessageIcon size={15} /> Chat
+                      {chatMessages.length > 1 && (
+                        <span style={{ fontSize: '9.5px', background: '#0284C7', color: '#fff', padding: '1px 5px', borderRadius: '10px' }}>
+                          {chatMessages.length}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('files')}
+                      style={{
+                        padding: '9px 6px',
+                        background: activeTab === 'files' ? '#1E293B' : 'transparent',
+                        border: 'none',
+                        borderBottom: activeTab === 'files' ? '2px solid #0284C7' : 'none',
+                        color: activeTab === 'files' ? '#F8FAFC' : '#94A3B8',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '5px',
+                      }}
+                    >
+                      <PaperclipIcon size={15} /> Files
+                      {files.length > 0 && (
+                        <span style={{ fontSize: '9.5px', background: '#334155', color: '#fff', padding: '1px 5px', borderRadius: '10px' }}>
+                          {files.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Close X Icon in top right corner of notes & file sidebar */}
+                  <button
+                    type="button"
+                    onClick={() => setIsSidebarOpen(false)}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      borderRadius: '6px',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#94A3B8',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginLeft: '6px',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = '#F8FAFC';
+                      e.currentTarget.style.background = '#334155';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = '#94A3B8';
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                    title="Close (Hide) Sidebar"
+                  >
+                    <XIcon size={16} />
+                  </button>
+                </div>
 
               {/* TAB 1: Real-time Notes */}
               {activeTab === 'notes' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', gap: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#CBD5E1' }}>Session Workspace Notes</span>
-                    <span style={{ fontSize: '11px', color: '#64748B' }}>{notesStatus}</span>
+                <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '12px', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#CBD5E1' }}>Workspace Notes</span>
+                    <span style={{ fontSize: '10.5px', color: '#64748B' }}>{notesStatus}</span>
                   </div>
                   <textarea
                     value={notes}
@@ -1425,54 +1867,55 @@ export default function SessionRoomPage() {
                     placeholder="Type code snippets, discussion bullet points, architecture diagrams, or next steps here..."
                     style={{
                       flex: 1,
+                      minHeight: 0,
                       width: '100%',
                       background: '#0F172A',
                       color: '#F8FAFC',
                       border: '1px solid #334155',
-                      borderRadius: '10px',
-                      padding: '12px',
+                      borderRadius: '8px',
+                      padding: '10px',
                       fontFamily: 'monospace',
-                      fontSize: '13px',
-                      lineHeight: 1.6,
+                      fontSize: '12px',
+                      lineHeight: 1.5,
                       resize: 'none',
                       outline: 'none',
                     }}
                   />
-                  <div style={{ fontSize: '11px', color: '#64748B' }}>
-                    💡 Notes are preserved across reconnects and auto-saved to your profile.
+                  <div style={{ fontSize: '10.5px', color: '#64748B', flexShrink: 0 }}>
+                    💡 Notes auto-saved to your profile.
                   </div>
                 </div>
               )}
 
               {/* TAB 2: In-Call Chat */}
               {activeTab === 'chat' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {chatMessages.map((msg) => (
                       <div
                         key={msg.id}
                         style={{
                           alignSelf: msg.isSystem ? 'center' : msg.isMe ? 'flex-end' : 'flex-start',
-                          maxWidth: msg.isSystem ? '95%' : '80%',
+                          maxWidth: msg.isSystem ? '95%' : '85%',
                           background: msg.isSystem ? 'rgba(56, 189, 248, 0.08)' : msg.isMe ? '#0284C7' : '#334155',
                           border: msg.isSystem ? '1px dashed rgba(56, 189, 248, 0.3)' : 'none',
-                          borderRadius: '10px',
-                          padding: '8px 12px',
-                          fontSize: '12.5px',
+                          borderRadius: '8px',
+                          padding: '6px 10px',
+                          fontSize: '12px',
                         }}
                       >
                         {!msg.isSystem && (
-                          <div style={{ fontSize: '10.5px', opacity: 0.7, marginBottom: '2px', fontWeight: 600 }}>
+                          <div style={{ fontSize: '10px', opacity: 0.7, marginBottom: '2px', fontWeight: 600 }}>
                             {msg.sender} · {msg.time}
                           </div>
                         )}
-                        <div style={{ color: msg.isSystem ? '#38BDF8' : '#fff', lineHeight: 1.4 }}>{msg.text}</div>
+                        <div style={{ color: msg.isSystem ? '#38BDF8' : '#fff', lineHeight: 1.35 }}>{msg.text}</div>
                       </div>
                     ))}
                     <div ref={chatBottomRef} />
                   </div>
 
-                  <form onSubmit={handleSendMessage} style={{ padding: '12px', borderTop: '1px solid #334155', display: 'flex', gap: '8px' }}>
+                  <form onSubmit={handleSendMessage} style={{ padding: '8px 12px', borderTop: '1px solid #334155', display: 'flex', gap: '6px', flexShrink: 0 }}>
                     <input
                       type="text"
                       value={chatInput}
@@ -1482,10 +1925,10 @@ export default function SessionRoomPage() {
                         flex: 1,
                         background: '#0F172A',
                         border: '1px solid #334155',
-                        borderRadius: '8px',
-                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        padding: '6px 10px',
                         color: '#fff',
-                        fontSize: '13px',
+                        fontSize: '12px',
                         outline: 'none',
                       }}
                     />
@@ -1496,9 +1939,9 @@ export default function SessionRoomPage() {
                         background: chatInput.trim() ? '#0284C7' : '#334155',
                         color: '#fff',
                         border: 'none',
-                        borderRadius: '8px',
-                        padding: '8px 14px',
-                        fontSize: '12.5px',
+                        borderRadius: '6px',
+                        padding: '6px 12px',
+                        fontSize: '12px',
                         fontWeight: 600,
                         cursor: chatInput.trim() ? 'pointer' : 'default',
                       }}
@@ -1511,24 +1954,24 @@ export default function SessionRoomPage() {
 
               {/* TAB 3: Shared Files */}
               {activeTab === 'files' && (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '16px', gap: '12px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#CBD5E1' }}>Session Attachments</span>
+                <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '12px', gap: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: '#CBD5E1' }}>Attachments</span>
                     <label
                       style={{
                         background: '#0284C7',
                         color: '#fff',
-                        padding: '6px 12px',
-                        borderRadius: '8px',
-                        fontSize: '12px',
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        fontSize: '11.5px',
                         fontWeight: 600,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '6px',
+                        gap: '5px',
                       }}
                     >
-                      <PaperclipIcon size={14} /> {uploadingFile ? 'Uploading…' : 'Share File'}
+                      <PaperclipIcon size={13} /> {uploadingFile ? 'Uploading…' : 'Share File'}
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -1539,10 +1982,10 @@ export default function SessionRoomPage() {
                     </label>
                   </div>
 
-                  <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {files.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '40px 16px', color: '#64748B', fontSize: '12.5px' }}>
-                        No files shared in this call yet. Upload logs, zip archives, or specifications (up to 25MB).
+                      <div style={{ textAlign: 'center', padding: '30px 12px', color: '#64748B', fontSize: '12px' }}>
+                        No files shared in this call yet. Upload logs or specs (up to 25MB).
                       </div>
                     ) : (
                       files.map((file) => (
@@ -1551,21 +1994,21 @@ export default function SessionRoomPage() {
                           style={{
                             background: '#0F172A',
                             border: '1px solid #334155',
-                            borderRadius: '10px',
-                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            padding: '8px 10px',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            gap: '8px',
+                            gap: '6px',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                            <DocumentIcon size={18} className="text-sky-400 shrink-0" />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                            <DocumentIcon size={16} className="text-sky-400 shrink-0" />
                             <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#F8FAFC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: '#F8FAFC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {file.filename}
                               </div>
-                              <div style={{ fontSize: '10.5px', color: '#64748B' }}>
+                              <div style={{ fontSize: '10px', color: '#64748B' }}>
                                 By {file.uploader_name} · {(file.file_size / 1024).toFixed(1)} KB
                               </div>
                             </div>
@@ -1579,9 +2022,9 @@ export default function SessionRoomPage() {
                               style={{
                                 background: '#334155',
                                 color: '#38BDF8',
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                fontSize: '11px',
+                                padding: '3px 8px',
+                                borderRadius: '5px',
+                                fontSize: '10.5px',
                                 fontWeight: 700,
                                 textDecoration: 'none',
                               }}
@@ -1596,6 +2039,7 @@ export default function SessionRoomPage() {
                 </div>
               )}
             </div>
+          )}
           </div>
         </div>
       </main>
@@ -1734,8 +2178,6 @@ export default function SessionRoomPage() {
           </div>
         </div>
       )}
-
-      <Footer />
     </div>
   );
 }

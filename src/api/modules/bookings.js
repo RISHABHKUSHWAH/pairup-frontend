@@ -1,4 +1,5 @@
 import { apiFetch } from '../http';
+import { buildAgoraToken, DEFAULT_AGORA_APP_ID, DEFAULT_AGORA_APP_CERTIFICATE } from './agoraTokenBuilder';
 
 export const bookingApi = {
   getBookings: () =>
@@ -53,11 +54,66 @@ export const bookingApi = {
   saveNotes: (id, notes) =>
     apiFetch(`/api/bookings/${id}/notes`, { method: 'PUT', auth: true, body: { notes } }),
 
-  getAgoraToken: (id) =>
-    apiFetch(`/api/bookings/${id}/agora-token`, { auth: true }),
+  getAgoraToken: async (id) => {
+    let result = null;
+    try {
+      result = await apiFetch(`/api/bookings/${id}/agora-token`, { auth: true });
+    } catch (err) {
+      // If backend hasn't been updated with /agora-token yet (404), fall back to /livekit-token or booking info
+      if (err?.status === 404) {
+        try {
+          result = await apiFetch(`/api/bookings/${id}/livekit-token`, { auth: true });
+        } catch (_) {
+          result = await apiFetch(`/api/bookings/${id}`, { auth: true });
+        }
+      } else {
+        throw err;
+      }
+    }
 
-  getLiveKitToken: (id) =>
-    apiFetch(`/api/bookings/${id}/agora-token`, { auth: true }),
+    const appId =
+      result.app_id && result.app_id !== 'test_agora_app_id'
+        ? result.app_id
+        : import.meta.env.VITE_AGORA_APP_ID || DEFAULT_AGORA_APP_ID;
+    const appCertificate =
+      result.app_certificate ||
+      import.meta.env.VITE_AGORA_APP_CERTIFICATE ||
+      DEFAULT_AGORA_APP_CERTIFICATE;
+    const channelName = result.channel_name || result.room_name || `pairup-session-${id}`;
+    const uid = result.uid || result.user_id || 0;
+
+    let token = result.token;
+    // If token is missing, LiveKit JWT (starts with eyJ), or placeholder, build a fresh Agora RTC token
+    if (!token || String(token).startsWith('eyJ') || String(token) === 'test_token') {
+      try {
+        token = await buildAgoraToken(appId, appCertificate, channelName, uid);
+      } catch (tokErr) {
+        console.warn('Browser Agora token builder error:', tokErr);
+        token = '';
+      }
+    }
+
+    return {
+      ...result,
+      app_id: appId,
+      app_certificate: appCertificate,
+      channel_name: channelName,
+      room_name: channelName,
+      token,
+      uid,
+    };
+  },
+
+  getLiveKitToken: async (id) => {
+    try {
+      return await apiFetch(`/api/bookings/${id}/agora-token`, { auth: true });
+    } catch (err) {
+      if (err?.status === 404) {
+        return await apiFetch(`/api/bookings/${id}/livekit-token`, { auth: true });
+      }
+      throw err;
+    }
+  },
 
   getSessionFiles: (id) =>
     apiFetch(`/api/bookings/${id}/files`, { auth: true }),
