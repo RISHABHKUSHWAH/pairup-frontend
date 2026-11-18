@@ -314,6 +314,7 @@ export const mentorNotifications = {
     const newItem = { id: Date.now(), time: 'Just now', read: false, ...item };
     const updated = [newItem, ...list];
     localStorage.setItem('pairup_mentor_notifications', JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
     return updated;
   },
 };

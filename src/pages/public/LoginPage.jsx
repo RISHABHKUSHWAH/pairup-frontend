@@ -72,17 +72,31 @@ export default function LoginPage() {
   const [pendingAction, setPendingAction] = useState(null);
   const [googleConfig, setGoogleConfig] = useState({ enabled: false, clientId: '' });
 
-  const renderGoogleButton = () => {
+  const lastGoogleWidthRef = useRef(0);
+
+  const renderGoogleButton = (force = false) => {
     if (!window.google?.accounts?.id || !googleBtnRef.current) return;
     try {
-      googleBtnRef.current.innerHTML = '';
-      window.google.accounts.id.renderButton(googleBtnRef.current, {
+      const containerEl = googleBtnRef.current;
+      const availableWidth =
+        containerEl.clientWidth ||
+        containerEl.parentElement?.clientWidth ||
+        (typeof window !== 'undefined' ? window.innerWidth - 64 : 360);
+      const targetWidth = Math.max(200, Math.min(360, Math.floor(availableWidth)));
+
+      if (!force && lastGoogleWidthRef.current && Math.abs(lastGoogleWidthRef.current - targetWidth) < 4 && containerEl.childElementCount > 0) {
+        return;
+      }
+      lastGoogleWidthRef.current = targetWidth;
+
+      containerEl.innerHTML = '';
+      window.google.accounts.id.renderButton(containerEl, {
         type: 'standard',
         theme: 'outline',
         size: 'large',
         text: mode === 'register' ? 'signup_with' : 'continue_with',
         shape: 'rectangular',
-        width: 360,
+        width: targetWidth,
         logo_alignment: 'left',
       });
     } catch (e) {
@@ -120,7 +134,7 @@ export default function LoginPage() {
                 }
               },
             });
-            renderGoogleButton();
+            renderGoogleButton(true);
           } catch (e) {
             console.warn('GIS init error:', e);
           }
@@ -143,9 +157,30 @@ export default function LoginPage() {
   }, [mode]);
 
   useEffect(() => {
-    if (googleConfig.clientId && window.google?.accounts?.id) {
-      renderGoogleButton();
+    if (!googleConfig.clientId) return;
+    if (window.google?.accounts?.id) {
+      renderGoogleButton(true);
     }
+    let resizeTimer = null;
+    const handleResize = () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (window.google?.accounts?.id) {
+          renderGoogleButton(false);
+        }
+      }, 120);
+    };
+    window.addEventListener('resize', handleResize);
+    let observer = null;
+    if (googleBtnRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(handleResize);
+      observer.observe(googleBtnRef.current);
+    }
+    return () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      window.removeEventListener('resize', handleResize);
+      if (observer) observer.disconnect();
+    };
   }, [googleConfig.clientId, mode]);
 
   useEffect(() => {
@@ -994,10 +1029,10 @@ export default function LoginPage() {
             {/* Social Logins */}
             <div className="social-auth-section">
               {googleConfig.clientId ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: '100%', gap: '8px', overflow: 'hidden' }}>
                   <div
                     ref={googleBtnRef}
-                    style={{ minHeight: '44px', width: '100%', display: 'flex', justifyContent: 'center' }}
+                    style={{ minHeight: '44px', width: '100%', maxWidth: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden' }}
                   />
                   {mode === 'register' && (
                     <span style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>

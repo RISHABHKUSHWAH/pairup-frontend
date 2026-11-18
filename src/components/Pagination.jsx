@@ -40,6 +40,7 @@ export default function Pagination({
   pageSizeOptions,
   onPageSizeChange,
   compact = false,
+  simple = false,
   className = '',
   style = {},
 }) {
@@ -59,9 +60,9 @@ export default function Pagination({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: compact ? '8px' : '12px',
-        padding: compact ? '12px 0 0 0' : '13px 20px',
+        flexWrap: compact ? 'nowrap' : 'wrap',
+        gap: compact ? '6px' : '12px',
+        padding: compact ? '10px 0 0 0' : '13px 20px',
         background: compact ? 'transparent' : 'var(--surface)',
         borderTop: compact ? '1px solid var(--grid)' : '1px solid var(--grid-strong)',
         ...style,
@@ -73,12 +74,18 @@ export default function Pagination({
         <div
           className="ledger-pagination-info"
           style={{
-            fontSize: compact ? '12px' : '12.5px',
+            fontSize: compact ? '11.5px' : '12.5px',
             color: 'var(--ink-muted)',
+            whiteSpace: 'nowrap',
           }}
         >
           {totalItems === 0 ? (
             <span>No {itemLabel}</span>
+          ) : compact ? (
+            <span>
+              <strong style={{ color: 'var(--ink)' }}>{startItem}–{endItem}</strong> of{' '}
+              <strong style={{ color: 'var(--ink)' }}>{totalItems}</strong>
+            </span>
           ) : (
             <span>
               Showing <strong style={{ color: 'var(--ink)' }}>{startItem}</strong>–
@@ -95,8 +102,8 @@ export default function Pagination({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: compact ? '8px' : '14px',
-          flexWrap: 'wrap',
+          gap: compact ? '6px' : '14px',
+          flexWrap: compact && simple ? 'nowrap' : 'wrap',
           marginLeft: showInfo && totalItems !== undefined ? 'auto' : undefined,
         }}
       >
@@ -133,54 +140,96 @@ export default function Pagination({
 
         {/* Page navigation buttons */}
         {totalPages > 1 && (
-          <div className="ledger-page-nav" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            {/* Previous button */}
-            <button
-              type="button"
-              className="ledger-page-btn nav-arrow"
-              disabled={currentPage <= 1}
-              onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-              title="Previous Page"
-              aria-label="Previous Page"
-            >
-              <ChevronLeftIcon size={14} />
-            </button>
+          simple ? (
+            <div className="ledger-page-nav" style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="ledger-page-btn nav-arrow"
+                disabled={currentPage <= 1}
+                onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+                title="Previous Page"
+                aria-label="Previous Page"
+                style={compact ? { minWidth: '26px', height: '26px', padding: 0 } : {}}
+              >
+                <ChevronLeftIcon size={compact ? 12 : 14} />
+              </button>
 
-            {/* Page number buttons */}
-            {pageNumbers.map((item, idx) => {
-              if (typeof item === 'string') {
+              <span
+                className="mono"
+                style={{
+                  fontSize: compact ? '11.5px' : '12px',
+                  fontWeight: 600,
+                  color: 'var(--ink)',
+                  padding: '0 4px',
+                  whiteSpace: 'nowrap',
+                  userSelect: 'none',
+                }}
+              >
+                {currentPage} / {totalPages}
+              </span>
+
+              <button
+                type="button"
+                className="ledger-page-btn nav-arrow"
+                disabled={currentPage >= totalPages}
+                onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+                title="Next Page"
+                aria-label="Next Page"
+                style={compact ? { minWidth: '26px', height: '26px', padding: 0 } : {}}
+              >
+                <ChevronRightIcon size={compact ? 12 : 14} />
+              </button>
+            </div>
+          ) : (
+            <div className="ledger-page-nav" style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+              {/* Previous button */}
+              <button
+                type="button"
+                className="ledger-page-btn nav-arrow"
+                disabled={currentPage <= 1}
+                onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+                title="Previous Page"
+                aria-label="Previous Page"
+              >
+                <ChevronLeftIcon size={14} />
+              </button>
+
+              {/* Page number buttons */}
+              {pageNumbers.map((item, idx) => {
+                if (typeof item === 'string') {
+                  return (
+                    <span key={`${item}-${idx}`} className="ledger-page-ellipsis">
+                      …
+                    </span>
+                  );
+                }
                 return (
-                  <span key={`${item}-${idx}`} className="ledger-page-ellipsis">
-                    …
-                  </span>
+                  <button
+                    key={`page-${item}`}
+                    type="button"
+                    className={`ledger-page-btn ${currentPage === item ? 'active' : ''}`}
+                    onClick={() => onPageChange(item)}
+                    aria-label={`Page ${item}`}
+                    aria-current={currentPage === item ? 'page' : undefined}
+                  >
+                    {item}
+                  </button>
                 );
-              }
-              return (
-                <button
-                  key={`page-${item}`}
-                  type="button"
-                  className={`ledger-page-btn ${currentPage === item ? 'active' : ''}`}
-                  onClick={() => onPageChange(item)}
-                  aria-label={`Page ${item}`}
-                  aria-current={currentPage === item ? 'page' : undefined}
-                >
-                  {item}
-                </button>
-              );
-            })}
+              })}
 
-            {/* Next button */}
-            <button
-              type="button"
-              className="ledger-page-btn nav-arrow"
-              disabled={currentPage >= totalPages}
-              onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-              title="Next Page"
-              aria-label="Next Page"
-            >
-              <ChevronRightIcon size={14} />
-            </button>
-          </div>
+              {/* Next button */}
+              <button
+                type="button"
+                className="ledger-page-btn nav-arrow"
+                disabled={currentPage >= totalPages}
+                onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+                title="Next Page"
+                aria-label="Next Page"
+              >
+                <ChevronRightIcon size={14} />
+              </button>
+            </div>
+          )
         )}
       </div>
     </div>

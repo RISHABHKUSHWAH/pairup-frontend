@@ -4,6 +4,7 @@ import PortalLayout from '../../components/PortalLayout';
 import { api } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { soundSettings, previewIncomingSound, previewOutgoingSound } from '../../utils/soundEffects';
 
 const SETTING_TABS = [
   { id: 'general', label: 'General' },
@@ -23,6 +24,8 @@ export default function AdminSettingsPage() {
   const { user, updateUser } = useAuth();
   const { toast } = useToast();
   const isSuperadmin = user?.role === 'superadmin' || user?.role === 'admin';
+  const [soundIncoming, setSoundIncoming] = useState(() => soundSettings.isIncomingEnabled());
+  const [soundOutgoing, setSoundOutgoing] = useState(() => soundSettings.isOutgoingEnabled());
 
   const [activeTab, setActiveTab] = useState('general');
   const [loading, setLoading] = useState(true);
@@ -720,6 +723,68 @@ export default function AdminSettingsPage() {
                   />
                   <span>Dispatch Urgent Dispute &amp; Verification Alerts to Admin Panel</span>
                 </label>
+              </div>
+
+              <div className="section-label" style={{ marginTop: '24px' }}>Chat Audio &amp; Message Sounds</div>
+              <p className="sub" style={{ fontSize: '12.5px', marginBottom: '14px' }}>
+                Configure sound effects when receiving notifications or sending messages across platform tools.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--grid)' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '13px' }}>Incoming Message Sound</div>
+                    <div className="sub" style={{ margin: 0, fontSize: '12px' }}>Play chime on receiving messages</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      onClick={previewIncomingSound}
+                    >
+                      🔊 Test
+                    </button>
+                    <input
+                      type="checkbox"
+                      checked={soundIncoming}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setSoundIncoming(val);
+                        soundSettings.setIncomingEnabled(val);
+                        toast.success(val ? 'Incoming sound enabled' : 'Incoming sound disabled');
+                      }}
+                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '13px' }}>Sent Message Sound</div>
+                    <div className="sub" style={{ margin: 0, fontSize: '12px' }}>Play audio pop on dispatching messages</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      onClick={previewOutgoingSound}
+                    >
+                      🔊 Test
+                    </button>
+                    <input
+                      type="checkbox"
+                      checked={soundOutgoing}
+                      onChange={(e) => {
+                        const val = e.target.checked;
+                        setSoundOutgoing(val);
+                        soundSettings.setOutgoingEnabled(val);
+                        toast.success(val ? 'Sent sound enabled' : 'Sent sound disabled');
+                      }}
+                      style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}

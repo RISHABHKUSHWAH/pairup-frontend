@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import { api, learnerDrafts } from '../../api/client';
 import { useToast } from '../../context';
+import { broadcastDataChange } from '../../utils';
 import { DocumentIcon, CheckCircleIcon, ClockIcon, ShieldCheckIcon, UsersIcon } from '../../components/Icons';
 
 export default function PostProblemPage() {
@@ -86,12 +87,19 @@ export default function PostProblemPage() {
     setLoading(true);
 
     // Format rich combined description with all fields
+    const urgencyLineParts = [`Urgency: ${formData.urgency}`];
+    if (formData.preferredTime) {
+      urgencyLineParts.push(`Preferred Date & Time: ${formData.preferredTime}`);
+    }
+    urgencyLineParts.push(`Preferred Duration: ${formData.duration} mins`);
+    urgencyLineParts.push(`Format: ${formData.budgetType}`);
+
     const fullDescription = [
       formData.description.trim(),
       formData.expectedOutcome ? `\n\n### Expected Outcome:\n${formData.expectedOutcome.trim()}` : '',
       formData.whatTried ? `\n\n### What I Have Tried:\n${formData.whatTried.trim()}` : '',
       formData.codeSnippet ? `\n\n### Code Snippet / Error Logs:\n\`\`\`\n${formData.codeSnippet.trim()}\n\`\`\`` : '',
-      `\n\n*Urgency: ${formData.urgency} | Preferred Duration: ${formData.duration} mins | Format: ${formData.budgetType}*`,
+      `\n\n*${urgencyLineParts.join(' | ')}*`,
       attachedFiles.length > 0 ? `\n*Attachments: ${attachedFiles.map((f) => f.name).join(', ')}*` : '',
     ].join('');
 
@@ -104,10 +112,13 @@ export default function PostProblemPage() {
         description: fullDescription,
         skills: combinedSkills,
         budget: formData.budget ? Number(formData.budget) : null,
+        urgency: formData.urgency,
+        preferred_time: formData.preferredTime || null,
       });
 
       // Clear draft on successful publish
       learnerDrafts.clearProblemDraft();
+      broadcastDataChange('problems');
 
       const msg = 'Problem published! Mentors can now view it and submit proposals.';
       setSuccess(msg);

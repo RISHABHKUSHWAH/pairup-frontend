@@ -9,6 +9,7 @@ import { UserIcon, RefreshIcon, CodeIcon, MailIcon, UsersIcon } from '../../comp
 import { mentorPayoutSettings } from '../../api/client';
 import { adminSupport } from '../../api/storage/adminStorage';
 import { api } from '../../api';
+import { soundSettings, previewIncomingSound, previewOutgoingSound, previewNotificationSound } from '../../utils/soundEffects';
 import { usePlatformCommission } from '../../utils';
 
 export default function MentorSettingsPage() {
@@ -46,6 +47,9 @@ export default function MentorSettingsPage() {
   });
 
   // 3. Notifications
+  const [soundIncoming, setSoundIncoming] = useState(() => soundSettings.isIncomingEnabled());
+  const [soundOutgoing, setSoundOutgoing] = useState(() => soundSettings.isOutgoingEnabled());
+  const [soundNotification, setSoundNotification] = useState(() => soundSettings.isNotificationEnabled());
   const [notifications, setNotifications] = useState({
     newProblems: true,
     proposalAccepted: true,
@@ -494,6 +498,130 @@ export default function MentorSettingsPage() {
                   />
                 </div>
               ))}
+            </div>
+
+            <div className="section-label" style={{ marginTop: '24px' }}>Chat Audio &amp; Message Sounds</div>
+            <p className="sub" style={{ fontSize: '12.5px', marginBottom: '14px' }}>
+              Control chime and audio alerts when receiving or sending direct chat messages with learners.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '14px 16px',
+                  background: 'var(--card-bg, #1a1a24)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '13.5px' }}>Incoming Message Chime</div>
+                  <div className="sub" style={{ fontSize: '12px', margin: '2px 0 0' }}>Play a melodic sound whenever a learner sends you a chat message</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '4px 10px', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    onClick={previewIncomingSound}
+                    title="Test incoming message chime"
+                  >
+                    🔊 Test Sound
+                  </button>
+                  <input
+                    type="checkbox"
+                    checked={soundIncoming}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setSoundIncoming(val);
+                      soundSettings.setIncomingEnabled(val);
+                      showSaveSuccess(val ? 'Incoming message chime enabled' : 'Incoming message chime disabled');
+                    }}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '14px 16px',
+                  background: 'var(--card-bg, #1a1a24)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '13.5px' }}>Sent Message Sound</div>
+                  <div className="sub" style={{ fontSize: '12px', margin: '2px 0 0' }}>Play a subtle audio pop when your chat message is dispatched</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '4px 10px', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    onClick={previewOutgoingSound}
+                    title="Test sent message pop sound"
+                  >
+                    🔊 Test Sound
+                  </button>
+                  <input
+                    type="checkbox"
+                    checked={soundOutgoing}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setSoundOutgoing(val);
+                      soundSettings.setOutgoingEnabled(val);
+                      showSaveSuccess(val ? 'Sent message sound enabled' : 'Sent message sound disabled');
+                    }}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '14px 16px',
+                  background: 'var(--card-bg, #1a1a24)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '13.5px' }}>Notification Sound &amp; Chimes</div>
+                  <div className="sub" style={{ fontSize: '12px', margin: '2px 0 0' }}>Play a 3-note harmonic chime when proposals, sessions, and system alerts arrive</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '4px 10px', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    onClick={previewNotificationSound}
+                    title="Test notification harmonic chime"
+                  >
+                    🔊 Test Chime
+                  </button>
+                  <input
+                    type="checkbox"
+                    checked={soundNotification}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setSoundNotification(val);
+                      soundSettings.setNotificationEnabled(val);
+                      showSaveSuccess(val ? 'Notification chime enabled' : 'Notification chime disabled');
+                    }}
+                    style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                  />
+                </div>
+              </div>
             </div>
 
             <div style={{ marginTop: '20px' }}>

@@ -16,7 +16,10 @@ import {
   FileEditIcon,
   MailIcon,
   XIcon,
+  VolumeIcon,
+  VolumeXIcon,
 } from '../../components/Icons';
+import { soundSettings, previewNotificationSound } from '../../utils/soundEffects';
 import { useConfirm, useToast } from '../../context';
 
 export default function MentorNotificationsPage() {
@@ -26,6 +29,19 @@ export default function MentorNotificationsPage() {
   const [notifications, setNotifications] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(() => soundSettings.isNotificationEnabled());
+
+  useEffect(() => {
+    const handleSoundChange = (e) => {
+      if (e?.detail?.notification !== undefined) {
+        setSoundEnabled(e.detail.notification);
+      } else {
+        setSoundEnabled(soundSettings.isNotificationEnabled());
+      }
+    };
+    window.addEventListener('pairup_sound_settings_changed', handleSoundChange);
+    return () => window.removeEventListener('pairup_sound_settings_changed', handleSoundChange);
+  }, []);
 
   useEffect(() => {
     loadNotifications();
@@ -89,8 +105,9 @@ export default function MentorNotificationsPage() {
       await notificationsApi.markRead(id);
     } catch (_) {}
     mentorNotifications.markRead(id);
-    setNotifications((prev) => prev.filter((n) => String(n.id) !== String(id)));
-    toast.success('Notification marked as read and removed');
+    setNotifications((prev) => prev.map((n) => String(n.id) === String(id) ? { ...n, read: true } : n));
+    toast.success('Notification marked as read');
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
   };
 
   const handleViewDetail = async (item) => {
@@ -112,8 +129,9 @@ export default function MentorNotificationsPage() {
       await notificationsApi.markAllRead();
     } catch (_) {}
     mentorNotifications.markAllRead();
-    setNotifications([]);
-    toast.success('All notifications marked as read and removed');
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    toast.success('All notifications marked as read');
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
   };
 
   const handleDeleteNotification = async (id, e) => {
@@ -122,8 +140,9 @@ export default function MentorNotificationsPage() {
       await notificationsApi.delete(id);
     } catch (_) {}
     mentorNotifications.deleteNotification(id);
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setNotifications((prev) => prev.filter((n) => String(n.id) !== String(id)));
     toast.success('Notification removed');
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
   };
 
   const handleClearAll = async () => {
@@ -142,21 +161,31 @@ export default function MentorNotificationsPage() {
     mentorNotifications.clearAll();
     setNotifications([]);
     toast.success('All notifications have been cleared.');
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
   };
 
   const filtered = notifications.filter((n) => {
     if (activeFilter === 'all') return true;
     if (activeFilter === 'unread') return !n.read;
+    if (activeFilter === 'session') {
+      const t = String(n.type || '').toLowerCase();
+      return t === 'session' || t.startsWith('session') || t.includes('reschedule');
+    }
     return n.type === activeFilter;
   });
 
   const getIcon = (type) => {
-    switch (type) {
+    const t = String(type || '').toLowerCase();
+    switch (t) {
       case 'problem':
         return <DocumentIcon size={18} />;
       case 'proposal':
         return <FileEditIcon size={18} />;
       case 'session':
+      case 'session_rescheduled':
+      case 'reschedule_request':
+      case 'reschedule_accepted':
+      case 'reschedule_declined':
         return <ClockIcon size={18} />;
       case 'message':
         return <MessageIcon size={18} />;
@@ -167,17 +196,23 @@ export default function MentorNotificationsPage() {
       case 'support':
         return <MailIcon size={18} />;
       default:
+        if (t.includes('reschedule') || t.startsWith('session')) return <ClockIcon size={18} />;
         return <BellIcon size={18} />;
     }
   };
 
   const getTypeLabel = (type) => {
-    switch (type) {
+    const t = String(type || '').toLowerCase();
+    switch (t) {
       case 'problem':
         return 'Problem Request';
       case 'proposal':
         return 'Proposal / Pitch';
       case 'session':
+      case 'session_rescheduled':
+      case 'reschedule_request':
+      case 'reschedule_accepted':
+      case 'reschedule_declined':
         return 'Session';
       case 'message':
         return 'Message';
@@ -188,6 +223,7 @@ export default function MentorNotificationsPage() {
       case 'support':
         return 'Support Desk';
       default:
+        if (t.includes('reschedule') || t.startsWith('session')) return 'Session';
         return 'Alert';
     }
   };
@@ -197,7 +233,33 @@ export default function MentorNotificationsPage() {
       title="Notification Center"
       portalType="mentor"
       actions={
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{
+              fontSize: '12.5px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: soundEnabled ? 'var(--primary)' : 'var(--text-muted)',
+            }}
+            onClick={() => {
+              const next = !soundEnabled;
+              soundSettings.setNotificationEnabled(next);
+              setSoundEnabled(next);
+              if (next) {
+                previewNotificationSound();
+                toast.info('Notification sound enabled');
+              } else {
+                toast.info('Notification sound muted');
+              }
+            }}
+            title={soundEnabled ? 'Click to mute notification chime' : 'Click to enable notification chime'}
+          >
+            {soundEnabled ? <VolumeIcon size={14} /> : <VolumeXIcon size={14} />}
+            <span>{soundEnabled ? 'Sound On' : 'Sound Muted'}</span>
+          </button>
           <button
             type="button"
             className="btn btn-ghost"

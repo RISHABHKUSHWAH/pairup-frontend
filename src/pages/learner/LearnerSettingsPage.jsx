@@ -8,6 +8,7 @@ import { useToast } from '../../context';
 import { DownloadIcon, MailIcon, BugIcon, RefreshIcon, ShieldIcon } from '../../components/Icons';
 import { adminSupport } from '../../api/storage/adminStorage';
 import { api } from '../../api';
+import { soundSettings, previewIncomingSound, previewOutgoingSound, previewNotificationSound } from '../../utils/soundEffects';
 
 export default function LearnerSettingsPage() {
   const { user, switchRole, logout } = useAuth();
@@ -34,6 +35,9 @@ export default function LearnerSettingsPage() {
   const [currency, setCurrency] = useState('INR');
 
   // Notifications
+  const [soundIncoming, setSoundIncoming] = useState(() => soundSettings.isIncomingEnabled());
+  const [soundOutgoing, setSoundOutgoing] = useState(() => soundSettings.isOutgoingEnabled());
+  const [soundNotification, setSoundNotification] = useState(() => soundSettings.isNotificationEnabled());
   const [notifSettings, setNotifSettings] = useState({
     emailReminders: true,
     emailProposals: true,
@@ -409,7 +413,7 @@ export default function LearnerSettingsPage() {
               />
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--grid)' }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: '13px' }}>Browser Push Notifications</div>
                 <div className="sub" style={{ margin: 0, fontSize: '12px' }}>Native desktop notifications for incoming sessions</div>
@@ -419,6 +423,95 @@ export default function LearnerSettingsPage() {
                 checked={notifSettings.pushNotifs}
                 onChange={(e) => { setNotifSettings({ ...notifSettings, pushNotifs: e.target.checked }); showSaveSuccess(); }}
               />
+            </div>
+
+            <div className="section-label">Chat Audio &amp; Message Sounds</div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--grid)' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '13px' }}>Incoming Message Sound</div>
+                <div className="sub" style={{ margin: 0, fontSize: '12px' }}>Play a chime when you receive a new chat message</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '3px 9px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  onClick={previewIncomingSound}
+                  title="Test incoming message chime"
+                >
+                  🔊 Test Sound
+                </button>
+                <input
+                  type="checkbox"
+                  checked={soundIncoming}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setSoundIncoming(val);
+                    soundSettings.setIncomingEnabled(val);
+                    showSaveSuccess(val ? 'Incoming message chime enabled' : 'Incoming message chime disabled');
+                  }}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--grid)' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '13px' }}>Sent Message Sound</div>
+                <div className="sub" style={{ margin: 0, fontSize: '12px' }}>Play a subtle audio confirmation when you send a message</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '3px 9px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  onClick={previewOutgoingSound}
+                  title="Test sent message pop sound"
+                >
+                  🔊 Test Sound
+                </button>
+                <input
+                  type="checkbox"
+                  checked={soundOutgoing}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setSoundOutgoing(val);
+                    soundSettings.setOutgoingEnabled(val);
+                    showSaveSuccess(val ? 'Sent message sound enabled' : 'Sent message sound disabled');
+                  }}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '13px' }}>Notification Sound &amp; Chimes</div>
+                <div className="sub" style={{ margin: 0, fontSize: '12px' }}>Play a 3-note harmonic chime when you receive notifications, proposals, sessions, and alerts</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '3px 9px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  onClick={previewNotificationSound}
+                  title="Test notification harmonic chime"
+                >
+                  🔊 Test Chime
+                </button>
+                <input
+                  type="checkbox"
+                  checked={soundNotification}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setSoundNotification(val);
+                    soundSettings.setNotificationEnabled(val);
+                    showSaveSuccess(val ? 'Notification chime enabled' : 'Notification chime disabled');
+                  }}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+              </div>
             </div>
           </div>
         )}

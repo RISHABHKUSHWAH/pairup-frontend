@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
 import RescheduleModal from '../../components/RescheduleModal';
+import Pagination from '../../components/Pagination';
 import { api, initials, stars } from '../../api/client';
 import {
   SearchIcon,
@@ -18,10 +19,12 @@ import {
   MessageIcon,
   ShieldIcon,
   CheckCircleIcon,
+  MoreHorizontalIcon,
+  AlertTriangleIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast, useAuth } from '../../context';
 
-import { usePlatformCommission } from '../../utils';
+import { usePlatformCommission, useRealtimeSync, broadcastDataChange } from '../../utils';
 
 export default function LearnerSessionsPage() {
   const { user } = useAuth();
@@ -31,7 +34,29 @@ export default function LearnerSessionsPage() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('upcoming');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const validTabs = ['upcoming', 'live', 'past', 'expired', 'unscheduled'];
+  const queryTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(validTabs.includes(queryTab) ? queryTab : 'upcoming');
+
+  useEffect(() => {
+    if (queryTab && validTabs.includes(queryTab) && queryTab !== activeTab) {
+      setActiveTab(queryTab);
+    }
+  }, [queryTab]);
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab }, { replace: true });
+  };
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   // Modals state
   const [reviewModalBooking, setReviewModalBooking] = useState(null);
@@ -63,6 +88,17 @@ export default function LearnerSessionsPage() {
   const [loadingNotes, setLoadingNotes] = useState(false);
 
   const [submittingAction, setSubmittingAction] = useState(false);
+  const [openMenuBookingId, setOpenMenuBookingId] = useState(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('.session-more-menu-container')) {
+        setOpenMenuBookingId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
   const [payingBookingId, setPayingBookingId] = useState(null);
   const [paidSuccessBooking, setPaidSuccessBooking] = useState(null);
 
@@ -72,25 +108,32 @@ export default function LearnerSessionsPage() {
     loadBookings();
   }, []);
 
-  const loadBookings = async () => {
-    setLoading(true);
+  const loadBookings = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await api.getBookings();
       setBookings(data);
     } catch (err) {
-      if (err?.status !== 401) {
+      if (err?.status !== 401 && !silent) {
         setError(err.message);
       }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  useRealtimeSync({
+    onSync: () => loadBookings(true),
+    entities: ['sessions'],
+    intervalMs: 3500,
+  });
 
   const handlePay = async (booking) => {
     setPayingBookingId(booking.id);
     try {
       await api.payBooking(booking.id);
       toast.success('Escrow secured! Session is confirmed.');
+      broadcastDataChange('sessions');
       const data = await api.getBookings();
       setBookings(data);
       const updated = data.find((b) => b.id === booking.id);
@@ -113,6 +156,7 @@ export default function LearnerSessionsPage() {
     try {
       await api.completeBooking(bookingId);
       toast.success('Session marked completed and escrow released.');
+      broadcastDataChange('sessions');
       loadBookings();
     } catch (err) {
       toast.error('Error: ' + err.message);
@@ -162,6 +206,7 @@ export default function LearnerSessionsPage() {
     try {
       const res = await api.cancelBooking(cancelModalBooking.id, cancelReason.trim());
       toast.success(res?.message || 'Session cancelled. If paid, your escrow payment will be refunded.');
+      broadcastDataChange('sessions');
       setCancelModalBooking(null);
       setCancelReason('');
       loadBookings();
@@ -208,9 +253,9 @@ export default function LearnerSessionsPage() {
   const isSessionLiveNow = (b) => {
     if (b.status !== 'paid') return false;
     const raw = b.scheduled_at || b.scheduled_time;
-    if (!raw) return true; // flexible unscheduled sessions are accessible anytime
+    if (!raw) return false; // Unscheduled sessions are NEVER live
     const date = new Date(raw);
-    if (isNaN(date.getTime())) return true;
+    if (isNaN(date.getTime())) return false;
     const durationMs = (b.duration_minutes || 60) * 60 * 1000;
     const startMs = date.getTime();
     const endMs = startMs + durationMs;
@@ -218,27 +263,65 @@ export default function LearnerSessionsPage() {
     return now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
   };
 
+  const isSessionExpired = (b) => {
+    if (['completed', 'cancelled', 'declined', 'disputed'].includes(b.status)) return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return false;
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return false;
+    const durationMs = (b.duration_minutes || 60) * 60 * 1000;
+    const endMs = date.getTime() + durationMs;
+    const now = Date.now();
+    const expiryThreshold = b.status === 'paid' ? (endMs + 30 * 60 * 1000) : endMs;
+    return now > expiryThreshold;
+  };
+
   const isSessionUpcoming = (b) => {
-    if (['pending', 'accepted'].includes(b.status)) return true;
+    if (isSessionExpired(b)) return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return false; // Unscheduled sessions live in the dedicated Unscheduled tab
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return false;
+    if (['pending', 'accepted'].includes(b.status)) {
+      return Date.now() < date.getTime();
+    }
     if (b.status === 'paid') {
-      const raw = b.scheduled_at || b.scheduled_time;
-      if (!raw) return true; // keep available in upcoming as well
-      const date = new Date(raw);
-      if (isNaN(date.getTime())) return true;
+      if (isSessionLiveNow(b)) return false;
       const now = Date.now();
       return now < (date.getTime() - 15 * 60 * 1000);
     }
     return false;
   };
 
+  const isSessionUnscheduled = (b) => {
+    if (['completed', 'cancelled', 'declined', 'disputed'].includes(b.status)) return false;
+    if (isSessionExpired(b)) return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return true;
+    const date = new Date(raw);
+    return isNaN(date.getTime());
+  };
+
   // Filter sessions by tabs
   const upcomingList = bookings.filter(isSessionUpcoming);
   const liveList = bookings.filter(isSessionLiveNow);
-  const pastList = bookings.filter((b) => ['completed', 'cancelled', 'disputed'].includes(b.status));
+  const pastList = bookings.filter((b) => ['completed', 'cancelled', 'disputed', 'declined'].includes(b.status));
+  const expiredList = bookings.filter(isSessionExpired);
+  const unscheduledList = bookings.filter(isSessionUnscheduled);
 
   let currentList = upcomingList;
   if (activeTab === 'live') currentList = liveList;
   if (activeTab === 'past') currentList = pastList;
+  if (activeTab === 'expired') currentList = expiredList;
+  if (activeTab === 'unscheduled') currentList = unscheduledList;
+
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(currentList.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedList = currentList.slice(
+    (validCurrentPage - 1) * pageSize,
+    validCurrentPage * pageSize
+  );
 
   return (
     <PortalLayout
@@ -261,25 +344,75 @@ export default function LearnerSessionsPage() {
         <button
           type="button"
           className={`admin-filter-tab ${activeTab === 'upcoming' ? 'active' : ''}`}
-          onClick={() => setActiveTab('upcoming')}
+          onClick={() => handleTabChange('upcoming')}
         >
           Upcoming ({upcomingList.length})
         </button>
         <button
           type="button"
           className={`admin-filter-tab ${activeTab === 'live' ? 'active' : ''}`}
-          onClick={() => setActiveTab('live')}
+          onClick={() => handleTabChange('live')}
         >
           In Progress (Live) ({liveList.length})
         </button>
         <button
           type="button"
           className={`admin-filter-tab ${activeTab === 'past' ? 'active' : ''}`}
-          onClick={() => setActiveTab('past')}
+          onClick={() => handleTabChange('past')}
         >
           Past Sessions ({pastList.length})
         </button>
+        <button
+          type="button"
+          className={`admin-filter-tab ${activeTab === 'expired' ? 'active' : ''}`}
+          onClick={() => handleTabChange('expired')}
+        >
+          Expired ({expiredList.length})
+        </button>
+        <button
+          type="button"
+          className={`admin-filter-tab ${activeTab === 'unscheduled' ? 'active' : ''}`}
+          onClick={() => handleTabChange('unscheduled')}
+          style={{ position: 'relative' }}
+        >
+          Unscheduled ({unscheduledList.length})
+          {unscheduledList.length > 0 && (
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', display: 'inline-block', marginLeft: '6px' }} />
+          )}
+        </button>
       </div>
+
+      {activeTab === 'upcoming' && unscheduledList.length > 0 && (
+        <div
+          style={{
+            background: 'rgba(245, 158, 11, 0.08)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: '10px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+            <CalendarIcon size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
+            <span>
+              You have <strong>{unscheduledList.length} unscheduled session{unscheduledList.length > 1 ? 's' : ''}</strong> that need a date &amp; time.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ fontSize: '12px', padding: '5px 12px' }}
+            onClick={() => handleTabChange('unscheduled')}
+          >
+            View Unscheduled ({unscheduledList.length}) →
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <p className="sub">Loading your sessions...</p>
@@ -288,36 +421,103 @@ export default function LearnerSessionsPage() {
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '8px' }}>
             <CalendarIcon size={36} />
           </div>
-          <p>No {activeTab} sessions found.</p>
+          <p>
+            {activeTab === 'unscheduled'
+              ? 'All of your sessions currently have scheduled dates and times.'
+              : `No ${activeTab} sessions found.`}
+          </p>
           <Link to="/learner/explore" className="btn btn-primary" style={{ marginTop: '12px' }}>
             Browse Mentors
           </Link>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {currentList.map((b) => (
-            <div key={b.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <div className="avatar">{initials(b.mentor_name)}</div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '15.5px' }}>{b.mentor_name}</div>
-                    <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px' }}>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))', gap: '20px' }}>
+            {paginatedList.map((b) => {
+              const isExpired = isSessionExpired(b) || activeTab === 'expired';
+              return (
+              <div
+                key={b.id}
+                className="card"
+                style={{
+                  position: 'relative',
+                  overflow: 'hidden',
+                  padding: '20px',
+                  borderRadius: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '14px',
+                  height: '100%',
+                  borderColor: isExpired ? 'rgba(239, 68, 68, 0.35)' : undefined,
+                }}
+              >
+                {/* Expired Watermark */}
+                {isExpired && (
+                  <div className="card-watermark-expired" aria-hidden="true">
+                    EXPIRED
+                  </div>
+                )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', flex: 1, minWidth: 0 }}>
+                  <div className="avatar" style={{ flexShrink: 0 }}>{initials(b.mentor_name)}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: '15.5px' }}>{b.mentor_name}</span>
+                      <span className="mono" style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.18)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.35)', letterSpacing: '0.4px' }}>
+                        Session #{b.id}
+                      </span>
+                      {b.contract_id && (
+                        <Link
+                          to={`/contracts/${b.contract_id}`}
+                          className="mono"
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.35)',
+                            letterSpacing: '0.4px',
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                          title={`Milestone session originating from Contract #${b.contract_id}${b.contract_title ? `: ${b.contract_title}` : ''}. Click to view contract.`}
+                        >
+                          <DocumentIcon size={11} />
+                          Contract #{b.contract_id}
+                          {b.session_number ? ` · #${b.session_number}` : ''}
+                        </Link>
+                      )}
+                    </div>
+                    <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px', wordBreak: 'break-word' }}>
                       Topic: <strong>{b.topic || 'Pairing Session'}</strong>
                     </div>
                     <div className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span>Date: {b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : new Date(b.created_at).toLocaleDateString()}</span>
+                      <span>
+                        Date:{' '}
+                        {b.scheduled_at || b.scheduled_time ? (
+                          new Date(b.scheduled_at || b.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                        ) : (
+                          <strong style={{ color: '#f59e0b', background: 'rgba(245, 158, 11, 0.12)', padding: '2px 6px', borderRadius: '4px' }}>
+                            Not scheduled yet
+                          </strong>
+                        )}
+                      </span>
                       <span>·</span>
                       <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Duration: {b.duration_minutes || 60} mins</span>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ textAlign: 'right' }}>
+                <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 'auto' }}>
                   <span
                     className={`status-badge ${
                       b.status === 'paid'
-                        ? (isSessionLiveNow(b) ? 'badge-completed' : 'badge-accepted')
+                        ? (isSessionLiveNow(b) ? 'badge-completed' : (!b.scheduled_at && !b.scheduled_time) ? 'badge-pending' : 'badge-accepted')
                         : b.status === 'accepted'
                         ? 'badge-accepted'
                         : b.status === 'completed'
@@ -326,7 +526,7 @@ export default function LearnerSessionsPage() {
                     } mono`}
                   >
                     {b.status === 'paid'
-                      ? (isSessionLiveNow(b) ? '🔴 Paid & Live Now' : 'Confirmed & Paid')
+                      ? (isSessionLiveNow(b) ? '🔴 Paid & Live Now' : (!b.scheduled_at && !b.scheduled_time) ? '🟠 Paid · Unscheduled' : 'Confirmed & Paid')
                       : b.status}
                   </span>
                   <div className="mono" style={{ fontWeight: 700, fontSize: '14px', marginTop: '6px' }}>
@@ -362,8 +562,18 @@ export default function LearnerSessionsPage() {
               {b.status === 'paid' && (
                 <div
                   style={{
-                    background: isSessionLiveNow(b) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.08)',
-                    border: `1px solid ${isSessionLiveNow(b) ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.25)'}`,
+                    background: isSessionLiveNow(b)
+                      ? 'rgba(16, 185, 129, 0.12)'
+                      : (!b.scheduled_at && !b.scheduled_time)
+                      ? 'rgba(245, 158, 11, 0.08)'
+                      : 'rgba(59, 130, 246, 0.08)',
+                    border: `1px solid ${
+                      isSessionLiveNow(b)
+                        ? 'rgba(16, 185, 129, 0.3)'
+                        : (!b.scheduled_at && !b.scheduled_time)
+                        ? 'rgba(245, 158, 11, 0.3)'
+                        : 'rgba(59, 130, 246, 0.25)'
+                    }`,
                     borderRadius: '8px',
                     padding: '8px 12px',
                     fontSize: '12px',
@@ -373,12 +583,31 @@ export default function LearnerSessionsPage() {
                     gap: '8px',
                   }}
                 >
-                  <ShieldIcon size={14} style={{ color: isSessionLiveNow(b) ? '#10b981' : '#3b82f6', flexShrink: 0 }} />
+                  <ShieldIcon
+                    size={14}
+                    style={{
+                      color: isSessionLiveNow(b)
+                        ? '#10b981'
+                        : (!b.scheduled_at && !b.scheduled_time)
+                        ? '#f59e0b'
+                        : '#3b82f6',
+                      flexShrink: 0,
+                    }}
+                  />
                   <div>
-                    <strong>{isSessionLiveNow(b) ? '🔴 Active Call Room:' : '🛡️ Escrow Protected & Confirmed:'}</strong> ₹{b.price} is secured in PairUp escrow.
+                    <strong>
+                      {isSessionLiveNow(b)
+                        ? '🔴 Active Call Room:'
+                        : (!b.scheduled_at && !b.scheduled_time)
+                        ? '🛡️ Escrow Protected · Action Required:'
+                        : '🛡️ Escrow Protected & Confirmed:'}
+                    </strong>{' '}
+                    ₹{b.price} is secured in PairUp escrow.
                     {isSessionLiveNow(b)
                       ? ' The session time is now active! Click below to enter the live room and pair.'
-                      : ` Scheduled for ${b.scheduled_at ? new Date(b.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'your scheduled time'}. The live video room activates 15 minutes before your session begins.`}
+                      : (!b.scheduled_at && !b.scheduled_time)
+                      ? ' This session has not been scheduled yet. Click "Schedule Session" below to choose an available date and time slot.'
+                      : ` Scheduled for ${new Date(b.scheduled_at || b.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}. The live video room activates 15 minutes before your session begins.`}
                   </div>
                 </div>
               )}
@@ -471,80 +700,64 @@ export default function LearnerSessionsPage() {
                   gap: '8px',
                   flexWrap: 'wrap',
                   alignItems: 'center',
+                  justifyContent: 'space-between',
                   borderTop: '1px solid var(--grid)',
                   paddingTop: '12px',
+                  marginTop: 'auto',
                 }}
               >
-                {/* When Live/Paid */}
-                {b.status === 'paid' && (
-                  <>
-                    {isSessionLiveNow(b) ? (
-                      <Link
-                        to={`/session?booking_id=${b.id}`}
-                        className="btn btn-primary"
-                        style={{ fontSize: '12.5px', padding: '7px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-                      >
-                        <VideoIcon size={14} /> Join Live Session Room
-                      </Link>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled
-                        className="btn btn-secondary"
-                        title="The live video room activates 15 minutes before your scheduled session time."
-                        style={{
-                          fontSize: '12.5px',
-                          padding: '7px 16px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          opacity: 0.65,
-                          cursor: 'not-allowed',
-                        }}
-                      >
-                        <VideoIcon size={14} /> Join Live (Opens 15m before)
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      onClick={() => {
-                        setRescheduleModalBooking(b);
-                      }}
-                    >
-                      <CalendarIcon size={13} /> Reschedule
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      onClick={() => setPaidSuccessBooking(b)}
-                    >
-                      <DocumentIcon size={13} /> Receipt
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', color: 'var(--warn)' }}
-                      onClick={() => setDisputeModalBooking(b)}
-                    >
-                      Report Issue / Dispute
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', color: 'var(--danger, #ef4444)' }}
-                      onClick={() => setCancelModalBooking(b)}
-                    >
-                      Cancel Session
-                    </button>
-                  </>
-                )}
+                {/* Primary Left-Side Actions */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {/* When Live/Paid */}
+                  {b.status === 'paid' && (
+                    <>
+                      {isSessionLiveNow(b) ? (
+                        <Link
+                          to={`/session?booking_id=${b.id}`}
+                          className="btn btn-primary"
+                          style={{ fontSize: '12.5px', padding: '7px 16px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <VideoIcon size={14} /> Join Live Session Room
+                        </Link>
+                      ) : (!b.scheduled_at && !b.scheduled_time) ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{
+                            fontSize: '12.5px',
+                            padding: '7px 16px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                          onClick={() => setRescheduleModalBooking(b)}
+                        >
+                          <CalendarIcon size={14} /> Schedule Session
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          className="btn btn-secondary"
+                          title="The live video room activates 15 minutes before your scheduled session time."
+                          style={{
+                            fontSize: '12.5px',
+                            padding: '7px 16px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            opacity: 0.65,
+                            cursor: 'not-allowed',
+                          }}
+                        >
+                          <VideoIcon size={14} /> Join Live (Opens 15m before)
+                        </button>
+                      )}
+                    </>
+                  )}
 
-                {/* When Accepted (Awaiting payment) */}
-                {b.status === 'accepted' && (
-                  <>
+                  {/* When Accepted (Awaiting escrow deposit) */}
+                  {b.status === 'accepted' && (
                     <button
                       type="button"
                       className="btn btn-primary"
@@ -555,122 +768,218 @@ export default function LearnerSessionsPage() {
                       <CreditCardIcon size={14} />
                       {payingBookingId === b.id ? 'Securing Escrow...' : `Deposit Escrow (₹${Number(b.total_amount_paid || b.price).toLocaleString('en-IN')})`}
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      onClick={() => {
-                        setRescheduleModalBooking(b);
-                      }}
-                    >
-                      <CalendarIcon size={13} /> Reschedule
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', color: 'var(--warn)' }}
-                      onClick={() => setCancelModalBooking(b)}
-                    >
-                      Cancel Session
-                    </button>
-                  </>
-                )}
+                  )}
 
-                {/* When Pending */}
-                {b.status === 'pending' && (
-                  <>
+                  {/* When Pending */}
+                  {b.status === 'pending' && (
                     <span className="mono" style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
                       Awaiting mentor confirmation...
                     </span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', marginLeft: 'auto' }}
-                      onClick={() => setCancelModalBooking(b)}
-                    >
-                      Cancel Request
-                    </button>
-                  </>
-                )}
+                  )}
 
-                {/* When Completed */}
-                {b.status === 'completed' && (
-                  <>
-                    {(b.has_review || b.review) ? (
+                  {/* When Completed */}
+                  {b.status === 'completed' && (
+                    <>
+                      {(b.has_review || b.review) ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{
+                            fontSize: '12px',
+                            padding: '6px 12px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            border: '1px solid var(--grid-strong)',
+                          }}
+                          onClick={() => setViewReviewBooking(b)}
+                          title="View submitted review (Permanent)"
+                        >
+                          <CheckCircleIcon size={13} style={{ color: 'var(--gold)' }} /> Reviewed ({b.review?.rating || 5}★)
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                          onClick={() => setReviewModalBooking(b)}
+                        >
+                          <StarIcon size={13} /> Leave Review
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                        onClick={() => openNotes(b)}
+                      >
+                        <DocumentIcon size={13} /> Notes &amp; Resources
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Right-Side Actions: Chat + Three-dots (...) menu */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+                  <Link
+                    to={`/chat?with=${b.mentor_id}&name=${encodeURIComponent(b.mentor_name)}`}
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                  >
+                    <MessageIcon size={13} /> Chat
+                  </Link>
+
+                  {/* Three-dots (...) dropdown menu for secondary actions */}
+                  {['paid', 'accepted', 'pending', 'completed'].includes(b.status) && (
+                    <div className="session-more-menu-container" style={{ position: 'relative' }}>
                       <button
                         type="button"
                         className="btn btn-ghost"
                         style={{
-                          fontSize: '12px',
-                          padding: '6px 12px',
+                          fontSize: '14px',
+                          padding: '6px 8px',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '5px',
-                          border: '1px solid var(--grid-strong)',
+                          justifyContent: 'center',
+                          borderRadius: '6px',
+                          background: openMenuBookingId === b.id ? 'var(--bg)' : 'transparent',
+                          borderColor: openMenuBookingId === b.id ? 'var(--ink-faint)' : 'var(--grid-strong)',
                         }}
-                        onClick={() => setViewReviewBooking(b)}
-                        title="View submitted review (Permanent)"
+                        title="More options"
+                        aria-label="More options"
+                        onClick={() => setOpenMenuBookingId(openMenuBookingId === b.id ? null : b.id)}
                       >
-                        <CheckCircleIcon size={13} style={{ color: 'var(--gold)' }} /> Reviewed ({b.review?.rating || 5}★)
+                        <MoreHorizontalIcon size={16} />
                       </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                        onClick={() => setReviewModalBooking(b)}
-                      >
-                        <StarIcon size={13} /> Leave Review
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      onClick={() => openNotes(b)}
-                    >
-                      <DocumentIcon size={13} /> Notes &amp; Resources
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', padding: '6px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      onClick={() => {
-                        setBookAgainMentor({
-                          id: b.mentor_id,
-                          user_id: b.mentor_id,
-                          name: b.mentor_name,
-                          hourly_rate: b.price ? Math.round((b.price * 60) / (b.duration_minutes || 60)) : 50,
-                        });
-                        setBookAgainTopic(`Follow up on: ${b.topic || 'pairing'}`);
-                      }}
-                    >
-                      <RefreshIcon size={13} /> Book Again
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', color: 'var(--warn)', marginLeft: 'auto' }}
-                      onClick={() => setDisputeModalBooking(b)}
-                    >
-                      Dispute Session
-                    </button>
-                  </>
-                )}
 
-                {/* Common chat shortcut */}
-                <Link
-                  to={`/chat?with=${b.mentor_id}&name=${encodeURIComponent(b.mentor_name)}`}
-                  className="btn btn-ghost"
-                  style={{ fontSize: '12px', padding: '6px 12px', marginLeft: b.status === 'pending' ? '0' : 'auto', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                >
-                  <MessageIcon size={13} /> Chat
-                </Link>
+                      {openMenuBookingId === b.id && (
+                        <div className="session-menu-dropdown">
+                          {/* Schedule / Reschedule option */}
+                          {['paid', 'accepted'].includes(b.status) && (
+                            <button
+                              type="button"
+                              className="session-menu-item"
+                              onClick={() => {
+                                setOpenMenuBookingId(null);
+                                setRescheduleModalBooking(b);
+                              }}
+                            >
+                              <CalendarIcon size={14} style={{ color: 'var(--ink-muted)' }} />
+                              <span>{(b.scheduled_at || b.scheduled_time) ? 'Reschedule' : 'Schedule Session'}</span>
+                            </button>
+                          )}
+
+                          {/* Receipt */}
+                          {(b.status === 'paid' || b.status === 'completed') && (
+                            <button
+                              type="button"
+                              className="session-menu-item"
+                              onClick={() => {
+                                setOpenMenuBookingId(null);
+                                setPaidSuccessBooking(b);
+                              }}
+                            >
+                              <DocumentIcon size={14} style={{ color: 'var(--ink-muted)' }} />
+                              <span>Receipt</span>
+                            </button>
+                          )}
+
+                          {/* Book Again */}
+                          {b.status === 'completed' && (
+                            <button
+                              type="button"
+                              className="session-menu-item"
+                              onClick={() => {
+                                setOpenMenuBookingId(null);
+                                setBookAgainMentor({
+                                  id: b.mentor_id,
+                                  user_id: b.mentor_id,
+                                  name: b.mentor_name,
+                                  hourly_rate: b.price ? Math.round((b.price * 60) / (b.duration_minutes || 60)) : 50,
+                                });
+                                setBookAgainTopic(`Follow up on: ${b.topic || 'pairing'}`);
+                              }}
+                            >
+                              <RefreshIcon size={14} style={{ color: 'var(--ink-muted)' }} />
+                              <span>Book Again</span>
+                            </button>
+                          )}
+
+                          {/* Report Issue / Dispute */}
+                          {(b.status === 'paid' || b.status === 'completed') && (
+                            <button
+                              type="button"
+                              className="session-menu-item warning"
+                              onClick={() => {
+                                setOpenMenuBookingId(null);
+                                setDisputeModalBooking(b);
+                              }}
+                            >
+                              <AlertTriangleIcon size={14} />
+                              <span>Report Issue / Dispute</span>
+                            </button>
+                          )}
+
+                          {/* Cancel */}
+                          {['paid', 'accepted'].includes(b.status) && (
+                            <button
+                              type="button"
+                              className="session-menu-item danger"
+                              onClick={() => {
+                                setOpenMenuBookingId(null);
+                                setCancelModalBooking(b);
+                              }}
+                            >
+                              <XIcon size={14} />
+                              <span>Cancel Session</span>
+                            </button>
+                          )}
+
+                          {/* Cancel Request (Pending) */}
+                          {b.status === 'pending' && (
+                            <button
+                              type="button"
+                              className="session-menu-item danger"
+                              onClick={() => {
+                                setOpenMenuBookingId(null);
+                                setCancelModalBooking(b);
+                              }}
+                            >
+                              <XIcon size={14} />
+                              <span>Cancel Request</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          ))}
+          );
+        })}
         </div>
-      )}
+
+        <Pagination
+          currentPage={validCurrentPage}
+          totalPages={totalPages}
+          onPageChange={(page) => setCurrentPage(page)}
+          totalItems={currentList.length}
+          itemsPerPage={pageSize}
+          itemLabel="sessions"
+          pageSizeOptions={[6, 9, 15, 30]}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+          }}
+          style={{
+            marginTop: '24px',
+            borderRadius: '12px',
+            border: '1px solid var(--grid-strong)',
+          }}
+        />
+      </>
+    )}
 
       {/* Multi-Criteria Review Modal */}
       <Modal

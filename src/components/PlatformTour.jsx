@@ -44,8 +44,12 @@ export default function PlatformTour() {
     h: typeof window !== 'undefined' ? window.innerHeight : 800,
   });
 
-  // Track active target element class
+  // Track active target element class with thorough cleanup
   useEffect(() => {
+    document.querySelectorAll('.tour-active-target').forEach((node) => {
+      node.classList.remove('tour-active-target');
+    });
+
     if (!isTourActive || !currentStep?.target) return;
     const el = document.querySelector(currentStep.target);
     if (el) {
@@ -55,6 +59,14 @@ export default function PlatformTour() {
       };
     }
   }, [isTourActive, currentStep]);
+
+  useEffect(() => {
+    if (!isTourActive) {
+      document.querySelectorAll('.tour-active-target').forEach((node) => {
+        node.classList.remove('tour-active-target');
+      });
+    }
+  }, [isTourActive]);
 
   // Keep card height measured accurately
   useEffect(() => {
@@ -68,16 +80,35 @@ export default function PlatformTour() {
     if (!isTourActive || !currentStep) return;
 
     function updatePosition() {
-      setViewport({ w: window.innerWidth, h: window.innerHeight });
+      const vwCurrent = window.innerWidth || document.documentElement?.clientWidth || 1200;
+      const vhCurrent = window.innerHeight || document.documentElement?.clientHeight || 800;
+      setViewport({ w: vwCurrent, h: vhCurrent });
 
       if (cardRef.current) {
         setCardHeight(cardRef.current.offsetHeight);
       }
 
-      if (currentStep.target) {
+      if (currentStep?.target) {
         const el = document.querySelector(currentStep.target);
         if (el) {
           const rect = el.getBoundingClientRect();
+          const sidebar = document.querySelector('.admin-sidebar');
+          const isSidebar = sidebar ? sidebar.contains(el) : (rect.left < 320 && rect.width <= 320);
+
+          // On mobile/narrow viewports, if the target is hidden or off-screen (e.g. inside the closed sidebar drawer),
+          // fall back to a cleanly centered tour card with no off-screen spotlight cutout.
+          const isHiddenOrOffscreen =
+            rect.width <= 0 ||
+            rect.height <= 0 ||
+            rect.right <= 0 ||
+            rect.left >= vwCurrent ||
+            (vwCurrent <= 768 && isSidebar && (!sidebar || !sidebar.classList.contains('mobile-open')));
+
+          if (isHiddenOrOffscreen) {
+            setTargetRect(null);
+            return;
+          }
+
           setTargetRect({
             top: rect.top,
             left: rect.left,
@@ -86,7 +117,12 @@ export default function PlatformTour() {
             bottom: rect.bottom,
             right: rect.right,
           });
-          el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+
+          const isInViewport =
+            rect.top >= 0 && rect.bottom <= vhCurrent && rect.left >= 0 && rect.right <= vwCurrent;
+          if (!isInViewport && !isSidebar) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+          }
           return;
         }
       }
@@ -94,7 +130,9 @@ export default function PlatformTour() {
     }
 
     updatePosition();
-    const timer = setTimeout(updatePosition, 80);
+    const t1 = setTimeout(updatePosition, 50);
+    const t2 = setTimeout(updatePosition, 160);
+    const t3 = setTimeout(updatePosition, 360);
 
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
@@ -110,7 +148,9 @@ export default function PlatformTour() {
     }
 
     return () => {
-      clearTimeout(timer);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
       if (observer) observer.disconnect();
@@ -143,19 +183,61 @@ export default function PlatformTour() {
 
   const isLastStep = currentStepIndex === totalSteps - 1;
 
-  // Calculate card positioning relative to targetRect with intelligent viewport clamping
-  let cardStyle = {};
-  const vw = viewport.w;
-  const vh = viewport.h;
-  const cardWidth = Math.min(440, Math.max(300, vw - 32));
+  // Viewport and sizing calculation (use actual window dimensions matching 1:1 unzoomed tour wrapper)
+  const vw = (typeof window !== 'undefined' && window.innerWidth) || viewport.w || 1200;
+  const vh = (typeof window !== 'undefined' && window.innerHeight) || viewport.h || 800;
+  const isMobile = vw <= 768;
+  const cardWidth = Math.min(440, Math.max(260, vw - 24));
   const effectiveCardHeight = cardRef.current?.offsetHeight || cardHeight || 360;
 
-  if (targetRect) {
-    const isSidebarTarget = targetRect.left < 300 && targetRect.width <= 320;
+  const targetEl = currentStep?.target ? document.querySelector(currentStep.target) : null;
+  const sidebarEl = typeof document !== 'undefined' ? document.querySelector('.admin-sidebar') : null;
+  const isSidebarTarget = Boolean(
+    targetRect && (
+      (targetEl && sidebarEl && sidebarEl.contains(targetEl)) ||
+      (targetRect.left < 320 && targetRect.width <= 320)
+    )
+  );
 
-    if (isSidebarTarget && vw > 768) {
-      // Place card to the RIGHT of sidebar so sidebar item is fully visible and not blocked
-      const left = Math.min(targetRect.right + 20, vw - cardWidth - 16);
+  // Get active browser CSS zoom factor on <html> if present (e.g. --app-zoom: 0.9)
+  const getAppZoom = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return 1;
+    const computed = getComputedStyle(document.documentElement).zoom;
+    const parsed = parseFloat(computed);
+    return parsed && !isNaN(parsed) && parsed > 0 ? parsed : 1;
+  };
+
+  const zoomFactor = getAppZoom();
+
+  // For sidebar targets, use exact 0 padding so the frame fits the div pill exactly
+  const padX = isSidebarTarget ? 0 : 4;
+  const padY = isSidebarTarget ? 0 : 4;
+  const cornerRadius = isSidebarTarget ? 10 : 8;
+
+  const cutoutX = targetRect ? Math.max(0, targetRect.left - padX) : 0;
+  const cutoutY = targetRect ? Math.max(0, targetRect.top - padY) : 0;
+  const cutoutW = targetRect ? targetRect.width + padX * 2 : 0;
+  const cutoutH = targetRect ? targetRect.height + padY * 2 : 0;
+
+  // Use flexbox centered modal overlay when no target is visible (e.g. Step 1 intro or mobile hidden sidebar targets)
+  const isCentered = !targetRect || (isMobile && isSidebarTarget);
+
+  // Calculate card positioning relative to targetRect with intelligent viewport clamping
+  let cardStyle = {};
+
+  if (!isCentered && targetRect) {
+    if (isSidebarTarget && !isMobile) {
+      // Place card to the RIGHT of the entire sidebar so sidebar item is fully visible and not blocked
+      const sidebarRect = sidebarEl ? sidebarEl.getBoundingClientRect() : null;
+      const sidebarRight = sidebarRect ? sidebarRect.right : targetRect.right;
+      const anchorRight = Math.max(targetRect.right, sidebarRight);
+
+      let left = anchorRight + 20;
+
+      // If sidebar + card overflows viewport, clamp safely
+      if (left + cardWidth > vw - 16) {
+        left = Math.max(16, vw - cardWidth - 16);
+      }
 
       // Center card vertically aligned with target, clamped inside viewport
       let top = targetRect.top + targetRect.height / 2 - effectiveCardHeight / 2;
@@ -165,11 +247,39 @@ export default function PlatformTour() {
         position: 'fixed',
         top: `${Math.round(top)}px`,
         left: `${Math.round(left)}px`,
-        maxHeight: 'calc(100vh - 32px)',
+        width: `${cardWidth}px`,
+        maxWidth: 'calc(100vw - 24px)',
+        maxHeight: 'calc(100dvh - 32px)',
+        zIndex: 100002,
+      };
+    } else if (isMobile) {
+      // Mobile viewport with visible main-area target: full-width clamped card anchored above or below target
+      const spaceBelow = vh - targetRect.bottom;
+      const spaceAbove = targetRect.top;
+
+      let top;
+      if (spaceBelow >= Math.min(effectiveCardHeight, vh * 0.55) + 16) {
+        top = targetRect.bottom + 12;
+      } else if (spaceAbove >= Math.min(effectiveCardHeight, vh * 0.55) + 16) {
+        top = targetRect.top - effectiveCardHeight - 12;
+      } else {
+        top = Math.max(12, (vh - effectiveCardHeight) / 2);
+      }
+      top = Math.max(12, Math.min(top, Math.max(12, vh - effectiveCardHeight - 12)));
+
+      cardStyle = {
+        position: 'fixed',
+        top: `${Math.round(top)}px`,
+        left: '12px',
+        right: '12px',
+        width: 'auto',
+        maxWidth: '440px',
+        margin: '0 auto',
+        maxHeight: 'calc(100dvh - 24px)',
         zIndex: 100002,
       };
     } else {
-      // Target in main area: place below if room, otherwise above, clamped
+      // Desktop target in main area: place below if room, otherwise above, clamped
       const spaceBelow = vh - targetRect.bottom;
       const spaceAbove = targetRect.top;
 
@@ -190,18 +300,19 @@ export default function PlatformTour() {
         position: 'fixed',
         top: `${Math.round(top)}px`,
         left: `${Math.round(left)}px`,
-        maxHeight: 'calc(100vh - 32px)',
+        width: `${cardWidth}px`,
+        maxWidth: 'calc(100vw - 24px)',
+        maxHeight: 'calc(100dvh - 32px)',
         zIndex: 100002,
       };
     }
   } else {
-    // Centered modal style for intro step
+    // Centered modal card inside .tour-centered-overlay flexbox container (immune to transform/zoom drift)
     cardStyle = {
-      position: 'fixed',
-      top: '50%',
-      left: '50%',
-      transform: 'translate(-50%, -50%)',
-      maxHeight: 'calc(100vh - 32px)',
+      position: 'relative',
+      width: '100%',
+      maxWidth: '440px',
+      maxHeight: 'calc(100dvh - 24px)',
       zIndex: 100002,
     };
   }
@@ -236,7 +347,18 @@ export default function PlatformTour() {
   const icon = stepIcons[currentStep.id] || <HelpCircleIcon size={20} />;
 
   return createPortal(
-    <div className="tour-wrapper" role="dialog" aria-modal="true">
+    <div
+      className="tour-wrapper"
+      role="dialog"
+      aria-modal="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 100000,
+        zoom: zoomFactor !== 1 ? 1 / zoomFactor : undefined,
+      }}
+    >
       {/* SVG Mask Backdrop with transparent cutout hole directly over the target option */}
       <svg
         className="tour-svg-backdrop"
@@ -244,8 +366,10 @@ export default function PlatformTour() {
           position: 'fixed',
           top: 0,
           left: 0,
-          width: '100vw',
-          height: '100vh',
+          right: 0,
+          bottom: 0,
+          width: '100%',
+          height: '100%',
           zIndex: 100000,
           pointerEvents: 'auto',
         }}
@@ -253,17 +377,17 @@ export default function PlatformTour() {
       >
         <defs>
           <mask id="tour-cutout-mask" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">
-            {/* White area = visible dark overlay */}
-            <rect x="0" y="0" width={vw} height={vh} fill="#ffffff" />
-            {/* Black area = 100% transparent cutout hole */}
-            {targetRect && (
+            {/* White area = visible dark overlay - covers 100% of screen under all viewport & zoom conditions */}
+            <rect x="0" y="0" width="100%" height="100%" fill="#ffffff" />
+            {/* Black area = 100% transparent cutout hole matching exact div bounds */}
+            {!isCentered && targetRect && (
               <rect
-                x={Math.max(0, targetRect.left - 6)}
-                y={Math.max(0, targetRect.top - 6)}
-                width={targetRect.width + 12}
-                height={targetRect.height + 12}
-                rx="8"
-                ry="8"
+                x={cutoutX}
+                y={cutoutY}
+                width={cutoutW}
+                height={cutoutH}
+                rx={cornerRadius}
+                ry={cornerRadius}
                 fill="#000000"
               />
             )}
@@ -272,35 +396,37 @@ export default function PlatformTour() {
         <rect
           x="0"
           y="0"
-          width={vw}
-          height={vh}
+          width="100%"
+          height="100%"
           fill="rgba(0, 0, 0, 0.72)"
           mask="url(#tour-cutout-mask)"
         />
       </svg>
 
-      {/* Glowing spotlight frame around target element */}
-      {targetRect && (
+      {/* Glowing spotlight frame around target element - exactly fitted to target div */}
+      {!isCentered && targetRect && (
         <div
           className="tour-spotlight-frame"
           style={{
             position: 'fixed',
-            top: `${targetRect.top - 6}px`,
-            left: `${targetRect.left - 6}px`,
-            width: `${targetRect.width + 12}px`,
-            height: `${targetRect.height + 12}px`,
-            borderRadius: '8px',
+            top: `${cutoutY}px`,
+            left: `${cutoutX}px`,
+            width: `${cutoutW}px`,
+            height: `${cutoutH}px`,
+            boxSizing: 'border-box',
+            borderRadius: `${cornerRadius}px`,
             border: '2px solid var(--accent)',
             boxShadow: '0 0 16px rgba(38, 71, 214, 0.65), inset 0 0 8px rgba(38, 71, 214, 0.25)',
             pointerEvents: 'none',
             zIndex: 100001,
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         />
       )}
 
       {/* Floating Tour Step Card */}
-      <div ref={cardRef} className="tour-card" style={cardStyle} onClick={(e) => e.stopPropagation()}>
+      <div className={isCentered ? 'tour-centered-overlay' : undefined}>
+      <div ref={cardRef} className={`tour-card ${isCentered ? 'tour-card--centered' : ''}`} style={cardStyle} onClick={(e) => e.stopPropagation()}>
         {/* Top Header: Progress and Role Switcher */}
         <div className="tour-card-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -401,6 +527,7 @@ export default function PlatformTour() {
             </button>
           </div>
         </div>
+      </div>
       </div>
     </div>,
     document.body

@@ -3,6 +3,7 @@ import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import BookSessionModal from '../../components/BookSessionModal';
+import LearnerProfileModal from '../../components/LearnerProfileModal';
 import { api, initials, resolveImageUrl, API_BASE } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -29,6 +30,7 @@ import {
   SearchIcon,
 } from '../../components/Icons';
 import { formatChatDayDate, isSameDay } from '../../utils/formatters';
+import { playIncomingSound, playOutgoingSound } from '../../utils/soundEffects';
 import { useToast } from '../../context';
 
 const formatPreviewText = (text) => {
@@ -55,26 +57,28 @@ const formatPreviewText = (text) => {
 };
 
 export function getSessionTiming(b) {
-  if (!b) return { isLiveNow: false, isUpcoming: false, isPast: false, isFlexible: false, timeLabel: '' };
+  if (!b) return { isLiveNow: false, isUpcoming: false, isToday: false, isPast: false, isUnscheduled: true, timeLabel: '' };
   const raw = b.scheduled_at || b.scheduled_time;
   if (!raw) {
     return {
-      isLiveNow: b.status === 'paid',
+      isLiveNow: false,
       isUpcoming: false,
+      isToday: false,
       isPast: false,
-      isFlexible: true,
-      timeLabel: 'Flexible / Unscheduled',
+      isUnscheduled: true,
+      timeLabel: 'Not scheduled yet',
     };
   }
 
   const date = new Date(raw);
   if (isNaN(date.getTime())) {
     return {
-      isLiveNow: b.status === 'paid',
+      isLiveNow: false,
       isUpcoming: false,
+      isToday: false,
       isPast: false,
-      isFlexible: true,
-      timeLabel: 'Flexible / Unscheduled',
+      isUnscheduled: true,
+      timeLabel: 'Not scheduled yet',
     };
   }
 
@@ -82,6 +86,11 @@ export function getSessionTiming(b) {
   const startMs = date.getTime();
   const endMs = startMs + durationMs;
   const now = Date.now();
+  const today = new Date(now);
+  const isToday =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
 
   // Call room is considered "Live Now" from 15 minutes before scheduled start through 30 minutes after end time
   const isLiveNow = now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
@@ -91,8 +100,9 @@ export function getSessionTiming(b) {
   return {
     isLiveNow,
     isUpcoming,
+    isToday,
     isPast,
-    isFlexible: false,
+    isUnscheduled: false,
     timeLabel: date.toLocaleString([], {
       dateStyle: 'medium',
       timeStyle: 'short',
@@ -120,6 +130,10 @@ export default function ChatPage() {
   const searchName = (rawName && rawName !== 'undefined' && rawName !== 'null') ? rawName : null;
   const rawContract = searchParams.get('contract');
   const searchContractId = (rawContract && rawContract !== 'undefined' && rawContract !== 'null' && rawContract !== 'NaN') ? rawContract : null;
+  const rawProblem = searchParams.get('problem');
+  const searchProblemId = (rawProblem && rawProblem !== 'undefined' && rawProblem !== 'null' && rawProblem !== 'NaN') ? rawProblem : null;
+  const rawProblemTitle = searchParams.get('problem_title');
+  const searchProblemTitle = (rawProblemTitle && rawProblemTitle !== 'undefined' && rawProblemTitle !== 'null') ? rawProblemTitle : null;
 
   const [conversations, setConversations] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -132,6 +146,7 @@ export default function ChatPage() {
   const [error, setError] = useState('');
   const [loadingConv, setLoadingConv] = useState(true);
   const [partnerProfile, setPartnerProfile] = useState(null);
+  const [profileModalLearner, setProfileModalLearner] = useState(null);
 
   // Filters & Tabs
   const [convTab, setConvTab] = useState('all'); // all, active, archived
@@ -173,6 +188,13 @@ export default function ChatPage() {
   }, [moreMenuOpen]);
 
   const activeConvoKey = otherId ? `${otherId}_${searchContractId || 'general'}` : '';
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  }, [inputText, otherId, searchContractId]);
 
   const handleInputChange = (val) => {
     setInputText(val);
@@ -448,9 +470,11 @@ export default function ChatPage() {
     };
   }, []);
 
-  // If no partner selected in URL but conversations exist, auto-select first conversation
+  // On desktop, auto-select the first conversation when none is in URL.
+  // On mobile (<= 768px), keep the Conversations list visible so users can pick a chat and navigate back cleanly.
   useEffect(() => {
-    if (!otherId && conversations.length > 0 && !loadingConv) {
+    const isMobileViewport = typeof window !== 'undefined' && window.innerWidth <= 768;
+    if (!isMobileViewport && !otherId && conversations.length > 0 && !loadingConv) {
       const first = conversations[0];
       const pid = first.user_id || first.other_id;
       const pname = first.name || first.other_name || 'User';
@@ -467,62 +491,110 @@ export default function ChatPage() {
     (c) => String(c.user_id || c.other_id) === String(otherId) && String(c.contract_id || null) === String(searchContractId || null)
   );
 
-  // Fetch mentor profile for otherId so we always have the real hourly rate, title, and details
+  // Fallback to any existing conversation with the same partner (e.g. direct chat or another contract)
+  // so partner-level presence (online status), name, role, and avatar remain accurate even in a brand-new contract thread
+  const partnerConvo = activeConvo || conversations.find(
+    (c) => String(c.user_id || c.other_id) === String(otherId)
+  );
+  const hasPartnerConvo = Boolean(partnerConvo);
+
+  // Fetch partner profile for otherId (works for both mentors and learners via backend fallback)
+  // so hourly rate, title, avatar, and real-time online status are available even before any messages exist
   useEffect(() => {
     setPartnerProfile(null);
     if (!otherId) {
       return;
     }
-    // Skip fetching mentor profile if partner is not a mentor (e.g. platform admin or learner)
-    if (activeConvo && activeConvo.role && activeConvo.role !== 'mentor') {
+    // If we already have a conversation with a non-mentor (e.g. learner/admin), conversations polling keeps online status fresh
+    if (partnerConvo && partnerConvo.role && partnerConvo.role !== 'mentor') {
       return;
     }
-    api.getMentor(otherId)
-      .then((m) => {
-        if (m && String(m.user_id || m.id) === String(otherId)) {
-          setPartnerProfile({
-            id: m.user_id || m.id,
-            name: m.name,
-            role: 'mentor',
-            title: m.title || 'Technical Mentor',
-            hourly_rate: m.hourly_rate !== undefined && m.hourly_rate !== null ? Number(m.hourly_rate) : undefined,
-            avatar: m.photo_url || m.avatar || null,
-            photo_url: m.photo_url || m.avatar || null,
-          });
-        } else {
-          setPartnerProfile(null);
-        }
-      })
-      .catch(() => {
-        setPartnerProfile(null);
-      });
-  }, [otherId, activeConvo?.role]);
+    let cancelled = false;
+    const loadPartnerProfile = () => {
+      api.getMentor(otherId)
+        .then((m) => {
+          if (cancelled) return;
+          if (m && String(m.user_id || m.id) === String(otherId)) {
+            const profileOnline = Boolean(m.online || m.is_online || m.online_status);
+            setPartnerProfile({
+              id: m.user_id || m.id,
+              name: m.name,
+              role: m.role || 'mentor',
+              title: m.title || (m.role === 'mentor' || !m.role ? 'Technical Mentor' : undefined),
+              hourly_rate: m.hourly_rate !== undefined && m.hourly_rate !== null ? Number(m.hourly_rate) : undefined,
+              avatar: m.photo_url || m.avatar || null,
+              photo_url: m.photo_url || m.avatar || null,
+              online: profileOnline,
+              is_online: profileOnline,
+              online_status: profileOnline ? 1 : 0,
+            });
+          } else {
+            setPartnerProfile(null);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setPartnerProfile(null);
+        });
+    };
+    loadPartnerProfile();
+    // Poll profile presence when no conversation thread exists yet for this partner
+    const interval = !hasPartnerConvo ? setInterval(loadPartnerProfile, 10000) : null;
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [otherId, hasPartnerConvo, partnerConvo?.role]);
 
-  // Priority: 1. activeConvo from DB (reliable ground truth)
+  // Priority: 1. activeConvo / partnerConvo from DB (reliable ground truth)
   //           2. partnerProfile (if matching otherId)
   //           3. searchName query param
   //           4. fallback
   const otherName =
-    activeConvo?.name ||
-    activeConvo?.other_name ||
+    partnerConvo?.name ||
+    partnerConvo?.other_name ||
     (partnerProfile && String(partnerProfile.id) === String(otherId) ? partnerProfile.name : null) ||
     searchName ||
     'Direct Message';
 
   const otherRole =
-    activeConvo?.role ||
-    activeConvo?.other_role ||
+    partnerConvo?.role ||
+    partnerConvo?.other_role ||
     (partnerProfile && String(partnerProfile.id) === String(otherId) ? partnerProfile.role : null) ||
     'user';
 
   const otherAvatar =
     (partnerProfile && String(partnerProfile.id) === String(otherId) ? (partnerProfile.photo_url || partnerProfile.avatar) : null) ||
-    activeConvo?.photo_url ||
-    (typeof activeConvo?.avatar === 'string' && (activeConvo.avatar.includes('/') || activeConvo.avatar.startsWith('http') || activeConvo.avatar.startsWith('data:')) ? activeConvo.avatar : null) ||
+    partnerConvo?.photo_url ||
+    (typeof partnerConvo?.avatar === 'string' && (partnerConvo.avatar.includes('/') || partnerConvo.avatar.startsWith('http') || partnerConvo.avatar.startsWith('data:')) ? partnerConvo.avatar : null) ||
     null;
 
-  const isPlatformAdmin = otherRole === 'admin' || otherRole === 'superadmin' || activeConvo?.role === 'admin' || activeConvo?.role === 'superadmin';
-  const isPartnerOnline = Boolean(activeConvo?.online || activeConvo?.is_online || activeConvo?.online_status || partnerProfile?.online);
+  const isPlatformAdmin = otherRole === 'admin' || otherRole === 'superadmin' || partnerConvo?.role === 'admin' || partnerConvo?.role === 'superadmin';
+  const isPartnerOnline = partnerConvo
+    ? Boolean(partnerConvo.online || partnerConvo.is_online || partnerConvo.online_status)
+    : Boolean(partnerProfile?.online || partnerProfile?.is_online || partnerProfile?.online_status);
+
+  const currentContract = searchContractId
+    ? userContracts.find((c) => String(c.id) === String(searchContractId))
+    : null;
+  const resolvedContractTitle = activeConvo?.contract_title || currentContract?.title || null;
+  const isPartnerMentor = otherRole === 'mentor' || (otherRole === 'user' && user?.role === 'learner');
+  const handleOpenPartnerProfile = () => {
+    if (isPlatformAdmin || !otherId) return;
+    if (isPartnerMentor) {
+      navigate(`/mentor/${otherId}`);
+    } else {
+      setProfileModalLearner({
+        id: Number(otherId),
+        user_id: Number(otherId),
+        name: otherName,
+        avatar: otherAvatar,
+        photo_url: otherAvatar,
+      });
+    }
+  };
+  const problemTargetPath = user?.role === 'mentor'
+    ? `/mentor/explore-problems${searchProblemId ? `?problem=${searchProblemId}` : ''}`
+    : `/learner/my-problems${searchProblemId ? `?problem=${searchProblemId}` : ''}`;
 
   // Keep URL parameters clean and aligned with resolved name
   useEffect(() => {
@@ -535,9 +607,11 @@ export default function ChatPage() {
     ) {
       const nextParams = { with: String(otherId), name: otherName };
       if (searchContractId) nextParams.contract = String(searchContractId);
+      if (searchProblemId) nextParams.problem = String(searchProblemId);
+      if (searchProblemTitle) nextParams.problem_title = searchProblemTitle;
       setSearchParams(nextParams, { replace: true });
     }
-  }, [otherId, otherName, searchContractId]);
+  }, [otherId, otherName, searchContractId, searchProblemId, searchProblemTitle]);
 
   const scrollToBottom = (behavior = 'auto') => {
     if (messagesContainerRef.current) {
@@ -605,6 +679,15 @@ export default function ChatPage() {
             return prev;
           }
 
+          // Play incoming sound if new messages arrived from partner
+          if (!isInitial && prev.length > 0 && msgs.length > prev.length) {
+            const prevIds = new Set(prev.map((m) => m.id));
+            const hasNewIncoming = msgs.some((m) => !prevIds.has(m.id) && Number(m.sender_id) === Number(otherId));
+            if (hasNewIncoming) {
+              playIncomingSound();
+            }
+          }
+
           // If messages changed and user is at bottom or it's initial load, scroll internal container
           setTimeout(() => {
             if (isInitial || isAtBottomRef.current) {
@@ -615,31 +698,38 @@ export default function ChatPage() {
           return msgs;
         });
 
-        // Check if there is an active/upcoming booking with this partner
+        window.dispatchEvent(new CustomEvent('pairup_messages_updated'));
+
+        // Check if there is a live or today-scheduled booking with this partner
         const bookings = await api.getBookings().catch(() => []);
         const partnerBookings = (bookings || []).filter(
           (b) =>
             ['paid', 'accepted', 'pending'].includes(b.status) &&
-            (Number(b.learner_id) === Number(otherId) || Number(b.mentor_id) === Number(otherId))
+            (Number(b.learner_id) === Number(otherId) || Number(b.mentor_id) === Number(otherId)) &&
+            (!searchContractId || Number(b.contract_id) === Number(searchContractId))
         );
 
-        // Sort: 1st priority = Live Now session; 2nd priority = Earliest upcoming session; 3rd = Most recent
+        // Only show scheduled sessions that are Live Now or scheduled for today (never unscheduled or past sessions)
         let chosenSession = null;
-        const liveNow = partnerBookings.find((b) => b.status === 'paid' && getSessionTiming(b).isLiveNow);
+        const liveNow = partnerBookings.find((b) => {
+          const t = getSessionTiming(b);
+          return b.status === 'paid' && !t.isUnscheduled && t.isLiveNow;
+        });
         if (liveNow) {
           chosenSession = liveNow;
         } else {
-          const upcoming = partnerBookings
-            .filter((b) => getSessionTiming(b).isUpcoming)
+          const upcomingToday = partnerBookings
+            .filter((b) => {
+              const t = getSessionTiming(b);
+              return !t.isUnscheduled && t.isUpcoming && t.isToday;
+            })
             .sort((a, b) => {
               const aTime = new Date(a.scheduled_at || a.scheduled_time || 0).getTime();
               const bTime = new Date(b.scheduled_at || b.scheduled_time || 0).getTime();
               return aTime - bTime;
             });
-          if (upcoming.length > 0) {
-            chosenSession = upcoming[0];
-          } else if (partnerBookings.length > 0) {
-            chosenSession = partnerBookings[0];
+          if (upcomingToday.length > 0) {
+            chosenSession = upcomingToday[0];
           }
         }
         if (isMounted) setActiveSession(chosenSession || null);
@@ -692,6 +782,7 @@ export default function ChatPage() {
     setError('');
 
     try {
+      playOutgoingSound();
       await api.sendMessage(targetId, textToSend, searchContractId);
       const msgs = await api.getMessages(targetId, searchContractId);
       setMessages(msgs);
@@ -703,6 +794,7 @@ export default function ChatPage() {
         if (Array.isArray(data)) {
           setConversations(data.map(normalizeConvo));
         }
+        window.dispatchEvent(new CustomEvent('pairup_messages_updated'));
       }).catch(() => {});
     } catch (err) {
       setError(err.message);
@@ -727,6 +819,7 @@ export default function ChatPage() {
     setSnippetModalOpen(false);
     setSnippetCode('');
     try {
+      playOutgoingSound();
       await api.sendMessage(targetId, formatted, searchContractId);
       const msgs = await api.getMessages(targetId, searchContractId);
       setMessages(msgs);
@@ -738,6 +831,7 @@ export default function ChatPage() {
         if (Array.isArray(data)) {
           setConversations(data.map(normalizeConvo));
         }
+        window.dispatchEvent(new CustomEvent('pairup_messages_updated'));
       }).catch(() => {});
     } catch (err) {
       setError(err.message);
@@ -784,14 +878,31 @@ export default function ChatPage() {
     setContractForm({
       ...contractForm,
       topics: nextTopics,
-      total_sessions: Math.max(Number(contractForm.total_sessions) || 1, nextTopics.length),
+      total_sessions: nextTopics.length,
     });
   };
 
   const handleRemoveTopic = (index) => {
     if (contractForm.topics.length <= 1) return;
     const updated = contractForm.topics.filter((_, i) => i !== index);
-    setContractForm({ ...contractForm, topics: updated });
+    setContractForm({
+      ...contractForm,
+      topics: updated,
+      total_sessions: Math.max(1, updated.length),
+    });
+  };
+
+  const handleSessionsChange = (num) => {
+    const n = Math.max(1, Math.min(50, parseInt(num, 10) || 1));
+    let nextTopics = [...contractForm.topics];
+    if (n > nextTopics.length) {
+      for (let i = nextTopics.length; i < n; i++) {
+        nextTopics.push('');
+      }
+    } else if (n < nextTopics.length) {
+      nextTopics = nextTopics.slice(0, n);
+    }
+    setContractForm({ ...contractForm, total_sessions: n, topics: nextTopics });
   };
 
   const handleProposeContract = async (e) => {
@@ -804,6 +915,8 @@ export default function ChatPage() {
       return;
     }
 
+    const finalSessions = validTopics.length;
+
     setSubmittingContract(true);
     try {
       const payload = {
@@ -811,7 +924,7 @@ export default function ChatPage() {
         title: contractForm.title.trim(),
         description: contractForm.description.trim(),
         technology: contractForm.technology.trim(),
-        total_sessions: Number(contractForm.total_sessions),
+        total_sessions: finalSessions,
         session_duration_minutes: Number(contractForm.session_duration_minutes),
         total_price: Number(contractForm.total_price),
         topics: validTopics,
@@ -1838,9 +1951,33 @@ export default function ChatPage() {
                             </button>
                           </div>
                         </div>
-                        <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {c.last_message_mine ? <span style={{ opacity: 0.7, fontWeight: 500 }}>You: </span> : ''}
-                          {formatPreviewText(c.last_message)}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                          <div style={{ fontSize: '11.5px', color: 'var(--ink-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                            {c.last_message_mine ? <span style={{ opacity: 0.7, fontWeight: 500 }}>You: </span> : ''}
+                            {formatPreviewText(c.last_message)}
+                          </div>
+                          {Number(c.unread_count) > 0 && !isSelected && (
+                            <span
+                              style={{
+                                background: '#ef4444',
+                                color: '#ffffff',
+                                fontSize: '10.5px',
+                                fontWeight: 700,
+                                minWidth: '18px',
+                                height: '18px',
+                                padding: '0 5px',
+                                borderRadius: '999px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                lineHeight: 1,
+                                flexShrink: 0,
+                                boxShadow: '0 1px 4px rgba(239, 68, 68, 0.4)',
+                              }}
+                            >
+                              {c.unread_count > 99 ? '99+' : c.unread_count}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1868,12 +2005,14 @@ export default function ChatPage() {
               <>
                 {/* Chat Header */}
                 <div
+                  className="chat-header-bar"
                   style={{
                     padding: '12px 18px',
                     borderBottom: '1px solid var(--grid-strong)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
+                    flexWrap: 'wrap',
                     flexShrink: 0,
                     background: 'var(--surface)',
                   }}
@@ -1890,9 +2029,29 @@ export default function ChatPage() {
                     <ArrowLeftIcon size={18} />
                   </button>
 
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <div
+                    style={{
+                      position: 'relative',
+                      flexShrink: 0,
+                      cursor: (searchContractId || !isPlatformAdmin) ? 'pointer' : 'default',
+                    }}
+                    onClick={() => {
+                      if (searchContractId) {
+                        navigate(`/contracts/${searchContractId}`);
+                      } else if (!isPlatformAdmin) {
+                        handleOpenPartnerProfile();
+                      }
+                    }}
+                    title={
+                      searchContractId
+                        ? `Open Contract #${searchContractId}`
+                        : !isPlatformAdmin
+                        ? `View ${otherName}'s profile`
+                        : undefined
+                    }
+                  >
                     <div
-                      className="avatar"
+                      className="avatar chat-header-avatar"
                       style={{
                         width: '40px',
                         height: '40px',
@@ -1947,10 +2106,53 @@ export default function ChatPage() {
                   </div>
 
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--ink)' }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {searchContractId && activeConvo?.contract_title ? activeConvo.contract_title : otherName}
-                      </span>
+                    <div style={{ fontWeight: 700, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--ink)', flexWrap: 'wrap' }}>
+                      {searchContractId ? (
+                        <Link
+                          to={`/contracts/${searchContractId}`}
+                          title={`Open Contract #${searchContractId}`}
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            color: 'inherit',
+                            textDecoration: 'none',
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                        >
+                          {resolvedContractTitle || otherName}
+                        </Link>
+                      ) : !isPlatformAdmin ? (
+                        <button
+                          type="button"
+                          onClick={handleOpenPartnerProfile}
+                          title={`View ${otherName}'s profile`}
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            color: 'inherit',
+                            background: 'transparent',
+                            border: 'none',
+                            padding: 0,
+                            font: 'inherit',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            maxWidth: '100%',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                        >
+                          {otherName}
+                        </button>
+                      ) : (
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {otherName}
+                        </span>
+                      )}
                       {isPlatformAdmin && (
                         <span
                           style={{
@@ -1970,7 +2172,9 @@ export default function ChatPage() {
                         </span>
                       )}
                       {searchContractId && (
-                        <span
+                        <Link
+                          to={`/contracts/${searchContractId}`}
+                          title={`Open Contract #${searchContractId}`}
                           style={{
                             fontSize: '10.5px',
                             background: 'var(--accent-soft)',
@@ -1980,55 +2184,109 @@ export default function ChatPage() {
                             whiteSpace: 'nowrap',
                             fontWeight: 600,
                             border: '1px solid rgba(99, 102, 241, 0.25)',
+                            textDecoration: 'none',
+                            cursor: 'pointer',
+                            transition: 'filter 0.15s ease',
                           }}
+                          onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.15)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
                         >
-                          Contract #{searchContractId}
-                        </span>
+                          Contract #{searchContractId} ↗
+                        </Link>
+                      )}
+                      {!searchContractId && searchProblemId && (
+                        <Link
+                          to={problemTargetPath}
+                          title={`Open Problem #${searchProblemId}${searchProblemTitle ? `: ${searchProblemTitle}` : ''}`}
+                          style={{
+                            fontSize: '10.5px',
+                            background: 'rgba(245, 158, 11, 0.14)',
+                            color: '#f59e0b',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            whiteSpace: 'nowrap',
+                            fontWeight: 600,
+                            border: '1px solid rgba(245, 158, 11, 0.3)',
+                            textDecoration: 'none',
+                            cursor: 'pointer',
+                            maxWidth: '240px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.15)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; }}
+                        >
+                          Problem #{searchProblemId}{searchProblemTitle ? ` · ${searchProblemTitle}` : ''} ↗
+                        </Link>
                       )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', marginTop: '2px' }}>
-                      {searchContractId && activeConvo?.contract_title && (
-                        <>
-                          <span style={{ color: 'var(--ink-muted)' }}>with {otherName}</span>
-                          <span style={{ color: 'var(--ink-faint)' }}>•</span>
-                        </>
-                      )}
-                      <span className={`chat-status-indicator ${isPartnerOnline ? 'online' : 'offline'}`}>
-                        <span className={`led ${isPartnerOnline ? 'online' : 'offline'}`}></span>
-                        {isPlatformAdmin
-                          ? 'Official PairUp Support'
-                          : isPartnerOnline
-                          ? 'Active on PairUp'
-                          : 'Offline'}
-                      </span>
-                    </div>
+                    {((searchContractId && resolvedContractTitle) || isPlatformAdmin) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', marginTop: '2px' }}>
+                        {searchContractId && resolvedContractTitle && (
+                          <span style={{ color: 'var(--ink-muted)' }}>
+                            with{' '}
+                            {!isPlatformAdmin ? (
+                              <button
+                                type="button"
+                                onClick={handleOpenPartnerProfile}
+                                title={`View ${otherName}'s profile`}
+                                style={{
+                                  background: 'transparent',
+                                  border: 'none',
+                                  padding: 0,
+                                  font: 'inherit',
+                                  color: 'var(--ink-muted)',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; e.currentTarget.style.color = 'var(--ink)'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; e.currentTarget.style.color = 'var(--ink-muted)'; }}
+                              >
+                                {otherName}
+                              </button>
+                            ) : (
+                              otherName
+                            )}
+                          </span>
+                        )}
+                        {isPlatformAdmin && (
+                          <span style={{ color: 'var(--ink-muted)' }}>
+                            Official PairUp Support
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    {!isPlatformAdmin && otherRole === 'mentor' && (
+                  <div className="chat-header-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {!isPlatformAdmin && (
                       <button
                         type="button"
                         className="btn btn-primary"
                         style={{ fontSize: '11.5px', padding: '5px 12px' }}
+                        title="Schedule Session"
+                        aria-label="Schedule Session"
                         onClick={() => {
                           setScheduleModalOpen(true);
                           setScheduleDate(new Date(Date.now() + 86400000).toISOString().slice(0, 16));
                         }}
                       >
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                          <CalendarIcon size={13} /> Schedule Session
+                          <CalendarIcon size={13} /> <span className="chat-header-btn-label">Schedule Session</span>
                         </span>
                       </button>
                     )}
-                    {!isPlatformAdmin && otherRole === 'mentor' && !searchContractId && (
+                    {!isPlatformAdmin && !searchContractId && (
                       <button
                         type="button"
                         className="btn btn-secondary"
                         style={{ fontSize: '11.5px', padding: '5px 12px' }}
+                        title="Propose Contract"
+                        aria-label="Propose Contract"
                         onClick={() => setContractModalOpen(true)}
                       >
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                          <DocumentIcon size={13} /> Propose Contract
+                          <DocumentIcon size={13} /> <span className="chat-header-btn-label">Propose Contract</span>
                         </span>
                       </button>
                     )}
@@ -2070,9 +2328,9 @@ export default function ChatPage() {
                             gap: '2px',
                           }}
                         >
-                          {otherRole === 'mentor' && (
+                          {searchContractId && (
                             <Link
-                              to={`/mentor/${otherId}`}
+                              to={`/contracts/${searchContractId}`}
                               onClick={() => setMoreMenuOpen(false)}
                               style={{
                                 display: 'flex',
@@ -2089,9 +2347,63 @@ export default function ChatPage() {
                               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-hover)'; }}
                               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                             >
-                              <UserIcon size={14} style={{ color: 'var(--ink-muted)' }} />
-                              <span>Profile</span>
+                              <DocumentIcon size={14} style={{ color: 'var(--accent)' }} />
+                              <span>Open Contract #{searchContractId}</span>
                             </Link>
+                          )}
+
+                          {!searchContractId && searchProblemId && (
+                            <Link
+                              to={problemTargetPath}
+                              onClick={() => setMoreMenuOpen(false)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '7px 10px',
+                                borderRadius: '6px',
+                                fontSize: '12.5px',
+                                color: 'var(--ink)',
+                                textDecoration: 'none',
+                                cursor: 'pointer',
+                                transition: 'background 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-hover)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <CodeIcon size={14} style={{ color: '#f59e0b' }} />
+                              <span>Open Problem #{searchProblemId}</span>
+                            </Link>
+                          )}
+
+                          {!isPlatformAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMoreMenuOpen(false);
+                                handleOpenPartnerProfile();
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '7px 10px',
+                                borderRadius: '6px',
+                                fontSize: '12.5px',
+                                color: 'var(--ink)',
+                                background: 'transparent',
+                                border: 'none',
+                                width: '100%',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                transition: 'background 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-hover)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <UserIcon size={14} style={{ color: 'var(--ink-muted)' }} />
+                              <span>View Profile</span>
+                            </button>
                           )}
 
                           <button
@@ -2179,8 +2491,10 @@ export default function ChatPage() {
                       flexShrink: 0,
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '240px' }}>
-                      <div
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 'min(100%, 240px)' }}>
+                      <Link
+                        to={`/contracts/${activeContract.id}`}
+                        title={`Open Contract #${activeContract.id}`}
                         style={{
                           width: '32px',
                           height: '32px',
@@ -2191,15 +2505,22 @@ export default function ChatPage() {
                           alignItems: 'center',
                           justifyContent: 'center',
                           flexShrink: 0,
+                          textDecoration: 'none',
                         }}
                       >
                         <DocumentIcon size={16} />
-                      </div>
+                      </Link>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--ink)' }}>
+                          <Link
+                            to={`/contracts/${activeContract.id}`}
+                            title={`Open Contract #${activeContract.id}`}
+                            style={{ fontWeight: 700, fontSize: '13px', color: 'var(--ink)', textDecoration: 'none' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                          >
                             {activeContract.title}
-                          </span>
+                          </Link>
                           <span
                             style={{
                               fontSize: '10px',
@@ -2242,13 +2563,24 @@ export default function ChatPage() {
                     </div>
 
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      {activeContract.status === 'proposed' && user?.role === 'learner' && (
+                      {activeContract.status === 'proposed' && (
                         <Link
                           to={`/contracts/${activeContract.id}`}
                           className="btn btn-primary"
                           style={{ fontSize: '11px', padding: '5px 12px' }}
                         >
-                          Review &amp; Fund Escrow →
+                          {activeContract.created_by_id === user?.id
+                            ? 'View Proposal →'
+                            : (user?.role === 'learner' ? 'Review & Accept/Fund →' : 'Review & Accept →')}
+                        </Link>
+                      )}
+                      {activeContract.status === 'accepted' && user?.role === 'learner' && (
+                        <Link
+                          to={`/contracts/${activeContract.id}`}
+                          className="btn btn-primary"
+                          style={{ fontSize: '11px', padding: '5px 12px' }}
+                        >
+                          Deposit Escrow →
                         </Link>
                       )}
                       {activeContract.status === 'completed_by_mentor' && user?.role === 'learner' && (
@@ -2292,6 +2624,9 @@ export default function ChatPage() {
                 {/* Session Information Banner */}
                 {activeSession && dismissedSessionId !== activeSession.id && (() => {
                   const timing = getSessionTiming(activeSession);
+                  if (timing.isUnscheduled || timing.isPast || (!timing.isLiveNow && !timing.isToday)) {
+                    return null;
+                  }
                   const isMentor = user?.role === 'mentor';
                   const targetSessionsLink = isMentor ? '/mentor/sessions' : '/learner/sessions';
 
@@ -2311,7 +2646,7 @@ export default function ChatPage() {
                         flexShrink: 0,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '240px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 'min(100%, 240px)' }}>
                         <div
                           style={{
                             width: '32px',
@@ -2330,7 +2665,7 @@ export default function ChatPage() {
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--ink)' }}>
-                              {timing.isLiveNow ? '🔴 Live Session Now' : 'Upcoming Scheduled Session'}
+                              {timing.isLiveNow ? '🔴 Live Session Now' : "Today's Scheduled Session"}
                             </span>
                             <span
                               style={{
@@ -2362,7 +2697,7 @@ export default function ChatPage() {
                               whiteSpace: 'nowrap',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
-                              maxWidth: '520px',
+                              maxWidth: '100%',
                             }}
                             title={activeSession.topic || 'Pairing Session'}
                           >
@@ -2434,6 +2769,7 @@ export default function ChatPage() {
                 <div
                   ref={messagesContainerRef}
                   onScroll={handleScroll}
+                  className="chat-messages-stream"
                   style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}
                 >
                   {messages.length === 0 ? (
@@ -2599,6 +2935,7 @@ export default function ChatPage() {
 
                 {/* Rich Integrated Message Composer */}
                 <div
+                  className="chat-composer-wrap"
                   style={{
                     padding: '10px 18px 14px',
                     background: 'var(--bg)',
@@ -2617,16 +2954,19 @@ export default function ChatPage() {
                   {/* Emoji picker popup */}
                   {emojiPickerOpen && (
                     <div
+                      className="chat-emoji-popover"
                       style={{
                         position: 'absolute',
                         bottom: 'calc(100% - 4px)',
                         left: '18px',
+                        maxWidth: 'calc(100% - 24px)',
                         marginBottom: '8px',
                         background: 'var(--surface)',
                         border: '1px solid var(--grid-strong)',
                         borderRadius: '12px',
                         padding: '10px 12px',
                         display: 'flex',
+                        flexWrap: 'wrap',
                         gap: '6px',
                         boxShadow: '0 12px 28px rgba(0,0,0,0.3)',
                         zIndex: 50,
@@ -2723,7 +3063,7 @@ export default function ChatPage() {
                     <textarea
                       ref={inputRef}
                       value={inputText}
-                      rows={2}
+                      rows={1}
                       onChange={(e) => handleInputChange(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
@@ -2866,16 +3206,43 @@ export default function ChatPage() {
       <BookSessionModal
         isOpen={scheduleModalOpen}
         onClose={() => setScheduleModalOpen(false)}
-        mentor={{
+        mentor={user?.role === 'mentor' ? {
+          id: Number(user.id),
+          user_id: Number(user.id),
+          name: user.name || 'Mentor',
+          title: user.title || 'Technical Mentor',
+          hourly_rate: user.hourly_rate !== undefined && user.hourly_rate !== null
+            ? Number(user.hourly_rate)
+            : undefined,
+        } : {
           id: Number(otherId),
           user_id: Number(otherId),
           name: otherName || 'Mentor',
-          title: partnerProfile?.title || activeConvo?.title || 'Technical Mentor',
+          title: partnerProfile?.title || partnerConvo?.title || 'Technical Mentor',
           hourly_rate: partnerProfile?.hourly_rate !== undefined && partnerProfile?.hourly_rate !== null
             ? partnerProfile.hourly_rate
-            : activeConvo?.hourly_rate !== undefined && activeConvo?.hourly_rate !== null
-            ? Number(activeConvo.hourly_rate)
+            : partnerConvo?.hourly_rate !== undefined && partnerConvo?.hourly_rate !== null
+            ? Number(partnerConvo.hourly_rate)
             : undefined,
+        }}
+        learner={user?.role === 'mentor' ? {
+          id: Number(otherId),
+          user_id: Number(otherId),
+          name: otherName || 'Learner',
+        } : undefined}
+        onSuccess={async (bookingRes) => {
+          try {
+            const timeStr = bookingRes?.scheduled_at ? new Date(bookingRes.scheduled_at).toLocaleString() : '';
+            await api.sendMessage(
+              Number(otherId),
+              `📅 Scheduled a pairing session${timeStr ? ` for ${timeStr}` : ''}: "${bookingRes?.topic || 'Pairing Session'}". View session details in My Sessions.`
+            );
+            const msgs = await api.getMessages(otherId);
+            setMessages(msgs);
+            isAtBottomRef.current = true;
+            setTimeout(() => scrollToBottom('smooth'), 50);
+          } catch {}
+          setScheduleModalOpen(false);
         }}
         initialTopic={scheduleTopic}
       />
@@ -2931,7 +3298,7 @@ export default function ChatPage() {
                 min="1"
                 max="50"
                 value={contractForm.total_sessions}
-                onChange={(e) => setContractForm({ ...contractForm, total_sessions: e.target.value })}
+                onChange={(e) => handleSessionsChange(e.target.value)}
                 required
               />
             </div>
@@ -3256,6 +3623,12 @@ export default function ChatPage() {
           );
         })()}
       </Modal>
+
+      <LearnerProfileModal
+        isOpen={Boolean(profileModalLearner)}
+        onClose={() => setProfileModalLearner(null)}
+        learner={profileModalLearner}
+      />
     </PortalLayout>
   );
 }

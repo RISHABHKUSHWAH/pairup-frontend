@@ -162,6 +162,7 @@ export const learnerNotifications = {
     const newItem = { id: Date.now(), time: 'Just now', read: false, ...item };
     const updated = [newItem, ...list];
     localStorage.setItem('pairup_learner_notifications', JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
     return updated;
   },
 };

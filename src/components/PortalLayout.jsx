@@ -3,8 +3,9 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
-import { BellIcon, SunIcon, MoonIcon, ArrowLeftIcon, MenuIcon, CheckIcon } from './Icons';
-import { notificationsApi, learnerNotifications, mentorNotifications } from '../api/client';
+import { BellIcon, SunIcon, MoonIcon, ArrowLeftIcon, MenuIcon, CheckIcon, VolumeIcon, VolumeXIcon } from './Icons';
+import { notificationsApi, learnerNotifications, mentorNotifications, chatApi } from '../api/client';
+import { playIncomingSound, playNotificationSound, soundSettings } from '../utils/soundEffects';
 import { resolveNotificationLink } from '../utils';
 
 export default function PortalLayout({
@@ -45,9 +46,25 @@ export default function PortalLayout({
     portalType = 'mentor';
   }
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
+  const prevUnreadMessagesRef = useRef(null);
+  const prevUnreadNotifIdsRef = useRef(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => soundSettings.isNotificationEnabled());
   const [latestNotifs, setLatestNotifs] = useState([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleSoundChange = (e) => {
+      if (e?.detail?.notification !== undefined) {
+        setSoundEnabled(e.detail.notification);
+      } else {
+        setSoundEnabled(soundSettings.isNotificationEnabled());
+      }
+    };
+    window.addEventListener('pairup_sound_settings_changed', handleSoundChange);
+    return () => window.removeEventListener('pairup_sound_settings_changed', handleSoundChange);
+  }, []);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -150,11 +167,14 @@ export default function PortalLayout({
     const updateUnread = async () => {
       let remoteUnread = 0;
       let hasRemote = false;
+      let currentUnreadIds = [];
       try {
         const data = await notificationsApi.list();
         if (Array.isArray(data) && active) {
           hasRemote = true;
-          remoteUnread = data.filter((n) => !n.is_read).length;
+          const unreadList = data.filter((n) => !n.is_read);
+          remoteUnread = unreadList.length;
+          currentUnreadIds = unreadList.map((n) => String(n.id));
           setLatestNotifs(
             data.map((n) => ({
               id: n.id,
@@ -174,16 +194,30 @@ export default function PortalLayout({
           setUnreadCount(remoteUnread);
         } else if (portalType === 'mentor') {
           const notifs = mentorNotifications.getNotifications();
-          setUnreadCount(notifs.filter((n) => !n.read).length);
+          const unreadList = notifs.filter((n) => !n.read);
+          currentUnreadIds = unreadList.map((n) => String(n.id));
+          setUnreadCount(unreadList.length);
           setLatestNotifs(notifs);
         } else if (portalType === 'learner') {
           const notifs = learnerNotifications.getNotifications();
-          setUnreadCount(notifs.filter((n) => !n.read).length);
+          const unreadList = notifs.filter((n) => !n.read);
+          currentUnreadIds = unreadList.map((n) => String(n.id));
+          setUnreadCount(unreadList.length);
           setLatestNotifs(notifs);
         } else {
           setUnreadCount(0);
           setLatestNotifs([]);
         }
+
+        // Play notification chime when new unread notification(s) arrive
+        if (prevUnreadNotifIdsRef.current !== null) {
+          const prevSet = new Set(prevUnreadNotifIdsRef.current);
+          const hasNew = currentUnreadIds.some((id) => !prevSet.has(id));
+          if (hasNew) {
+            playNotificationSound();
+          }
+        }
+        prevUnreadNotifIdsRef.current = currentUnreadIds;
       }
     };
 
@@ -227,6 +261,47 @@ export default function PortalLayout({
     }
   };
 
+  useEffect(() => {
+    let active = true;
+
+    const updateUnreadMessages = async () => {
+      try {
+        const res = await chatApi.getUnreadCount();
+        if (res && typeof res.unread_count === 'number' && active) {
+          const newCount = res.unread_count;
+          if (prevUnreadMessagesRef.current !== null && newCount > prevUnreadMessagesRef.current) {
+            const isChatActive = location.pathname.startsWith('/chat') && location.search.includes('with=');
+            if (!isChatActive) {
+              playIncomingSound();
+            }
+          }
+          prevUnreadMessagesRef.current = newCount;
+          setUnreadMessagesCount(newCount);
+        }
+      } catch (_) {}
+    };
+
+    updateUnreadMessages();
+    const msgInterval = setInterval(updateUnreadMessages, 8000);
+
+    const handleMessageSync = (e) => {
+      if (e?.detail && typeof e.detail.unread_count === 'number') {
+        setUnreadMessagesCount(e.detail.unread_count);
+        prevUnreadMessagesRef.current = e.detail.unread_count;
+      } else {
+        updateUnreadMessages();
+      }
+    };
+
+    window.addEventListener('pairup_messages_updated', handleMessageSync);
+
+    return () => {
+      active = false;
+      clearInterval(msgInterval);
+      window.removeEventListener('pairup_messages_updated', handleMessageSync);
+    };
+  }, [location.pathname, location.search]);
+
   const handleDropdownMarkAllRead = async (e) => {
     e.stopPropagation();
     try {
@@ -255,6 +330,7 @@ export default function PortalLayout({
       <Sidebar
         portalType={portalType}
         unreadCount={unreadCount}
+        unreadMessagesCount={unreadMessagesCount}
         collapsed={sidebarCollapsed}
         onToggle={toggleSidebar}
         mobileOpen={mobileSidebarOpen}
@@ -373,17 +449,44 @@ export default function PortalLayout({
                         </span>
                       )}
                     </div>
-                    {unreadCount > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <button
                         type="button"
-                        onClick={handleDropdownMarkAllRead}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const next = !soundEnabled;
+                          soundSettings.setNotificationEnabled(next);
+                          setSoundEnabled(next);
+                          if (next) {
+                            playNotificationSound(true);
+                          }
+                        }}
                         className="btn btn-ghost"
-                        style={{ fontSize: '11px', padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        title={soundEnabled ? 'Mute notification sound' : 'Enable notification sound'}
+                        style={{
+                          fontSize: '11px',
+                          padding: '2px 8px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          color: soundEnabled ? 'var(--primary)' : 'var(--text-muted)',
+                        }}
                       >
-                        <CheckIcon size={12} />
-                        <span>Mark all read</span>
+                        {soundEnabled ? <VolumeIcon size={13} /> : <VolumeXIcon size={13} />}
+                        <span>{soundEnabled ? 'Sound' : 'Muted'}</span>
                       </button>
-                    )}
+                      {unreadCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDropdownMarkAllRead}
+                          className="btn btn-ghost"
+                          style={{ fontSize: '11px', padding: '2px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <CheckIcon size={12} />
+                          <span>Mark all read</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div style={{ maxHeight: '340px', overflowY: 'auto' }}>

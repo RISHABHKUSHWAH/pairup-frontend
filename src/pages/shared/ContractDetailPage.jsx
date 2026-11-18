@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import Modal from '../../components/Modal';
+import RescheduleModal from '../../components/RescheduleModal';
 import LearnerProfileModal from '../../components/LearnerProfileModal';
 import { api, initials, formatCurrency, formatDateTime } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -16,8 +17,11 @@ import {
   AlertTriangleIcon,
   StarIcon,
   ArrowLeftIcon,
+  VideoIcon,
+  FileEditIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
+import { useRealtimeSync, broadcastDataChange } from '../../utils';
 
 export default function ContractDetailPage() {
   const { id } = useParams();
@@ -47,7 +51,6 @@ export default function ContractDetailPage() {
 
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState(null);
-  const [scheduleDateTime, setScheduleDateTime] = useState('');
 
   // Session Notes & Files Modal
   const [notesModalSession, setNotesModalSession] = useState(null);
@@ -55,26 +58,178 @@ export default function ContractDetailPage() {
   const [sessionFiles, setSessionFiles] = useState([]);
   const [loadingNotes, setLoadingNotes] = useState(false);
 
+  // Edit Contract Proposal Terms Modal
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: '',
+    description: '',
+    technology: '',
+    topics: [],
+    total_sessions: 3,
+    session_duration_minutes: 60,
+    total_price: 0,
+  });
+  const [editError, setEditError] = useState('');
+
 
   useEffect(() => {
     loadContract();
   }, [id]);
 
-  const loadContract = async () => {
-    setLoading(true);
+  const loadContract = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const data = await api.getContract(id);
       setContract(data);
     } catch (err) {
-      setError(err.message || 'Failed to load contract');
+      if (!silent) setError(err.message || 'Failed to load contract');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
+  useRealtimeSync({
+    onSync: () => loadContract(true),
+    entities: ['contracts'],
+    intervalMs: 3500,
+  });
+
   const isLearner = user?.id === contract?.learner_id;
   const isMentor = user?.id === contract?.mentor_id;
+  const isCreator = user?.id === contract?.created_by_id;
+
+  const effectiveSessions = (contract?.topics && contract.topics.length > 0)
+    ? contract.topics.length
+    : (contract?.total_sessions || 1);
+
+  // Handle Accept Proposal
+  const handleAcceptContract = async () => {
+    const isCurrentUserMentor = user?.id === contract?.mentor_id;
+    const titleText = isCurrentUserMentor ? 'Accept Learner Contract Proposal' : 'Accept Mentorship Contract Proposal';
+    const msgText = `Are you sure you want to accept "${contract.title}" for ${formatCurrency(contract.total_price)} (${contract.total_sessions} sessions)?`;
+
+    const confirmed = await confirm({
+      title: titleText,
+      message: msgText,
+      confirmText: 'Accept Proposal',
+      type: 'info',
+    });
+    if (!confirmed) return;
+    setActionLoading(true);
+    setError('');
+    try {
+      const res = await api.acceptContract(id);
+      toast.success(res.message || 'Contract proposal accepted successfully!');
+      broadcastDataChange('contracts');
+      await loadContract();
+    } catch (err) {
+      toast.error(err.message);
+      setError(err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Open Edit Modal with prefilled contract data
+  const openEditModal = () => {
+    if (!contract) return;
+    const initialTopics = Array.isArray(contract.topics) && contract.topics.length > 0
+      ? [...contract.topics]
+      : Array.from({ length: contract.total_sessions || 3 }, (_, i) => `Milestone Session ${i + 1}`);
+
+    setEditForm({
+      title: contract.title || '',
+      description: contract.description || '',
+      technology: contract.technology || '',
+      topics: initialTopics,
+      total_sessions: initialTopics.length,
+      session_duration_minutes: contract.session_duration_minutes || 60,
+      total_price: contract.total_price || 0,
+    });
+    setEditError('');
+    setEditModalOpen(true);
+  };
+
+  const handleAddEditTopic = () => {
+    setEditForm((prev) => {
+      const nextTopics = [...prev.topics, `Milestone Session ${prev.topics.length + 1}`];
+      return {
+        ...prev,
+        topics: nextTopics,
+        total_sessions: nextTopics.length,
+      };
+    });
+  };
+
+  const handleRemoveEditTopic = (idx) => {
+    setEditForm((prev) => {
+      const nextTopics = prev.topics.filter((_, i) => i !== idx);
+      return {
+        ...prev,
+        topics: nextTopics,
+        total_sessions: Math.max(1, nextTopics.length),
+      };
+    });
+  };
+
+  const handleEditSessionsChange = (num) => {
+    const n = Math.max(1, Math.min(50, parseInt(num, 10) || 1));
+    setEditForm((prev) => {
+      let nextTopics = [...prev.topics];
+      if (n > nextTopics.length) {
+        for (let i = nextTopics.length; i < n; i++) {
+          nextTopics.push(`Milestone Session ${i + 1}`);
+        }
+      } else if (n < nextTopics.length) {
+        nextTopics = nextTopics.slice(0, n);
+      }
+      return { ...prev, total_sessions: n, topics: nextTopics };
+    });
+  };
+
+  const handleSaveEdit = async (e) => {
+    e?.preventDefault();
+    setEditError('');
+
+    if (!editForm.title.trim()) {
+      setEditError('Contract title is required.');
+      return;
+    }
+    const cleanTopics = editForm.topics.map((t) => t.trim()).filter(Boolean);
+    const finalSessions = cleanTopics.length > 0
+      ? cleanTopics.length
+      : Math.max(1, parseInt(editForm.total_sessions, 10) || 1);
+
+    const price = parseFloat(editForm.total_price);
+    if (!price || price <= 0) {
+      setEditError('Total price must be greater than 0.');
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const payload = {
+        title: editForm.title.trim(),
+        description: editForm.description.trim(),
+        technology: editForm.technology.trim(),
+        topics: cleanTopics,
+        total_sessions: finalSessions,
+        session_duration_minutes: parseInt(editForm.session_duration_minutes, 10) || 60,
+        total_price: price,
+      };
+
+      const res = await api.updateContract(id, payload);
+      setEditModalOpen(false);
+      toast.success(res.message || 'Contract terms updated! Sent for review.');
+      broadcastDataChange('contracts');
+      await loadContract();
+    } catch (err) {
+      setEditError(err.message || 'Failed to update contract terms.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Handle Pay Contract
   const handlePayContract = async () => {
@@ -84,6 +239,7 @@ export default function ContractDetailPage() {
       const res = await api.payContract(id, { payment_method: paymentMethod });
       setPayModalOpen(false);
       toast.success(res.message || 'Contract funded! Funds are held in escrow.');
+      broadcastDataChange('contracts');
       await loadContract();
     } catch (err) {
       setError(err.message);
@@ -106,6 +262,7 @@ export default function ContractDetailPage() {
     try {
       const res = await api.completeContractByMentor(id);
       toast.success(res.message);
+      broadcastDataChange('contracts');
       await loadContract();
     } catch (err) {
       toast.error(err.message);
@@ -139,6 +296,7 @@ export default function ContractDetailPage() {
       });
       setApproveModalOpen(false);
       toast.success(res.message);
+      broadcastDataChange('contracts');
       await loadContract();
     } catch (err) {
       toast.error(err.message);
@@ -159,6 +317,7 @@ export default function ContractDetailPage() {
       const res = await api.disputeContract(id, disputeReason.trim());
       setDisputeModalOpen(false);
       toast.info(res.message);
+      broadcastDataChange('contracts');
       await loadContract();
     } catch (err) {
       toast.error(err.message);
@@ -168,12 +327,19 @@ export default function ContractDetailPage() {
     }
   };
 
-  // Handle Decline
+  // Handle Decline / Withdraw
   const handleDeclineContract = async () => {
+    const isCurrentCreator = user?.id === contract?.created_by_id;
+    const titleText = isCurrentCreator ? 'Withdraw Contract Proposal' : 'Decline Contract Proposal';
+    const messageText = isCurrentCreator
+      ? 'Are you sure you want to withdraw this contract proposal? This proposal will be closed.'
+      : 'Are you sure you want to decline this contract proposal? This decision cannot be reversed.';
+    const confirmBtnText = isCurrentCreator ? 'Withdraw Proposal' : 'Decline Contract';
+
     const confirmed = await confirm({
-      title: 'Decline Contract Proposal',
-      message: 'Are you sure you want to decline this contract proposal? This decision cannot be reversed.',
-      confirmText: 'Decline Contract',
+      title: titleText,
+      message: messageText,
+      confirmText: confirmBtnText,
       type: 'danger',
     });
     if (!confirmed) return;
@@ -181,28 +347,11 @@ export default function ContractDetailPage() {
     setError('');
     try {
       const res = await api.declineContract(id);
-      toast.success(res.message);
+      toast.success(res.message || 'Contract proposal closed.');
+      broadcastDataChange('contracts');
       await loadContract();
     } catch (err) {
       toast.error(err.message);
-      setError(err.message);
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Handle Schedule Session
-  const handleScheduleSession = async (e) => {
-    e?.preventDefault();
-    if (!selectedSession || !scheduleDateTime) return;
-    setActionLoading(true);
-    setError('');
-    try {
-      const res = await api.scheduleContractSession(id, selectedSession.id, scheduleDateTime);
-      setScheduleModalOpen(false);
-      toast.success(res.message);
-      await loadContract();
-    } catch (err) {
       setError(err.message);
     } finally {
       setActionLoading(false);
@@ -261,6 +410,7 @@ export default function ContractDetailPage() {
 
   const statusBadgeClass = {
     proposed: 'badge-pending',
+    accepted: 'badge-accepted',
     active: 'badge-paid',
     completed_by_mentor: 'badge-accepted',
     completed: 'badge-completed',
@@ -270,6 +420,7 @@ export default function ContractDetailPage() {
 
   const statusLabel = {
     proposed: 'Proposal Pending',
+    accepted: 'Proposal Accepted',
     active: 'Active · Escrow Held',
     completed_by_mentor: 'Completed by Mentor · Awaiting Review',
     completed: 'Completed · Payment Released',
@@ -279,6 +430,28 @@ export default function ContractDetailPage() {
 
   const otherPersonName = isLearner ? contract.mentor_name : contract.learner_name;
   const otherPersonId = isLearner ? contract.mentor_id : contract.learner_id;
+
+  // Check whether a milestone session is currently live (15m before start until 30m after end)
+  const isSessionLive = (session) => {
+    if (!session || !session.scheduled_at) return false;
+    const date = new Date(session.scheduled_at);
+    if (isNaN(date.getTime())) return false;
+    const durationMs = (session.duration_minutes || 60) * 60 * 1000;
+    const startMs = date.getTime();
+    const endMs = startMs + durationMs;
+    const now = Date.now();
+    return now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
+  };
+
+  const isSessionExpired = (session) => {
+    if (!session || !session.scheduled_at) return false;
+    const date = new Date(session.scheduled_at);
+    if (isNaN(date.getTime())) return false;
+    const durationMs = (session.duration_minutes || 60) * 60 * 1000;
+    const endMs = date.getTime() + durationMs;
+    const now = Date.now();
+    return now > (endMs + 30 * 60 * 1000);
+  };
 
   return (
     <div className="portal-page-grid" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -308,7 +481,7 @@ export default function ContractDetailPage() {
               Contracts
             </Link>
             <span>/</span>
-            <span className="mono">#{contract.id}</span>
+            <span className="mono" style={{ fontWeight: 700, color: 'var(--ink)' }}>Contract #{contract.id}</span>
           </div>
         </div>
 
@@ -326,14 +499,45 @@ export default function ContractDetailPage() {
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
-            <div style={{ flex: 1, minWidth: '280px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+            <div style={{ flex: 1, minWidth: 'min(100%, 280px)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: '11.5px',
+                    fontWeight: 800,
+                    padding: '3px 10px',
+                    borderRadius: '6px',
+                    background: 'rgba(99, 102, 241, 0.16)',
+                    color: '#818cf8',
+                    border: '1.5px solid rgba(99, 102, 241, 0.4)',
+                    letterSpacing: '0.4px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  <DocumentIcon size={12} />
+                  Contract #{contract.id}
+                </span>
                 <span className={`status-badge ${statusBadgeClass}`} style={{ fontSize: '11px', fontWeight: 700 }}>
                   {statusLabel}
                 </span>
                 <span className="mono" style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
                   Created {formatDateTime(contract.created_at)}
                 </span>
+                {['proposed', 'accepted'].includes(contract.status) && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '11px', padding: '3px 8px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    onClick={openEditModal}
+                    title="Edit contract proposal terms"
+                  >
+                    <FileEditIcon size={12} />
+                    <span>Edit Terms</span>
+                  </button>
+                )}
               </div>
 
               <h1 style={{ fontSize: '26px', margin: '0 0 10px 0', lineHeight: 1.25 }}>
@@ -365,7 +569,7 @@ export default function ContractDetailPage() {
                 border: '1px solid var(--grid-strong)',
                 borderRadius: '12px',
                 padding: '20px 24px',
-                minWidth: '240px',
+                minWidth: 'min(100%, 240px)',
                 textAlign: 'right',
               }}
             >
@@ -376,7 +580,7 @@ export default function ContractDetailPage() {
                 {formatCurrency(contract.total_price)}
               </div>
               <div style={{ fontSize: '12px', color: 'var(--ink-muted)', fontFamily: 'IBM Plex Mono' }}>
-                ~{formatCurrency(Math.round(contract.total_price / contract.total_sessions))} per session
+                ~{formatCurrency(Math.round(contract.total_price / effectiveSessions))} per session
               </div>
 
               {contract.payment && (
@@ -439,8 +643,23 @@ export default function ContractDetailPage() {
               </div>
             </div>
 
-            {/* Chat button */}
-            <div style={{ marginLeft: 'auto' }}>
+            {/* Chat & Contract ID Info */}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span
+                className="mono"
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: 'var(--ink-muted)',
+                  background: 'var(--bg)',
+                  border: '1px solid var(--grid)',
+                  borderRadius: '6px',
+                  padding: '5px 10px',
+                  letterSpacing: '0.3px',
+                }}
+              >
+                Contract Number: #{contract.id}
+              </span>
               <Link
                 to={`/chat?with=${otherPersonId}&name=${encodeURIComponent(otherPersonName)}&contract=${contract.id}`}
                 className="btn btn-ghost"
@@ -472,7 +691,7 @@ export default function ContractDetailPage() {
         )}
 
         {/* Curriculum & Topics Section */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 340px) 1fr', gap: '24px', alignItems: 'start' }}>
+        <div className="contract-detail-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(min(100%, 300px), 340px) 1fr', gap: '24px', alignItems: 'start' }}>
           {/* Left Column: Topics Syllabus */}
           <div
             style={{
@@ -486,7 +705,7 @@ export default function ContractDetailPage() {
               Curriculum Topics ({contract.topics?.length || 0})
             </div>
             <p className="sub" style={{ fontSize: '13px' }}>
-              Agreed syllabus covered across {contract.total_sessions} mentorship sessions:
+              Agreed syllabus covered across {effectiveSessions} mentorship sessions:
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -561,7 +780,7 @@ export default function ContractDetailPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <h2 style={{ fontSize: '19px', margin: 0 }}>
-                Milestone Sessions ({contract.completed_sessions || 0} / {contract.total_sessions} Completed)
+                Milestone Sessions ({contract.completed_sessions || 0} / {effectiveSessions} Completed)
               </h2>
 
               {/* Progress Bar */}
@@ -571,13 +790,13 @@ export default function ContractDetailPage() {
                     style={{
                       height: '100%',
                       background: 'var(--add)',
-                      width: `${Math.round(((contract.completed_sessions || 0) / contract.total_sessions) * 100)}%`,
+                      width: `${Math.round(((contract.completed_sessions || 0) / effectiveSessions) * 100)}%`,
                       transition: 'width 0.3s ease',
                     }}
                   ></div>
                 </div>
                 <span className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)' }}>
-                  {Math.round(((contract.completed_sessions || 0) / contract.total_sessions) * 100)}%
+                  {Math.round(((contract.completed_sessions || 0) / effectiveSessions) * 100)}%
                 </span>
               </div>
             </div>
@@ -587,19 +806,26 @@ export default function ContractDetailPage() {
               contract.sessions.map((s) => {
                 const isContractFinished = contract.status === 'completed';
                 const isCompleted = s.status === 'completed' || isContractFinished;
+                const isLive = !isCompleted && isSessionLive(s);
+                const isExpired = !isCompleted && isSessionExpired(s);
 
                 return (
                   <div
                     key={s.id}
                     style={{
                       background: 'var(--surface)',
-                      border: '1px solid var(--grid-strong)',
+                      border: isLive
+                        ? '1px solid rgba(16, 185, 129, 0.45)'
+                        : isExpired
+                        ? '1px solid rgba(239, 68, 68, 0.35)'
+                        : '1px solid var(--grid-strong)',
                       borderRadius: '12px',
                       padding: '20px 22px',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '16px',
                       flexWrap: 'wrap',
+                      boxShadow: isLive ? '0 0 16px rgba(16, 185, 129, 0.08)' : 'none',
                     }}
                   >
                     {/* Session Number Circle */}
@@ -608,8 +834,16 @@ export default function ContractDetailPage() {
                         width: '42px',
                         height: '42px',
                         borderRadius: '10px',
-                        background: isCompleted ? 'var(--add-bg)' : 'var(--accent-soft)',
-                        color: isCompleted ? 'var(--add)' : 'var(--accent)',
+                        background: isCompleted
+                          ? 'var(--add-bg)'
+                          : isLive
+                          ? 'rgba(16, 185, 129, 0.15)'
+                          : 'var(--accent-soft)',
+                        color: isCompleted
+                          ? 'var(--add)'
+                          : isLive
+                          ? '#10b981'
+                          : 'var(--accent)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -622,7 +856,7 @@ export default function ContractDetailPage() {
                       {isCompleted ? '✓' : `#${s.session_number}`}
                     </div>
 
-                    <div style={{ flex: 1, minWidth: '220px' }}>
+                    <div style={{ flex: 1, minWidth: 'min(100%, 220px)' }}>
                       <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--ink)', marginBottom: '4px' }}>
                         {s.topic}
                       </div>
@@ -637,6 +871,44 @@ export default function ContractDetailPage() {
                           <CalendarIcon size={14} />
                           {s.scheduled_at ? formatDateTime(s.scheduled_at) : 'Not scheduled yet'}
                         </span>
+
+                        {isLive && (
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              color: '#10b981',
+                              background: 'rgba(16, 185, 129, 0.12)',
+                              border: '1px solid rgba(16, 185, 129, 0.3)',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+                            LIVE NOW
+                          </span>
+                        )}
+
+                        {isExpired && (
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              color: '#ef4444',
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.25)',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                            }}
+                          >
+                            EXPIRED
+                          </span>
+                        )}
 
                         {s.has_notes && <span style={{ color: 'var(--accent)' }}>📝 Notes saved</span>}
                         {s.files_count > 0 && <span style={{ color: 'var(--add)' }}>📎 {s.files_count} files</span>}
@@ -680,26 +952,37 @@ export default function ContractDetailPage() {
                           {/* Schedule / Reschedule Button */}
                           <button
                             type="button"
-                            className="btn btn-ghost"
-                            style={{ fontSize: '12.5px', padding: '8px 12px' }}
+                            className={!s.scheduled_at ? 'btn btn-primary' : 'btn btn-ghost'}
+                            style={{ fontSize: '12.5px', padding: '8px 14px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                             onClick={() => {
                               setSelectedSession(s);
-                              setScheduleDateTime(s.scheduled_at ? s.scheduled_at.slice(0, 16) : '');
                               setScheduleModalOpen(true);
                             }}
+                            title={s.scheduled_at ? (isExpired ? 'Session time expired. Click to reschedule.' : 'Reschedule session time. Live room opens 15m before start.') : 'Pick a date and time for this milestone session'}
                           >
                             <CalendarIcon size={14} />
-                            {s.scheduled_at ? 'Reschedule' : 'Schedule'}
+                            {s.scheduled_at ? (isExpired ? 'Reschedule (Expired)' : 'Reschedule') : 'Schedule'}
                           </button>
 
-                          {/* Join Live Session (Only active & non-completed sessions!) */}
-                          <Link
-                            to={s.room_url}
-                            className="btn btn-primary"
-                            style={{ fontSize: '12.5px', padding: '8px 14px' }}
-                          >
-                            Join Live Session
-                          </Link>
+                          {/* Join Live Session (Only active when session is currently live / within 15 minutes of start time!) */}
+                          {isLive && (
+                            <Link
+                              to={s.room_url}
+                              className="btn btn-primary"
+                              style={{
+                                fontSize: '12.5px',
+                                padding: '8px 14px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                background: '#10b981',
+                                borderColor: '#10b981',
+                                boxShadow: '0 0 12px rgba(16, 185, 129, 0.35)',
+                              }}
+                            >
+                              <VideoIcon size={14} /> Join Live Session
+                            </Link>
+                          )}
                         </>
                       ) : (
                         <span className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)' }}>
@@ -732,38 +1015,127 @@ export default function ContractDetailPage() {
                 gap: '14px',
               }}
             >
-              {/* If Proposed -> Learner can Accept & Pay */}
-              {contract.status === 'proposed' && isLearner && (
+              {/* Status: Proposed -> Recipient can Accept, Creator waits, Both can Edit */}
+              {contract.status === 'proposed' && !isCreator && (
                 <>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '15px' }}>Ready to start your mentorship?</div>
+                    <div style={{ fontWeight: 700, fontSize: '15px' }}>
+                      Mentorship Proposal from {otherPersonName}
+                    </div>
                     <div className="sub" style={{ margin: 0, fontSize: '13px' }}>
-                      Accept terms and deposit {formatCurrency(contract.total_price)} into escrow to activate all {contract.total_sessions} sessions.
+                      {otherPersonName} proposed a {effectiveSessions}-session contract for {formatCurrency(contract.total_price)} ({contract.session_duration_minutes} min/session). Review terms, accept the proposal, or edit terms.
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '10px' }}>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                     <button className="btn btn-ghost" onClick={handleDeclineContract} disabled={actionLoading}>
                       Decline
                     </button>
-                    <button className="btn btn-primary" onClick={() => setPayModalOpen(true)} disabled={actionLoading}>
-                      Accept & Fund ({formatCurrency(contract.total_price)})
+                    <button
+                      className="btn btn-secondary"
+                      onClick={openEditModal}
+                      disabled={actionLoading}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <FileEditIcon size={14} /> Edit Terms
+                    </button>
+                    {isLearner ? (
+                      <>
+                        <button className="btn btn-secondary" onClick={handleAcceptContract} disabled={actionLoading}>
+                          Accept Proposal
+                        </button>
+                        <button className="btn btn-primary" onClick={() => setPayModalOpen(true)} disabled={actionLoading}>
+                          Accept & Fund ({formatCurrency(contract.total_price)})
+                        </button>
+                      </>
+                    ) : (
+                      <button className="btn btn-primary" onClick={handleAcceptContract} disabled={actionLoading}>
+                        Accept Proposal
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Status: Proposed -> Creator is waiting for counterparty */}
+              {contract.status === 'proposed' && isCreator && (
+                <>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '15px' }}>
+                      Proposal sent to {otherPersonName}
+                    </div>
+                    <div className="sub" style={{ margin: 0, fontSize: '13px' }}>
+                      Waiting for {otherPersonName} to review and accept the contract proposal ({formatCurrency(contract.total_price)}). You can modify terms or withdraw at any time.
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button className="btn btn-ghost" onClick={handleDeclineContract} disabled={actionLoading}>
+                      Withdraw Proposal
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={openEditModal}
+                      disabled={actionLoading}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <FileEditIcon size={14} /> Edit Terms
                     </button>
                   </div>
                 </>
               )}
 
-              {/* If Proposed -> Mentor waiting */}
-              {contract.status === 'proposed' && isMentor && (
+              {/* Status: Accepted -> Accept button is HIDDEN. Learner deposits escrow, Mentor awaits payment. Both can Edit */}
+              {contract.status === 'accepted' && isLearner && (
                 <>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '15px' }}>Contract proposal sent to {contract.learner_name}</div>
+                    <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--add)' }}>
+                      ✓ Proposal Accepted! Ready to Activate Mentorship
+                    </div>
                     <div className="sub" style={{ margin: 0, fontSize: '13px' }}>
-                      Waiting for the learner to accept and fund the contract in platform escrow.
+                      {contract.mentor_name} has accepted the proposal! Deposit {formatCurrency(contract.total_price)} into platform escrow to activate all {effectiveSessions} milestone sessions.
                     </div>
                   </div>
-                  <button className="btn btn-ghost" onClick={handleDeclineContract} disabled={actionLoading}>
-                    Withdraw Proposal
-                  </button>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button className="btn btn-ghost" onClick={handleDeclineContract} disabled={actionLoading}>
+                      Decline
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={openEditModal}
+                      disabled={actionLoading}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <FileEditIcon size={14} /> Edit Terms
+                    </button>
+                    <button className="btn btn-primary" onClick={() => setPayModalOpen(true)} disabled={actionLoading}>
+                      Deposit Escrow & Activate ({formatCurrency(contract.total_price)})
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {contract.status === 'accepted' && isMentor && (
+                <>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--accent)' }}>
+                      ✓ Proposal Accepted · Awaiting Learner Escrow Payment
+                    </div>
+                    <div className="sub" style={{ margin: 0, fontSize: '13px' }}>
+                      The proposal has been accepted! Waiting for {contract.learner_name} to deposit {formatCurrency(contract.total_price)} into escrow to activate the {effectiveSessions} sessions.
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button className="btn btn-ghost" onClick={handleDeclineContract} disabled={actionLoading}>
+                      Cancel / Withdraw
+                    </button>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={openEditModal}
+                      disabled={actionLoading}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <FileEditIcon size={14} /> Edit Terms
+                    </button>
+                  </div>
                 </>
               )}
 
@@ -771,7 +1143,7 @@ export default function ContractDetailPage() {
               {contract.status === 'active' && isMentor && (
                 <>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '15px' }}>Conducted all {contract.total_sessions} sessions?</div>
+                    <div style={{ fontWeight: 700, fontSize: '15px' }}>Conducted all {effectiveSessions} sessions?</div>
                     <div className="sub" style={{ margin: 0, fontSize: '13px' }}>
                       Submit this contract for learner review to release escrow funds to your account.
                     </div>
@@ -904,7 +1276,7 @@ export default function ContractDetailPage() {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
               <span style={{ color: 'var(--ink-muted)' }}>Total Sessions:</span>
-              <span className="mono">{contract.total_sessions} sessions ({contract.session_duration_minutes} min each)</span>
+              <span className="mono">{effectiveSessions} sessions ({contract.session_duration_minutes} min each)</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--grid-strong)', paddingTop: '10px', marginTop: '10px' }}>
               <span style={{ fontWeight: 700 }}>Total Escrow Amount:</span>
@@ -1107,24 +1479,30 @@ export default function ContractDetailPage() {
         </form>
       </Modal>
 
-      {/* Schedule Session Modal */}
-      <Modal isOpen={scheduleModalOpen} onClose={() => setScheduleModalOpen(false)} title={`Schedule ${selectedSession?.topic || 'Session'}`}>
-        <form onSubmit={handleScheduleSession} style={{ padding: '6px 0' }}>
-          <div className="field">
-            <label>Select Date & Time</label>
-            <input
-              type="datetime-local"
-              value={scheduleDateTime}
-              onChange={(e) => setScheduleDateTime(e.target.value)}
-              required
-            />
-          </div>
-
-          <button type="submit" className="btn btn-primary btn-block" disabled={actionLoading}>
-            {actionLoading ? 'Saving...' : 'Confirm Schedule'}
-          </button>
-        </form>
-      </Modal>
+      {/* Schedule / Reschedule Session Modal */}
+      <RescheduleModal
+        isOpen={scheduleModalOpen}
+        onClose={() => {
+          setScheduleModalOpen(false);
+          setSelectedSession(null);
+        }}
+        booking={selectedSession ? {
+          ...selectedSession,
+          contract_id: contract?.id || id,
+          mentor_id: contract?.mentor_id,
+          mentor_name: contract?.mentor_name,
+          learner_id: contract?.learner_id,
+          learner_name: contract?.learner_name,
+          duration_minutes: selectedSession.duration_minutes || contract?.session_duration_minutes || 60,
+        } : null}
+        userRole={isLearner ? 'learner' : 'mentor'}
+        contractId={contract?.id || id}
+        onSuccess={async () => {
+          setScheduleModalOpen(false);
+          setSelectedSession(null);
+          await loadContract();
+        }}
+      />
 
       {/* Session Notes & Files Modal */}
       <Modal
@@ -1219,6 +1597,166 @@ export default function ContractDetailPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Edit Contract Proposal Terms Modal */}
+      <Modal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        title="Edit Contract Proposal Terms"
+      >
+        <form onSubmit={handleSaveEdit} style={{ padding: '4px 0' }}>
+          {editError && (
+            <div className="error-box" style={{ marginBottom: '14px' }}>
+              {editError}
+            </div>
+          )}
+
+          <div className="field">
+            <label>Contract Title</label>
+            <input
+              type="text"
+              value={editForm.title}
+              onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+              placeholder="e.g. Master Full-Stack Development with React & Django"
+              required
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div className="field">
+              <label>Technology Stack</label>
+              <input
+                type="text"
+                value={editForm.technology}
+                onChange={(e) => setEditForm({ ...editForm, technology: e.target.value })}
+                placeholder="e.g. React, Django, PostgreSQL"
+              />
+            </div>
+            <div className="field">
+              <label>Total Price (₹)</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={editForm.total_price}
+                onChange={(e) => setEditForm({ ...editForm, total_price: e.target.value })}
+                required
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div className="field">
+              <label>Number of Sessions</label>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={editForm.total_sessions}
+                onChange={(e) => handleEditSessionsChange(e.target.value)}
+                required
+              />
+            </div>
+            <div className="field">
+              <label>Minutes / Session</label>
+              <select
+                value={editForm.session_duration_minutes}
+                onChange={(e) => setEditForm({ ...editForm, session_duration_minutes: e.target.value })}
+              >
+                <option value={30}>30 mins</option>
+                <option value={45}>45 mins</option>
+                <option value={60}>60 mins (1 hr)</option>
+                <option value={90}>90 mins (1.5 hrs)</option>
+                <option value={120}>120 mins (2 hrs)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Objectives &amp; Scope</label>
+            <textarea
+              rows={3}
+              value={editForm.description}
+              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+              placeholder="Outline what will be built, milestones, and learning outcomes..."
+            />
+          </div>
+
+          <div className="field" style={{ marginTop: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label style={{ margin: 0 }}>Milestone Topics ({editForm.topics.length})</label>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleAddEditTopic}
+                style={{ fontSize: '11px', padding: '2px 8px' }}
+              >
+                + Add Topic
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto' }}>
+              {editForm.topics.map((topic, idx) => (
+                <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <span className="mono" style={{ fontSize: '11px', color: 'var(--ink-muted)', width: '24px' }}>
+                    #{idx + 1}
+                  </span>
+                  <input
+                    type="text"
+                    value={topic}
+                    onChange={(e) => handleEditTopicChange(idx, e.target.value)}
+                    placeholder={`Milestone topic ${idx + 1}`}
+                    style={{ flex: 1, padding: '7px 10px', fontSize: '12.5px' }}
+                  />
+                  {editForm.topics.length > 1 && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => handleRemoveEditTopic(idx)}
+                      style={{ padding: '4px 8px', color: 'var(--del)', fontSize: '14px' }}
+                      title="Remove topic"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: '8px',
+              background: 'var(--accent-soft)',
+              fontSize: '12px',
+              marginTop: '14px',
+              color: 'var(--ink)',
+            }}
+          >
+            ✏️ <strong>Bilateral proposal terms:</strong> Saving revised terms will update the contract proposal and notify {otherPersonName} to review and accept.
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '18px' }}>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setEditModalOpen(false)}
+              style={{ flex: 1 }}
+              disabled={actionLoading}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ flex: 2 }}
+              disabled={actionLoading}
+            >
+              {actionLoading ? 'Saving...' : 'Save & Propose Revised Terms'}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       <LearnerProfileModal

@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
+import CounterHistoryTimeline from '../../components/CounterHistoryTimeline';
+import Pagination from '../../components/Pagination';
 import { api, initials, stars } from '../../api/client';
 import {
   PlusIcon,
@@ -13,15 +15,26 @@ import {
   XIcon,
   ShieldCheckIcon,
   CreditCardIcon,
+  ClockIcon,
+  FileEditIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
+import { useRealtimeSync, broadcastDataChange, checkProblemTimeOut } from '../../utils';
 
 export default function MyProblemsPage() {
   const { confirm } = useConfirm();
   const { toast } = useToast();
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('all');
+  const [activeTab, setActiveTab] = useState('open');
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   // Proposal & details modals
   const [selectedProblem, setSelectedProblem] = useState(null);
@@ -42,17 +55,48 @@ export default function MyProblemsPage() {
   const [paymentMethod, setPaymentMethod] = useState('upi');
   const [submittingCheckout, setSubmittingCheckout] = useState(false);
 
+  // Edit problem state
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingProblem, setEditingProblem] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    title: '',
+    description: '',
+    skills: '',
+    budget: '',
+    urgency: 'Today',
+    preferredTime: '',
+    duration: '60',
+    budgetType: 'fixed',
+  });
+  const [submittingEdit, setSubmittingEdit] = useState(false);
+
   // Proposal counts map
   const [proposalCounts, setProposalCounts] = useState({});
 
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const selectedProblemRef = useRef(selectedProblem);
+  selectedProblemRef.current = selectedProblem;
 
   useEffect(() => {
     loadProblems();
   }, []);
 
-  const loadProblems = async () => {
-    setLoading(true);
+  useEffect(() => {
+    const targetProblemId = searchParams.get('problem');
+    if (!targetProblemId || problems.length === 0) return;
+    const match = problems.find((p) => String(p.id) === String(targetProblemId));
+    if (match) {
+      openDetails(match);
+      const next = new URLSearchParams(searchParams);
+      next.delete('problem');
+      setSearchParams(next, { replace: true });
+    }
+  }, [problems, searchParams]);
+
+  const loadProblems = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await api.getMyProblems();
       const problemList = Array.isArray(data) ? data : [];
@@ -71,12 +115,27 @@ export default function MyProblemsPage() {
         })
       );
       setProposalCounts(counts);
+
+      // If proposals modal is currently open for a problem, refresh its proposals silently
+      if (selectedProblemRef.current) {
+        try {
+          const updatedProps = await api.getProposals(selectedProblemRef.current.id);
+          setProposals(Array.isArray(updatedProps) ? updatedProps : []);
+        } catch {}
+      }
     } catch (err) {
       console.error('Failed to load problems:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  // Real-time synchronization: automatically updates on focus, cross-tab events, or 3.5s interval
+  useRealtimeSync({
+    onSync: () => loadProblems(true),
+    entities: ['problems', 'proposals'],
+    intervalMs: 3500,
+  });
 
   const handleClose = async (id) => {
     const confirmed = await confirm({
@@ -89,6 +148,7 @@ export default function MyProblemsPage() {
     try {
       await api.closeProblem(id);
       toast.success('Problem post closed.');
+      broadcastDataChange('problems');
       loadProblems();
     } catch (err) {
       toast.error(err.message || 'Failed to close problem');
@@ -106,6 +166,7 @@ export default function MyProblemsPage() {
     try {
       await api.deleteProblem(id);
       toast.success('Problem post deleted.');
+      broadcastDataChange('problems');
       loadProblems();
     } catch (err) {
       toast.error(err.message || 'Failed to delete problem');
@@ -125,9 +186,19 @@ export default function MyProblemsPage() {
     }
   };
 
-  const openDetails = (problem) => {
+  const openDetails = async (problem) => {
     setSelectedProblem(problem);
     setDetailsModalOpen(true);
+    setProposals([]);
+    setLoadingProposals(true);
+    try {
+      const data = await api.getProposals(problem.id);
+      setProposals(Array.isArray(data) ? data : []);
+    } catch {
+      setProposals([]);
+    } finally {
+      setLoadingProposals(false);
+    }
   };
 
   const handleRejectProposal = async (problemId, proposalId) => {
@@ -141,6 +212,7 @@ export default function MyProblemsPage() {
     try {
       await api.rejectProposal(problemId, proposalId);
       toast.success('Proposal declined.');
+      broadcastDataChange('proposals');
       const updated = await api.getProposals(problemId);
       setProposals(updated);
     } catch (err) {
@@ -168,6 +240,7 @@ export default function MyProblemsPage() {
         counter_message: counterMessage.trim(),
       });
       toast.success('Counter-offer submitted to mentor!');
+      broadcastDataChange('proposals');
       setCounterModalOpen(false);
       setCounterProposal(null);
       const updated = await api.getProposals(selectedProblem.id);
@@ -193,6 +266,9 @@ export default function MyProblemsPage() {
         payment_method: paymentMethod,
         is_paid: true,
       });
+      broadcastDataChange('proposals');
+      broadcastDataChange('contracts');
+      broadcastDataChange('sessions');
       setCheckoutModalOpen(false);
       setCheckoutProposal(null);
       setSelectedProblem(null);
@@ -209,15 +285,117 @@ export default function MyProblemsPage() {
     }
   };
 
+  const openEditModal = (prob) => {
+    setEditingProblem(prob);
+    const rawDesc = prob.description || '';
+    let urg = prob.urgency || 'Today';
+    let prefTime = prob.preferred_time || '';
+    let dur = '60';
+    let bType = 'fixed';
+
+    const urgMatch = rawDesc.match(/Urgency:\s*([^|*\n]+)/i);
+    if (urgMatch) urg = urgMatch[1].trim();
+
+    const prefMatch = rawDesc.match(/Preferred Date & Time:\s*([^|*\n]+)/i);
+    if (prefMatch) prefTime = prefMatch[1].trim();
+
+    const durMatch = rawDesc.match(/Preferred Duration:\s*(\d+)/i);
+    if (durMatch) dur = durMatch[1].trim();
+
+    const formatMatch = rawDesc.match(/Format:\s*([^|*\n]+)/i);
+    if (formatMatch) bType = formatMatch[1].trim();
+
+    // Clean up description if it ends with the *Urgency:...* block
+    const cleanDesc = rawDesc.replace(/\n*\*Urgency:[^*]+\*\s*$/i, '').trim();
+
+    // Default preferredTime to future time if empty or expired
+    if (!prefTime || new Date(prefTime).getTime() <= Date.now()) {
+      const future = new Date(Date.now() + 2 * 3600 * 1000);
+      prefTime = future.toISOString().slice(0, 16);
+    }
+
+    setEditFormData({
+      title: prob.title || '',
+      description: cleanDesc,
+      skills: Array.isArray(prob.skills) ? prob.skills.join(', ') : (prob.skills || ''),
+      budget: prob.budget != null ? String(prob.budget) : '',
+      urgency: urg,
+      preferredTime: prefTime,
+      duration: dur,
+      budgetType: bType,
+    });
+    setEditModalOpen(true);
+  };
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault();
+    if (!editingProblem) return;
+    if (!editFormData.title.trim() || !editFormData.description.trim()) {
+      toast.error('Title and description are required.');
+      return;
+    }
+    setSubmittingEdit(true);
+    try {
+      const urgencyLineParts = [`Urgency: ${editFormData.urgency}`];
+      if (editFormData.preferredTime) {
+        urgencyLineParts.push(`Preferred Date & Time: ${editFormData.preferredTime}`);
+      }
+      urgencyLineParts.push(`Preferred Duration: ${editFormData.duration} mins`);
+      urgencyLineParts.push(`Format: ${editFormData.budgetType}`);
+
+      const fullDesc = `${editFormData.description.trim()}\n\n*${urgencyLineParts.join(' | ')}*`;
+
+      await api.updateProblem(editingProblem.id, {
+        title: editFormData.title.trim(),
+        description: fullDesc,
+        skills: editFormData.skills,
+        budget: editFormData.budget ? parseFloat(editFormData.budget) : null,
+        urgency: editFormData.urgency,
+        preferred_time: editFormData.preferredTime || null,
+        duration: editFormData.duration,
+        budgetType: editFormData.budgetType,
+        renew: true,
+      });
+
+      toast.success('Problem updated and reactivated! Mentors can now view and propose.');
+      broadcastDataChange('problems');
+      setEditModalOpen(false);
+      setEditingProblem(null);
+      await loadProblems(true);
+    } catch (err) {
+      toast.error('Failed to update problem: ' + (err.message || 'Unknown error'));
+    } finally {
+      setSubmittingEdit(false);
+    }
+  };
+
   // Filter problems by tab
-  const filteredProblems = problems.filter((p) => {
-    if (activeTab === 'all') return true;
-    if (activeTab === 'open') return p.status === 'open';
-    if (activeTab === 'in_progress') return p.status === 'in_progress' || (proposalCounts[p.id] > 0 && p.status === 'open');
-    if (activeTab === 'completed') return p.status === 'completed';
-    if (activeTab === 'closed') return p.status === 'closed';
-    return true;
-  });
+  const filteredProblems = problems
+    .filter((p) => {
+      if (activeTab === 'open') return p.status === 'open';
+      if (activeTab === 'all') return true;
+      if (activeTab === 'in_progress') return p.status === 'in_progress' || (proposalCounts[p.id] > 0 && p.status === 'open');
+      if (activeTab === 'completed') return p.status === 'completed';
+      if (activeTab === 'closed') return p.status === 'closed';
+      return true;
+    })
+    .sort((a, b) => {
+      // Active non-timed-out open problems come first
+      const timedOutA = checkProblemTimeOut(a) ? 1 : 0;
+      const timedOutB = checkProblemTimeOut(b) ? 1 : 0;
+      if (timedOutA !== timedOutB) {
+        return timedOutA - timedOutB;
+      }
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(filteredProblems.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedProblems = filteredProblems.slice(
+    (validCurrentPage - 1) * pageSize,
+    validCurrentPage * pageSize
+  );
 
   return (
     <PortalLayout
@@ -237,17 +415,17 @@ export default function MyProblemsPage() {
       <div className="admin-filter-tabs">
         <button
           type="button"
-          className={`admin-filter-tab ${activeTab === 'all' ? 'active' : ''}`}
-          onClick={() => setActiveTab('all')}
-        >
-          All Problems ({problems.length})
-        </button>
-        <button
-          type="button"
           className={`admin-filter-tab ${activeTab === 'open' ? 'active' : ''}`}
           onClick={() => setActiveTab('open')}
         >
           Open ({problems.filter((p) => p.status === 'open').length})
+        </button>
+        <button
+          type="button"
+          className={`admin-filter-tab ${activeTab === 'all' ? 'active' : ''}`}
+          onClick={() => setActiveTab('all')}
+        >
+          All Problems ({problems.length})
         </button>
         <button
           type="button"
@@ -285,112 +463,238 @@ export default function MyProblemsPage() {
           </Link>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {filteredProblems.map((p) => {
-            const count = proposalCounts[p.id] || 0;
-            return (
-              <div key={p.id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 700, fontSize: '16px' }}>{p.title}</span>
-                      <span
-                        className={`status-badge ${
-                          p.status === 'open' ? 'badge-accepted' : 'badge-completed'
-                        } mono`}
-                      >
-                        {p.status}
-                      </span>
-                      {count > 0 && (
-                        <span
-                          className="tag"
-                          style={{
-                            background: 'var(--accent)',
-                            color: '#fff',
-                            fontWeight: 700,
-                            fontSize: '11px',
-                            cursor: 'pointer',
-                          }}
-                          onClick={() => openProposals(p)}
-                        >
-                          {count} Proposal{count > 1 ? 's' : ''} Received
-                        </span>
-                      )}
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))', gap: '20px' }}>
+            {paginatedProblems.map((p) => {
+              const count = proposalCounts[p.id] || 0;
+              const isTimedOut = checkProblemTimeOut(p);
+              return (
+                <div
+                  key={p.id}
+                  className={`card ${isTimedOut ? 'card-timed-out' : ''}`}
+                  style={{
+                    padding: '20px',
+                    borderRadius: '12px',
+                    border: isTimedOut ? '1px solid rgba(239, 68, 68, 0.4)' : undefined,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: '14px',
+                    height: '100%',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {isTimedOut && (
+                    <div className="card-watermark-expired" aria-hidden="true">
+                      EXPIRED
                     </div>
-                    <div className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginTop: '4px' }}>
-                      Budget: <strong>{p.budget ? `₹${p.budget}` : 'Flexible'}</strong> • Posted on {p.created_at ? `${new Date(p.created_at).toLocaleDateString()} at ${new Date(p.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Recent'}
+                  )}
+                  <div style={{ position: 'relative', zIndex: 2 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', marginBottom: '8px' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--ink)', wordBreak: 'break-word' }}>
+                          {p.title}
+                        </h4>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+                          <span
+                            className={`status-badge ${
+                              p.status === 'open' ? 'badge-accepted' : 'badge-completed'
+                            } mono`}
+                            style={{ fontSize: '11px' }}
+                          >
+                            {p.status}
+                          </span>
+                          {isTimedOut && (
+                            <span className="stamp-timeout" title="This problem's scheduled preferred time or urgency has expired">
+                              <ClockIcon size={11} /> EXPIRED
+                            </span>
+                          )}
+                          {!isTimedOut && count > 0 && (
+                            <span
+                              className="tag"
+                              style={{
+                                background: 'var(--accent)',
+                                color: '#fff',
+                                fontWeight: 700,
+                                fontSize: '11px',
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => openProposals(p)}
+                            >
+                              {count} Proposal{count > 1 ? 's' : ''} Received
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div className="mono" style={{ fontWeight: 700, fontSize: '16px', color: 'var(--brand)' }}>
+                        {p.budget ? `₹${p.budget}` : 'Flexible'}
+                      </div>
+                      <div className="sub" style={{ fontSize: '11px', margin: 0 }}>Budget</div>
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', padding: '6px 12px' }}
-                      onClick={() => openDetails(p)}
-                    >
-                      View Details
-                    </button>
-                    {p.status === 'open' && (
+                  <div className="mono" style={{ fontSize: '11.5px', color: 'var(--ink-muted)', marginBottom: '10px' }}>
+                    Posted {p.created_at ? `${new Date(p.created_at).toLocaleDateString()} at ${new Date(p.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Recent'}
+                  </div>
+
+                  <p className="sub" style={{ margin: '0 0 10px', fontSize: '13px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                    {p.description}
+                  </p>
+
+                  {p.skills && p.skills.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {p.skills.map((s) => (
+                        <span key={s} className="tag">{s}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer action bar */}
+                <div
+                  style={{
+                    marginTop: 'auto',
+                    borderTop: '1px solid var(--grid)',
+                    paddingTop: '14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '8px',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                    onClick={() => openDetails(p)}
+                  >
+                    View Details
+                  </button>
+
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    {isTimedOut ? (
                       <>
                         <button
                           type="button"
                           className="btn btn-primary"
-                          style={{ fontSize: '12px', padding: '6px 12px' }}
-                          onClick={() => openProposals(p)}
+                          style={{
+                            fontSize: '12px',
+                            padding: '6px 14px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            background: 'var(--accent)',
+                          }}
+                          onClick={() => openEditModal(p)}
                         >
-                          Proposals ({count})
+                          <FileEditIcon size={13} /> Edit
                         </button>
                         <button
                           type="button"
                           className="btn btn-ghost"
-                          style={{ fontSize: '12px', padding: '6px 10px', color: 'var(--warn)' }}
-                          onClick={() => handleClose(p.id)}
+                          style={{ fontSize: '12px', padding: '6px 8px', display: 'inline-flex', alignItems: 'center' }}
+                          onClick={() => handleDelete(p.id)}
+                          title="Delete Problem"
                         >
-                          Close
+                          <TrashIcon size={14} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {p.status === 'open' ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ fontSize: '12px', padding: '6px 12px' }}
+                              onClick={() => openProposals(p)}
+                            >
+                              Proposals ({count})
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              style={{ fontSize: '12px', padding: '6px 10px', color: 'var(--warn)' }}
+                              onClick={() => handleClose(p.id)}
+                            >
+                              Close
+                            </button>
+                          </>
+                        ) : count > 0 && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '12px', padding: '6px 12px' }}
+                            onClick={() => openProposals(p)}
+                          >
+                            Proposals ({count})
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ fontSize: '12px', padding: '6px 8px', display: 'inline-flex', alignItems: 'center' }}
+                          onClick={() => handleDelete(p.id)}
+                          title="Delete Problem"
+                        >
+                          <TrashIcon size={14} />
                         </button>
                       </>
                     )}
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', padding: '6px 8px', display: 'inline-flex', alignItems: 'center' }}
-                      onClick={() => handleDelete(p.id)}
-                      title="Delete Problem"
-                    >
-                      <TrashIcon size={14} />
-                    </button>
                   </div>
-                </div>
-
-                <p className="sub" style={{ margin: '4px 0 6px', fontSize: '13px', lineHeight: 1.5 }}>
-                  {p.description.length > 200 ? `${p.description.slice(0, 200)}...` : p.description}
-                </p>
-
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {(p.skills || []).map((s) => (
-                    <span key={s} className="tag">{s}</span>
-                  ))}
                 </div>
               </div>
             );
           })}
         </div>
-      )}
+
+        <Pagination
+          currentPage={validCurrentPage}
+          totalPages={totalPages}
+          onPageChange={(page) => setCurrentPage(page)}
+          totalItems={filteredProblems.length}
+          itemsPerPage={pageSize}
+          itemLabel="problems"
+          pageSizeOptions={[6, 9, 15, 30]}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+          }}
+          style={{
+            marginTop: '24px',
+            borderRadius: '12px',
+            border: '1px solid var(--grid-strong)',
+          }}
+        />
+      </>
+    )}
 
       {/* Problem Details Modal */}
       <Modal
         isOpen={detailsModalOpen}
-        onClose={() => setDetailsModalOpen(false)}
+        onClose={() => {
+          setDetailsModalOpen(false);
+          setSelectedProblem(null);
+        }}
         title={selectedProblem?.title || 'Problem Details'}
       >
         {selectedProblem && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-              <span className={`status-badge ${selectedProblem.status === 'open' ? 'badge-accepted' : 'badge-completed'} mono`}>
-                {selectedProblem.status}
-              </span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className={`status-badge ${selectedProblem.status === 'open' ? 'badge-accepted' : 'badge-completed'} mono`}>
+                  {selectedProblem.status}
+                </span>
+                {checkProblemTimeOut(selectedProblem) && (
+                  <span className="stamp-timeout">
+                    <ClockIcon size={12} /> EXPIRED
+                  </span>
+                )}
+              </div>
               <span className="mono" style={{ fontSize: '12px' }}>
                 Budget: <strong>{selectedProblem.budget ? `₹${selectedProblem.budget}` : 'Flexible'}</strong>
               </span>
@@ -413,33 +717,108 @@ export default function MyProblemsPage() {
             </div>
 
             <div className="section-label">Required Skills</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '16px' }}>
               {(selectedProblem.skills || []).map((s) => (
                 <span key={s} className="tag">{s}</span>
               ))}
             </div>
+
+            {/* Proposals & Negotiation History inside Problem Details */}
+            {loadingProposals ? (
+              <p className="sub" style={{ fontSize: '12.5px', marginBottom: '16px' }}>
+                Loading proposals &amp; negotiation history...
+              </p>
+            ) : proposals.length > 0 && (
+              <div style={{ marginBottom: '18px' }}>
+                <div className="section-label" style={{ marginBottom: '8px' }}>
+                  Proposals &amp; Negotiations ({proposals.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {proposals.map((prop) => (
+                    <div
+                      key={prop.id}
+                      style={{
+                        background: 'var(--bg)',
+                        border: prop.status === 'accepted'
+                          ? '1px solid rgba(16, 185, 129, 0.4)'
+                          : prop.status === 'negotiating'
+                          ? '1px solid rgba(99, 102, 241, 0.4)'
+                          : '1px solid var(--grid)',
+                        borderRadius: '8px',
+                        padding: '12px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <strong style={{ fontSize: '13.5px', color: 'var(--ink)' }}>{prop.mentor_name}</strong>
+                          <span
+                            className={`status-badge ${
+                              prop.status === 'accepted'
+                                ? 'badge-accepted'
+                                : prop.status === 'rejected' || prop.status === 'declined'
+                                ? 'badge-declined'
+                                : 'badge-pending'
+                            } mono`}
+                            style={{ fontSize: '10px' }}
+                          >
+                            {prop.status}
+                          </span>
+                        </div>
+                        <span className="mono" style={{ fontWeight: 700, fontSize: '13.5px', color: 'var(--accent)' }}>
+                          ₹{prop.status === 'negotiating' && prop.counter_price ? prop.counter_price : prop.proposed_price}
+                        </span>
+                      </div>
+                      <CounterHistoryTimeline
+                        history={prop.counter_history}
+                        viewerRole="learner"
+                        title={proposals.length > 1 ? `Negotiation History — ${prop.mentor_name}` : 'Negotiation & Counter-Offer History'}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 type="button"
                 className="btn btn-ghost"
                 style={{ flex: 1 }}
-                onClick={() => setDetailsModalOpen(false)}
+                onClick={() => {
+                  setDetailsModalOpen(false);
+                  setSelectedProblem(null);
+                }}
               >
                 Close
               </button>
-              {selectedProblem.status === 'open' && (
+              {selectedProblem.status === 'open' && checkProblemTimeOut(selectedProblem) ? (
                 <button
                   type="button"
                   className="btn btn-primary"
-                  style={{ flex: 1 }}
+                  style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                   onClick={() => {
+                    const prob = selectedProblem;
                     setDetailsModalOpen(false);
-                    openProposals(selectedProblem);
+                    openEditModal(prob);
                   }}
                 >
-                  View Proposals
+                  <FileEditIcon size={14} /> Edit Problem
                 </button>
+              ) : (
+                (selectedProblem.status === 'open' || proposals.length > 0 || (proposalCounts[selectedProblem.id] || 0) > 0) && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={() => {
+                      const prob = selectedProblem;
+                      setDetailsModalOpen(false);
+                      openProposals(prob);
+                    }}
+                  >
+                    View Proposals ({proposals.length || proposalCounts[selectedProblem.id] || 0})
+                  </button>
+                )
               )}
             </div>
           </div>
@@ -570,10 +949,20 @@ export default function MyProblemsPage() {
                       </div>
                     )}
 
+                    {/* Full Saved Counter-Offer & Negotiation History */}
+                    {Array.isArray(prop.counter_history) && prop.counter_history.some((e) => e.action === 'counter') && (
+                      <div style={{ marginBottom: '12px' }}>
+                        <CounterHistoryTimeline
+                          history={prop.counter_history}
+                          viewerRole="learner"
+                        />
+                      </div>
+                    )}
+
                     {/* Action buttons */}
                     <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <Link
-                        to={`/chat?with=${prop.mentor_id}&name=${encodeURIComponent(prop.mentor_name)}`}
+                        to={`/chat?with=${prop.mentor_id}&name=${encodeURIComponent(prop.mentor_name)}${selectedProblem?.id ? `&problem=${selectedProblem.id}&problem_title=${encodeURIComponent(selectedProblem.title || '')}` : ''}`}
                         className="btn btn-ghost"
                         style={{ flex: 1, fontSize: '12px', minWidth: '100px', justifyContent: 'center', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                       >
@@ -765,7 +1154,7 @@ export default function MyProblemsPage() {
               <input
                 type="number"
                 min="1"
-                step="50"
+                step="1"
                 required
                 className="form-control"
                 placeholder="e.g. 1000"
@@ -925,6 +1314,157 @@ export default function MyProblemsPage() {
               </button>
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Edit Problem Modal */}
+      <Modal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        title="Edit & Reactivate Problem"
+      >
+        {editingProblem && (
+          <form onSubmit={handleSaveEdit}>
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--ink)', marginBottom: '5px' }}>
+                Problem Title *
+              </label>
+              <input
+                type="text"
+                className="input"
+                style={{ width: '100%', fontSize: '13px' }}
+                value={editFormData.title}
+                onChange={(e) => setEditFormData({ ...editFormData, title: e.target.value })}
+                required
+              />
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--ink)', marginBottom: '5px' }}>
+                Problem Description *
+              </label>
+              <textarea
+                className="input"
+                rows={4}
+                style={{ width: '100%', fontSize: '13px', lineHeight: 1.5, resize: 'vertical' }}
+                value={editFormData.description}
+                onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
+                required
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--ink)', marginBottom: '5px' }}>
+                  Budget (₹, optional)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  className="input"
+                  style={{ width: '100%', fontSize: '13px' }}
+                  placeholder="e.g. 500"
+                  value={editFormData.budget}
+                  onChange={(e) => setEditFormData({ ...editFormData, budget: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--ink)', marginBottom: '5px' }}>
+                  Preferred Duration
+                </label>
+                <select
+                  className="input"
+                  style={{ width: '100%', fontSize: '13px' }}
+                  value={editFormData.duration}
+                  onChange={(e) => setEditFormData({ ...editFormData, duration: e.target.value })}
+                >
+                  <option value="30">30 mins</option>
+                  <option value="60">60 mins</option>
+                  <option value="90">90 mins</option>
+                  <option value="120">120 mins</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--ink)', marginBottom: '5px' }}>
+                Skills (comma-separated)
+              </label>
+              <input
+                type="text"
+                className="input"
+                style={{ width: '100%', fontSize: '13px' }}
+                placeholder="e.g. Python, Django, Docker"
+                value={editFormData.skills}
+                onChange={(e) => setEditFormData({ ...editFormData, skills: e.target.value })}
+              />
+            </div>
+
+            {/* Urgency & Scheduling */}
+            <div style={{ padding: '12px', background: 'var(--panel-bg)', borderRadius: '8px', border: '1px solid var(--grid)', marginBottom: '18px' }}>
+              <div style={{ fontWeight: 700, fontSize: '12.5px', marginBottom: '8px', color: 'var(--brand)' }}>
+                Urgency &amp; Scheduling (Reactivate)
+              </div>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: 'var(--ink-muted)', marginBottom: '6px' }}>
+                  How urgently do you need help?
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
+                  {['ASAP (Next 2h)', 'Today', 'This Week', 'Flexible'].map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      className={`btn ${editFormData.urgency === u ? 'btn-primary' : 'btn-ghost'}`}
+                      style={{ fontSize: '11px', padding: '6px 4px', textAlign: 'center', justifyContent: 'center' }}
+                      onClick={() => setEditFormData({ ...editFormData, urgency: u })}
+                    >
+                      {u}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: 'var(--ink-muted)', marginBottom: '6px' }}>
+                  New Preferred Date &amp; Time (Optional)
+                </label>
+                <input
+                  type="datetime-local"
+                  className="input"
+                  style={{ width: '100%', fontSize: '12.5px' }}
+                  value={editFormData.preferredTime}
+                  onChange={(e) => setEditFormData({ ...editFormData, preferredTime: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ flex: 1 }}
+                disabled={submittingEdit}
+                onClick={() => setEditModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{ flex: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                disabled={submittingEdit}
+              >
+                {submittingEdit ? 'Reactivating...' : (
+                  <>
+                    <CheckIcon size={14} /> Save &amp; Reactivate Problem
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
         )}
       </Modal>
     </PortalLayout>

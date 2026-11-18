@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import LearnerProfileModal from '../../components/LearnerProfileModal';
+import Pagination from '../../components/Pagination';
 import { api, formatCurrency, formatDateTime, initials } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { DocumentIcon, ClockIcon, ShieldIcon, CheckCircleIcon } from '../../components/Icons';
+import { useRealtimeSync } from '../../utils';
 
 export default function ContractsListPage() {
   const { user } = useAuth();
@@ -13,35 +15,60 @@ export default function ContractsListPage() {
   const [filter, setFilter] = useState('all');
   const [selectedLearner, setSelectedLearner] = useState(null);
 
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter]);
+
   const portalType = user?.role === 'mentor' ? 'mentor' : 'learner';
 
   useEffect(() => {
     loadContracts();
   }, []);
 
-  const loadContracts = async () => {
-    setLoading(true);
+  const loadContracts = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await api.getContracts({});
       setContracts(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load contracts:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  useRealtimeSync({
+    onSync: () => loadContracts(true),
+    entities: ['contracts'],
+    intervalMs: 3500,
+  });
 
   const filteredContracts = contracts.filter((c) => {
     if (filter === 'all') return true;
     if (filter === 'active') return ['active', 'in_progress'].includes(c.status);
+    if (filter === 'proposed') return ['proposed', 'accepted'].includes(c.status);
     if (filter === 'completed') return ['completed', 'completed_by_mentor'].includes(c.status);
     return c.status === filter;
   });
+
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(filteredContracts.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedContracts = filteredContracts.slice(
+    (validCurrentPage - 1) * pageSize,
+    validCurrentPage * pageSize
+  );
 
   const getStatusBadge = (status) => {
     switch (status) {
       case 'active':
         return <span className="status-badge badge-paid">Active · Escrow</span>;
+      case 'accepted':
+        return <span className="status-badge badge-accepted">Accepted</span>;
       case 'proposed':
         return <span className="status-badge badge-pending">Proposed</span>;
       case 'completed_by_mentor':
@@ -113,8 +140,9 @@ export default function ContractsListPage() {
             </Link>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
-            {filteredContracts.map((c) => {
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))', gap: '20px' }}>
+              {paginatedContracts.map((c) => {
               const otherName = portalType === 'mentor' ? c.learner_name : c.mentor_name;
               const isDone = c.status === 'completed';
               const progressPct = Math.round(((c.completed_sessions || 0) / c.total_sessions) * 100);
@@ -136,7 +164,24 @@ export default function ContractsListPage() {
                   <div>
                     {/* Top row */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                      {getStatusBadge(c.status)}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            background: 'rgba(99, 102, 241, 0.16)',
+                            color: '#818cf8',
+                            border: '1px solid rgba(99, 102, 241, 0.35)',
+                            letterSpacing: '0.4px',
+                          }}
+                        >
+                          Contract #{c.id}
+                        </span>
+                        {getStatusBadge(c.status)}
+                      </div>
                       <span className="rate-num" style={{ fontSize: '19px' }}>
                         {formatCurrency(c.total_price)}
                       </span>
@@ -216,7 +261,27 @@ export default function ContractsListPage() {
               );
             })}
           </div>
-        )}
+
+          <Pagination
+            currentPage={validCurrentPage}
+            totalPages={totalPages}
+            onPageChange={(page) => setCurrentPage(page)}
+            totalItems={filteredContracts.length}
+            itemsPerPage={pageSize}
+            itemLabel="contracts"
+            pageSizeOptions={[6, 9, 15, 30]}
+            onPageSizeChange={(newSize) => {
+              setPageSize(newSize);
+              setCurrentPage(1);
+            }}
+            style={{
+              marginTop: '24px',
+              borderRadius: '12px',
+              border: '1px solid var(--grid-strong)',
+            }}
+          />
+        </>
+      )}
       </div>
 
       <LearnerProfileModal

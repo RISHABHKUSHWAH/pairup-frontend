@@ -158,7 +158,7 @@ export default function MentorReviewsPage() {
       </div>
 
       {/* 5-Criteria Evaluation Breakdown and Star Distribution */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '20px', marginBottom: '24px' }}>
         {/* 5 Criteria Breakdown */}
         <div className="panel" style={{ margin: 0 }}>
           <div className="section-label" style={{ marginTop: 0 }}>5-Criteria Performance Breakdown</div>

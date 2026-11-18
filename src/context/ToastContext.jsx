@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Alert from '../components/Alert';
+import { playNotificationSound } from '../utils/soundEffects';
 
 const ToastContext = createContext(null);
 
@@ -18,7 +19,11 @@ export function ToastProvider({ children }) {
     duration = 4500,
     action,
     dismissible = true,
+    silent = false,
   }) => {
+    if (!silent) {
+      playNotificationSound();
+    }
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 6);
     const newToast = { id, type, title, message, duration, action, dismissible };
 

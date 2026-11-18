@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context';
-import { initials, resolveImageUrl } from '../api/client';
+import { initials, resolveImageUrl, chatApi } from '../api/client';
 import {
   DashboardIcon,
   SearchIcon,
@@ -45,6 +45,7 @@ import { useTour } from '../context/TourContext';
 export default function Sidebar({
   portalType: rawPortalType = 'learner',
   unreadCount = 0,
+  unreadMessagesCount = 0,
   collapsed: controlledCollapsed,
   onToggle,
   mobileOpen = false,
@@ -69,6 +70,37 @@ export default function Sidebar({
   }
 
   const [onlineLoading, setOnlineLoading] = useState(false);
+  const [localUnreadMessages, setLocalUnreadMessages] = useState(unreadMessagesCount);
+
+  useEffect(() => {
+    setLocalUnreadMessages(unreadMessagesCount);
+  }, [unreadMessagesCount]);
+
+  useEffect(() => {
+    const fetchUnread = () => {
+      chatApi.getUnreadCount()
+        .then((res) => {
+          if (res && typeof res.unread_count === 'number') {
+            setLocalUnreadMessages(res.unread_count);
+          }
+        })
+        .catch(() => {});
+    };
+
+    const handleSync = (e) => {
+      if (e?.detail && typeof e.detail.unread_count === 'number') {
+        setLocalUnreadMessages(e.detail.unread_count);
+      } else {
+        fetchUnread();
+      }
+    };
+
+    fetchUnread();
+    window.addEventListener('pairup_messages_updated', handleSync);
+    return () => window.removeEventListener('pairup_messages_updated', handleSync);
+  }, []);
+
+  const effectiveUnreadMessages = Math.max(0, localUnreadMessages || 0);
 
   const handleToggleOnline = async (e) => {
     if (e) {
@@ -455,6 +487,9 @@ export default function Sidebar({
             );
           }
 
+          const isMessagesItem = item.to === '/chat' || item.label === 'Messages';
+          const badgeCount = isMessagesItem ? effectiveUnreadMessages : 0;
+
           return (
             <NavLink
               key={item.to}
@@ -466,8 +501,23 @@ export default function Sidebar({
               className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
               onClick={onCloseMobile}
             >
-              <span className="admin-nav-icon">{item.icon}</span>
+              <span className="admin-nav-icon">
+                {item.icon}
+                {isCollapsed && isMessagesItem && badgeCount > 0 && (
+                  <span className="admin-nav-icon-badge" title={` unread message`}>
+                    {badgeCount > 9 ? '9+' : badgeCount}
+                  </span>
+                )}
+              </span>
               <span className="admin-nav-label">{item.label}</span>
+              {badgeCount > 0 && (
+                <span
+                  className="admin-nav-badge admin-nav-badge--messages"
+                  title={` unread message`}
+                >
+                  {badgeCount > 99 ? '99+' : badgeCount}
+                </span>
+              )}
             </NavLink>
           );
         })}
@@ -535,17 +585,19 @@ export default function Sidebar({
               </NavLink>
             )}
 
-            <NavLink
-              to={notificationsLink}
-              className={({ isActive }) => `admin-user-menu-item ${isActive ? 'active' : ''}`}
-              onClick={() => setMenuOpen(false)}
-            >
-              <BellIcon size={16} />
-              <span>Notifications</span>
-              {unreadCount > 0 && (
-                <span className="admin-user-menu-count">{unreadCount}</span>
-              )}
-            </NavLink>
+            {portalType !== 'learner' && portalType !== 'mentor' && (
+              <NavLink
+                to={notificationsLink}
+                className={({ isActive }) => `admin-user-menu-item ${isActive ? 'active' : ''}`}
+                onClick={() => setMenuOpen(false)}
+              >
+                <BellIcon size={16} />
+                <span>Notifications</span>
+                {unreadCount > 0 && (
+                  <span className="admin-user-menu-count">{unreadCount}</span>
+                )}
+              </NavLink>
+            )}
 
             <NavLink
               to={settingsLink}
@@ -644,19 +696,7 @@ export default function Sidebar({
               </>
             )}
 
-            {(portalType === 'mentor' || portalType === 'learner') && (
-              <button
-                type="button"
-                className="admin-user-menu-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setShowHelpCenter(true);
-                }}
-              >
-                <HelpCircleIcon size={16} />
-                <span>Help &amp; FAQs</span>
-              </button>
-            )}
+
 
             <div className="admin-user-menu-divider" />
 
@@ -821,7 +861,9 @@ export default function Sidebar({
             <span style={{ display: user?.avatar || user?.photo_url ? 'none' : 'inline-block' }}>
               {initials(user?.name)}
             </span>
-            {unreadCount > 0 && <span className="admin-user-dot" title={`${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`} />}
+            {portalType !== 'learner' && portalType !== 'mentor' && unreadCount > 0 && (
+              <span className="admin-user-dot" title={`${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`} />
+            )}
           </div>
           <div className="admin-user-info">
             <div className="admin-user-name" title={user?.name || 'User'}>

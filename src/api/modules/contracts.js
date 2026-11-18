@@ -19,6 +19,13 @@ export const contractsApi = {
       body: data,
     }),
 
+  updateContract: (id, data) =>
+    apiFetch(`/api/contracts/${id}`, {
+      method: 'PUT',
+      auth: true,
+      body: data,
+    }),
+
   payContract: (id, data = {}) =>
     apiFetch(`/api/contracts/${id}/pay`, {
       method: 'POST',
@@ -58,11 +65,11 @@ export const contractsApi = {
       auth: true,
     }),
 
-  scheduleContractSession: (contractId, sessionId, scheduledAt) =>
+  scheduleContractSession: (contractId, sessionId, scheduledAt, note = '') =>
     apiFetch(`/api/contracts/${contractId}/sessions/${sessionId}/schedule`, {
       method: 'POST',
       auth: true,
-      body: { scheduled_at: scheduledAt },
+      body: { scheduled_at: scheduledAt, note },
     }),
 
   adminResolveContract: (id, action, adminNotes = '') =>

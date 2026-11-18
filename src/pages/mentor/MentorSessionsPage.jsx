@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import LearnerProfileModal from '../../components/LearnerProfileModal';
 import RescheduleModal from '../../components/RescheduleModal';
+import Pagination from '../../components/Pagination';
 import { api, initials, stars } from '../../api/client';
 import {
   SearchIcon,
   BugIcon,
   UsersIcon,
   CalendarIcon,
+  ClockIcon,
   DocumentIcon,
   MessageIcon,
   CheckIcon,
@@ -17,17 +19,42 @@ import {
   VideoIcon,
   ShieldIcon,
   CreditCardIcon,
+  MoreHorizontalIcon,
 } from '../../components/Icons';
 import { useConfirm, useToast } from '../../context';
+import { useRealtimeSync, broadcastDataChange } from '../../utils';
 
 export default function MentorSessionsPage() {
   const { confirm } = useConfirm();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const validTabs = ['upcoming', 'live', 'past', 'expired', 'unscheduled'];
+  const queryTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(validTabs.includes(queryTab) ? queryTab : 'upcoming');
+
+  useEffect(() => {
+    if (queryTab && validTabs.includes(queryTab) && queryTab !== activeTab) {
+      setActiveTab(queryTab);
+    }
+  }, [queryTab]);
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setSearchParams({ tab }, { replace: true });
+  };
+
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('upcoming'); // 'upcoming' | 'live' | 'past'
   const [selectedLearner, setSelectedLearner] = useState(null);
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   // Modals state
   const [rescheduleBooking, setRescheduleBooking] = useState(null);
@@ -44,6 +71,17 @@ export default function MentorSessionsPage() {
   const [notesBooking, setNotesBooking] = useState(null);
   const [sessionNotes, setSessionNotes] = useState({});
   const [currentNoteText, setCurrentNoteText] = useState('');
+  const [openMenuBookingId, setOpenMenuBookingId] = useState(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('.session-more-menu-container')) {
+        setOpenMenuBookingId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
   useEffect(() => {
     loadBookings();
@@ -53,25 +91,32 @@ export default function MentorSessionsPage() {
     } catch {}
   }, []);
 
-  const loadBookings = async () => {
-    setLoading(true);
+  const loadBookings = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await api.getBookings();
       setBookings(data);
     } catch (err) {
-      if (err?.status !== 401) {
+      if (err?.status !== 401 && !silent) {
         setError(err.message || 'Failed to load sessions');
       }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  useRealtimeSync({
+    onSync: () => loadBookings(true),
+    entities: ['sessions'],
+    intervalMs: 3500,
+  });
 
   const handleAccept = async (id) => {
     try {
       await api.acceptBooking(id);
       const msg = 'Booking accepted! Learner has been notified.';
       toast.success(msg);
+      broadcastDataChange('sessions');
       loadBookings();
     } catch (err) {
       toast.error('Could not accept booking: ' + err.message);
@@ -94,6 +139,8 @@ export default function MentorSessionsPage() {
     try {
       const res = await api.acceptReschedule(booking.id);
       toast.success(res?.message || 'Reschedule request accepted! Session time updated.');
+      broadcastDataChange('sessions');
+      window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
       loadBookings();
     } catch (err) {
       toast.error('Could not accept reschedule: ' + err.message);
@@ -109,6 +156,8 @@ export default function MentorSessionsPage() {
     try {
       const res = await api.denyReschedule(denyRescheduleBooking.id, denyRescheduleReason.trim());
       toast.success(res?.message || 'Reschedule request declined.');
+      broadcastDataChange('sessions');
+      window.dispatchEvent(new CustomEvent('pairup_notifications_updated'));
       setDenyRescheduleBooking(null);
       setDenyRescheduleReason('');
       loadBookings();
@@ -131,6 +180,7 @@ export default function MentorSessionsPage() {
       await api.completeBooking(id);
       const msg = 'Session completed! Earnings updated.';
       toast.success(msg);
+      broadcastDataChange('sessions');
       loadBookings();
     } catch (err) {
       toast.error('Could not mark completed: ' + err.message);
@@ -144,6 +194,7 @@ export default function MentorSessionsPage() {
     try {
       const res = await api.cancelBooking(cancelBooking.id, cancelReason.trim());
       toast.success(res?.message || 'Session cancelled and learner notified.');
+      broadcastDataChange('sessions');
       setCancelBooking(null);
       setCancelReason('');
       loadBookings();
@@ -172,9 +223,9 @@ export default function MentorSessionsPage() {
   const isSessionLiveNow = (b) => {
     if (b.status !== 'paid') return false;
     const raw = b.scheduled_at || b.scheduled_time;
-    if (!raw) return true; // flexible unscheduled sessions are accessible anytime
+    if (!raw) return false; // Unscheduled sessions are NEVER live
     const date = new Date(raw);
-    if (isNaN(date.getTime())) return true;
+    if (isNaN(date.getTime())) return false;
     const durationMs = (b.duration_minutes || 60) * 60 * 1000;
     const startMs = date.getTime();
     const endMs = startMs + durationMs;
@@ -182,28 +233,66 @@ export default function MentorSessionsPage() {
     return now >= (startMs - 15 * 60 * 1000) && now <= (endMs + 30 * 60 * 1000);
   };
 
+  const isSessionExpired = (b) => {
+    if (['completed', 'cancelled', 'declined', 'disputed'].includes(b.status)) return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return false;
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return false;
+    const durationMs = (b.duration_minutes || 60) * 60 * 1000;
+    const endMs = date.getTime() + durationMs;
+    const now = Date.now();
+    const expiryThreshold = b.status === 'paid' ? (endMs + 30 * 60 * 1000) : endMs;
+    return now > expiryThreshold;
+  };
+
   const isSessionUpcoming = (b) => {
-    if (['pending', 'accepted'].includes(b.status)) return true;
+    if (isSessionExpired(b)) return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return false; // Unscheduled sessions live in the dedicated Unscheduled tab
+    const date = new Date(raw);
+    if (isNaN(date.getTime())) return false;
+    if (['pending', 'accepted'].includes(b.status)) {
+      return Date.now() < date.getTime();
+    }
     if (b.status === 'paid') {
-      const raw = b.scheduled_at || b.scheduled_time;
-      if (!raw) return true; // keep visible in upcoming as well
-      const date = new Date(raw);
-      if (isNaN(date.getTime())) return true;
+      if (isSessionLiveNow(b)) return false;
       const now = Date.now();
       return now < (date.getTime() - 15 * 60 * 1000);
     }
     return false;
   };
 
+  const isSessionUnscheduled = (b) => {
+    if (['completed', 'cancelled', 'declined', 'disputed'].includes(b.status)) return false;
+    if (isSessionExpired(b)) return false;
+    const raw = b.scheduled_at || b.scheduled_time;
+    if (!raw) return true;
+    const date = new Date(raw);
+    return isNaN(date.getTime());
+  };
+
   // Classify sessions
   const upcomingSessions = bookings.filter(isSessionUpcoming);
   const liveSessions = bookings.filter(isSessionLiveNow);
-  const pastSessions = bookings.filter((b) => ['completed', 'cancelled', 'declined'].includes(b.status));
+  const pastSessions = bookings.filter((b) => ['completed', 'cancelled', 'declined', 'disputed'].includes(b.status));
+  const expiredSessions = bookings.filter(isSessionExpired);
+  const unscheduledSessions = bookings.filter(isSessionUnscheduled);
 
   let currentList = [];
   if (activeTab === 'upcoming') currentList = upcomingSessions;
   else if (activeTab === 'live') currentList = liveSessions;
   else if (activeTab === 'past') currentList = pastSessions;
+  else if (activeTab === 'expired') currentList = expiredSessions;
+  else if (activeTab === 'unscheduled') currentList = unscheduledSessions;
+
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(currentList.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedList = currentList.slice(
+    (validCurrentPage - 1) * pageSize,
+    validCurrentPage * pageSize
+  );
 
   const getSessionTypeBadge = (topic) => {
     const t = (topic || '').toLowerCase();
@@ -236,6 +325,7 @@ export default function MentorSessionsPage() {
     const isDisputed = b.status === 'disputed' || b.payment_status === 'disputed';
 
     if (isPaid) {
+      const isUnscheduled = !b.scheduled_at && !b.scheduled_time;
       return (
         <span
           className="status-badge"
@@ -244,17 +334,17 @@ export default function MentorSessionsPage() {
             display: 'inline-flex',
             alignItems: 'center',
             gap: '4px',
-            background: 'rgba(16, 185, 129, 0.15)',
-            color: '#10b981',
-            border: '1px solid rgba(16, 185, 129, 0.35)',
+            background: isUnscheduled ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+            color: isUnscheduled ? '#f59e0b' : '#10b981',
+            border: `1px solid ${isUnscheduled ? 'rgba(245, 158, 11, 0.35)' : 'rgba(16, 185, 129, 0.35)'}`,
             fontWeight: 600,
             padding: '2px 8px',
             borderRadius: '4px',
           }}
-          title="Full session payment is held safely in platform escrow"
+          title={isUnscheduled ? 'Session paid and held in escrow, but not scheduled yet.' : 'Full session payment is held safely in platform escrow'}
         >
           <ShieldIcon size={12} />
-          <span>Escrow Secured · Paid</span>
+          <span>{isUnscheduled ? 'Escrow Secured · Unscheduled' : 'Escrow Secured · Paid'}</span>
         </span>
       );
     }
@@ -380,14 +470,14 @@ export default function MentorSessionsPage() {
         <button
           type="button"
           className={`filter-chip ${activeTab === 'upcoming' ? 'active' : ''}`}
-          onClick={() => setActiveTab('upcoming')}
+          onClick={() => handleTabChange('upcoming')}
         >
           Upcoming ({upcomingSessions.length})
         </button>
         <button
           type="button"
           className={`filter-chip ${activeTab === 'live' ? 'active' : ''}`}
-          onClick={() => setActiveTab('live')}
+          onClick={() => handleTabChange('live')}
           style={{ position: 'relative' }}
         >
           In Progress (Live) ({liveSessions.length})
@@ -398,11 +488,65 @@ export default function MentorSessionsPage() {
         <button
           type="button"
           className={`filter-chip ${activeTab === 'past' ? 'active' : ''}`}
-          onClick={() => setActiveTab('past')}
+          onClick={() => handleTabChange('past')}
         >
           Past Sessions ({pastSessions.length})
         </button>
+        <button
+          type="button"
+          className={`filter-chip ${activeTab === 'expired' ? 'active' : ''}`}
+          onClick={() => handleTabChange('expired')}
+          style={{ position: 'relative' }}
+        >
+          Expired ({expiredSessions.length})
+          {expiredSessions.length > 0 && (
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', display: 'inline-block', marginLeft: '6px' }} />
+          )}
+        </button>
+        <button
+          type="button"
+          className={`filter-chip ${activeTab === 'unscheduled' ? 'active' : ''}`}
+          onClick={() => handleTabChange('unscheduled')}
+          style={{ position: 'relative' }}
+        >
+          Unscheduled ({unscheduledSessions.length})
+          {unscheduledSessions.length > 0 && (
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b', display: 'inline-block', marginLeft: '6px' }} />
+          )}
+        </button>
       </div>
+
+      {activeTab === 'upcoming' && unscheduledSessions.length > 0 && (
+        <div
+          style={{
+            background: 'rgba(245, 158, 11, 0.08)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: '10px',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+            <CalendarIcon size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
+            <span>
+              You have <strong>{unscheduledSessions.length} unscheduled session{unscheduledSessions.length > 1 ? 's' : ''}</strong> that need a date &amp; time.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ fontSize: '12px', padding: '5px 12px' }}
+            onClick={() => handleTabChange('unscheduled')}
+          >
+            View Unscheduled ({unscheduledSessions.length}) →
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <p className="sub">Loading sessions...</p>
@@ -412,13 +556,17 @@ export default function MentorSessionsPage() {
             <CalendarIcon size={36} />
           </div>
           <div style={{ fontWeight: 600, fontSize: '15px' }}>
-            No {activeTab === 'live' ? 'live in-progress' : activeTab} sessions found
+            No {activeTab === 'live' ? 'live in-progress' : activeTab === 'expired' ? 'expired' : activeTab === 'unscheduled' ? 'unscheduled' : activeTab} sessions found
           </div>
           <p className="sub" style={{ fontSize: '13px', margin: '4px 0 14px' }}>
             {activeTab === 'upcoming'
               ? 'When learners book a session or accept your proposal, they appear here.'
               : activeTab === 'live'
               ? 'Sessions that have been confirmed & paid for live pairing will appear here.'
+              : activeTab === 'unscheduled'
+              ? 'All of your sessions currently have scheduled dates and times.'
+              : activeTab === 'expired'
+              ? 'No sessions have expired past their scheduled date and time.'
               : 'Your completed or resolved sessions will be archived here with notes and reviews.'}
           </p>
           <Link to="/mentor/explore-problems" className="btn btn-primary" style={{ fontSize: '13px' }}>
@@ -426,73 +574,129 @@ export default function MentorSessionsPage() {
           </Link>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {currentList.map((b) => {
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))', gap: '20px' }}>
+            {paginatedList.map((b) => {
             const hasNotes = Boolean(sessionNotes[b.id]);
+            const isExpired = isSessionExpired(b) || activeTab === 'expired';
 
             return (
               <div
                 key={b.id}
                 className="card"
                 style={{
-                  padding: '18px 20px',
-                  borderRadius: '10px',
-                  border: b.status === 'paid' ? '1px solid var(--brand)' : '1px solid var(--border)',
+                  position: 'relative',
+                  overflow: 'hidden',
+                  padding: '20px',
+                  borderRadius: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '14px',
+                  height: '100%',
+                  borderColor: isExpired ? 'rgba(239, 68, 68, 0.35)' : undefined,
                 }}
               >
+                {/* Expired Watermark across the card */}
+                {isExpired && (
+                  <div className="card-watermark-expired" aria-hidden="true">
+                    EXPIRED
+                  </div>
+                )}
                 {/* Top row */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', flex: 1, minWidth: 0 }}>
+                    {/* Clickable Avatar */}
                     <div
-                      className="user-profile-trigger"
                       style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '50%',
+                        background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
+                        color: '#fff',
+                        fontSize: '15px',
+                        fontWeight: 'bold',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '12px',
+                        justifyContent: 'center',
+                        flexShrink: 0,
                         cursor: 'pointer',
-                        padding: '4px 6px',
-                        borderRadius: '8px',
+                        transition: 'transform 0.15s ease',
                       }}
                       onClick={() => setSelectedLearner({
                         id: b.learner_id,
                         name: b.learner_name,
                       })}
-                      title="Click to view learner profile"
+                      title={`View ${b.learner_name}'s profile`}
+                      onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
                     >
-                      <div
-                        style={{
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '50%',
-                          background: 'linear-gradient(135deg, var(--brand), #8b5cf6)',
-                          color: '#fff',
-                          fontSize: '15px',
-                          fontWeight: 'bold',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        {initials(b.learner_name)}
+                      {initials(b.learner_name)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {/* Clickable Name */}
+                        <span
+                          className="user-profile-name"
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '15px',
+                            cursor: 'pointer',
+                            color: 'var(--ink)',
+                            transition: 'color 0.15s ease',
+                          }}
+                          onClick={() => setSelectedLearner({
+                            id: b.learner_id,
+                            name: b.learner_name,
+                          })}
+                          title={`View ${b.learner_name}'s profile`}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--brand)'; e.currentTarget.style.textDecoration = 'underline'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.textDecoration = 'none'; }}
+                        >
+                          {b.learner_name}
+                        </span>
+
+                        <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '11px' }}>
+                          {b.status}
+                        </span>
+                        {getPaymentStatusBadge(b)}
+                        {getSessionTypeBadge(b.topic)}
+                        <span className="mono" style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.18)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.35)', letterSpacing: '0.4px' }}>
+                          Session #{b.id}
+                        </span>
+                        {b.contract_id && (
+                          <Link
+                            to={`/contracts/${b.contract_id}`}
+                            className="mono"
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              background: 'rgba(16, 185, 129, 0.15)',
+                              color: '#10b981',
+                              border: '1px solid rgba(16, 185, 129, 0.35)',
+                              letterSpacing: '0.4px',
+                              textDecoration: 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            title={`Milestone session originating from Contract #${b.contract_id}${b.contract_title ? `: ${b.contract_title}` : ''}. Click to view contract.`}
+                          >
+                            <DocumentIcon size={11} />
+                            Contract #{b.contract_id}
+                            {b.session_number ? ` · #${b.session_number}` : ''}
+                          </Link>
+                        )}
                       </div>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span className="user-profile-name" style={{ fontWeight: 700, fontSize: '15px' }}>{b.learner_name}</span>
-                          <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '11px' }}>
-                            {b.status}
-                          </span>
-                          {getPaymentStatusBadge(b)}
-                          {getSessionTypeBadge(b.topic)}
-                        </div>
-                        <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 500 }}>
-                          {b.topic || 'Pair Programming & Debugging Session'}
-                        </div>
+                      <div className="sub" style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 500, wordBreak: 'break-word' }}>
+                        {b.topic || 'Pair Programming & Debugging Session'}
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px', flexShrink: 0, marginLeft: 'auto' }}>
                     <div className="mono" style={{ fontWeight: 700, fontSize: '17px', color: 'var(--brand)' }}>
                       ₹{b.price}
                     </div>
@@ -534,30 +738,15 @@ export default function MentorSessionsPage() {
                 >
                   <div>
                     <strong>Scheduled:</strong>{' '}
-                    {(b.scheduled_at || b.scheduled_time)
-                      ? new Date(b.scheduled_at || b.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-                      : 'Pending learner time selection'}
-                  </div>
-                  <div>
-                    <strong>Payment &amp; Escrow:</strong>{' '}
-                    {b.status === 'paid' ? (
-                      <span style={{ color: '#10b981', fontWeight: 600 }}>
-                        ₹{b.price} Secured in Platform Escrow (Net take-home: ₹{b.net_amount || Math.round(b.price * 0.9)})
-                      </span>
-                    ) : b.status === 'accepted' ? (
-                      <span style={{ color: '#f59e0b', fontWeight: 600 }}>
-                        ₹{b.price} Unpaid · Learner prompted to deposit before session starts
-                      </span>
-                    ) : b.status === 'completed' ? (
-                      <span style={{ color: '#6366f1', fontWeight: 600 }}>
-                        ₹{b.price} Paid · Disbursed to mentor earnings
-                      </span>
+                    {(b.scheduled_at || b.scheduled_time) ? (
+                      new Date(b.scheduled_at || b.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
                     ) : (
-                      <span style={{ color: 'var(--ink-muted)' }}>
-                        Pending mentor confirmation
-                      </span>
+                      <strong style={{ color: '#f59e0b', background: 'rgba(245, 158, 11, 0.12)', padding: '2px 6px', borderRadius: '4px' }}>
+                        Not scheduled yet
+                      </strong>
                     )}
                   </div>
+
                   <div>
                     <strong>Tools:</strong> Live Video, Collaborative Screen Share &amp; Code IDE
                   </div>
@@ -567,6 +756,35 @@ export default function MentorSessionsPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Expired Status Notice Banner */}
+                {isExpired && (
+                  <div
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.06)',
+                      border: '1px solid rgba(239, 68, 68, 0.25)',
+                      borderRadius: '8px',
+                      padding: '9px 13px',
+                      margin: '10px 0 6px',
+                      fontSize: '12px',
+                      color: 'var(--ink)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      position: 'relative',
+                      zIndex: 2,
+                    }}
+                  >
+                    <ClockIcon size={15} style={{ color: '#ef4444', flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ color: '#dc2626' }}>Session Time Expired:</strong> Scheduled slot (
+                      {(b.scheduled_at || b.scheduled_time)
+                        ? new Date(b.scheduled_at || b.scheduled_time).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+                        : 'scheduled slot'}
+                      ) has passed without completion. You can reschedule a new slot with {b.learner_name} or cancel the booking.
+                    </div>
+                  </div>
+                )}
 
                 {/* Status Notice Banner */}
                 {b.status === 'accepted' && (
@@ -590,27 +808,7 @@ export default function MentorSessionsPage() {
                     </div>
                   </div>
                 )}
-                {b.status === 'paid' && (
-                  <div
-                    style={{
-                      background: 'rgba(16, 185, 129, 0.08)',
-                      border: '1px solid rgba(16, 185, 129, 0.25)',
-                      borderRadius: '8px',
-                      padding: '9px 13px',
-                      margin: '10px 0 6px',
-                      fontSize: '12px',
-                      color: 'var(--ink)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                    }}
-                  >
-                    <ShieldIcon size={15} style={{ color: '#10b981', flexShrink: 0 }} />
-                    <div style={{ flex: 1 }}>
-                      <strong style={{ color: '#047857' }}>Payment Secured in Escrow:</strong> <strong>₹{b.price}</strong> is safely held in PairUp platform escrow. You can join the live pairing room at the scheduled time. Funds will be released to your earnings upon session completion.
-                    </div>
-                  </div>
-                )}
+
 
                 {/* Reschedule Request Notice Banner */}
                 {b.reschedule_status === 'pending' && (
@@ -635,59 +833,73 @@ export default function MentorSessionsPage() {
                       </span>
                     </div>
 
-                    <div style={{ background: 'var(--panel-bg, #ffffff)', padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border)', marginBottom: '10px' }}>
-                      <div style={{ marginBottom: '4px' }}>
-                        <strong style={{ color: 'var(--ink-muted)' }}>Proposed New Time: </strong>
-                        <span style={{ fontWeight: 600, color: 'var(--brand, #2563eb)' }}>
-                          {b.reschedule_requested_at ? new Date(b.reschedule_requested_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' }) : 'Flexible'}
-                        </span>
-                      </div>
-                      {b.reschedule_note && (
-                        <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--ink)' }}>
-                          <strong style={{ color: 'var(--ink-muted)' }}>Learner Note: </strong>
-                          <em>"{b.reschedule_note}"</em>
+                    <div
+                      style={{
+                        background: 'var(--panel-bg, #ffffff)',
+                        padding: '10px 14px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '12px',
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: '220px' }}>
+                        <div style={{ marginBottom: b.reschedule_note ? '4px' : '0' }}>
+                          <strong style={{ color: 'var(--ink-muted)' }}>Proposed New Time: </strong>
+                          <span style={{ fontWeight: 600, color: 'var(--brand, #2563eb)' }}>
+                            {b.reschedule_requested_at ? new Date(b.reschedule_requested_at).toLocaleString([], { dateStyle: 'full', timeStyle: 'short' }) : 'Flexible'}
+                          </span>
                         </div>
-                      )}
-                    </div>
+                        {b.reschedule_note && (
+                          <div style={{ fontSize: '12px', color: 'var(--ink)' }}>
+                            <strong style={{ color: 'var(--ink-muted)' }}>Learner Note: </strong>
+                            <em>"{b.reschedule_note}"</em>
+                          </div>
+                        )}
+                      </div>
 
-                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 14px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          borderColor: 'rgba(239, 68, 68, 0.3)',
-                          color: 'var(--danger, #ef4444)',
-                        }}
-                        onClick={() => {
-                          setDenyRescheduleBooking(b);
-                          setDenyRescheduleReason('');
-                        }}
-                      >
-                        <XIcon size={13} /> Deny Reschedule
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 16px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          backgroundColor: '#16a34a',
-                          borderColor: '#16a34a',
-                          color: '#ffffff',
-                        }}
-                        disabled={acceptingRescheduleId === b.id}
-                        onClick={() => handleAcceptReschedule(b)}
-                      >
-                        <CheckIcon size={13} /> {acceptingRescheduleId === b.id ? 'Accepting...' : 'Accept Reschedule'}
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{
+                            fontSize: '12px',
+                            padding: '6px 14px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            borderColor: 'rgba(239, 68, 68, 0.3)',
+                            color: 'var(--danger, #ef4444)',
+                          }}
+                          onClick={() => {
+                            setDenyRescheduleBooking(b);
+                            setDenyRescheduleReason('');
+                          }}
+                        >
+                          <XIcon size={13} /> Deny
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{
+                            fontSize: '12px',
+                            padding: '6px 16px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            backgroundColor: '#16a34a',
+                            borderColor: '#16a34a',
+                            color: '#ffffff',
+                          }}
+                          disabled={acceptingRescheduleId === b.id}
+                          onClick={() => handleAcceptReschedule(b)}
+                        >
+                          <CheckIcon size={13} /> {acceptingRescheduleId === b.id ? 'Accepting...' : 'Accept'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -767,6 +979,7 @@ export default function MentorSessionsPage() {
                     alignItems: 'center',
                     borderTop: '1px dashed var(--border)',
                     paddingTop: '12px',
+                    marginTop: 'auto',
                     flexWrap: 'wrap',
                     gap: '8px',
                   }}
@@ -789,9 +1002,9 @@ export default function MentorSessionsPage() {
                     </button>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    {/* Upcoming actions */}
-                    {activeTab === 'upcoming' && (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    {/* Upcoming & Unscheduled actions */}
+                    {(activeTab === 'upcoming' || activeTab === 'unscheduled') && (
                       <>
                         {b.status === 'pending' && (
                           <button
@@ -803,50 +1016,79 @@ export default function MentorSessionsPage() {
                             <CheckIcon size={13} /> Accept Booking
                           </button>
                         )}
-                        {b.reschedule_status === 'pending' && (
-                          <>
-                            <button
-                              type="button"
-                              className="btn btn-primary"
-                              style={{ fontSize: '12.5px', padding: '5px 14px', backgroundColor: '#16a34a', borderColor: '#16a34a', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                              disabled={acceptingRescheduleId === b.id}
-                              onClick={() => handleAcceptReschedule(b)}
-                            >
-                              <CheckIcon size={13} /> Accept Reschedule
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost"
-                              style={{ fontSize: '12.5px', padding: '5px 12px', color: 'var(--danger, #ef4444)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                              onClick={() => {
-                                setDenyRescheduleBooking(b);
-                                setDenyRescheduleReason('');
-                              }}
-                            >
-                              <XIcon size={13} /> Deny Reschedule
-                            </button>
-                          </>
+
+                        {b.status === 'paid' && (!b.scheduled_at && !b.scheduled_time) && (
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ fontSize: '12.5px', padding: '5px 14px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                            onClick={() => setRescheduleBooking(b)}
+                          >
+                            <CalendarIcon size={13} /> Schedule Session
+                          </button>
                         )}
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          style={{ fontSize: '12.5px', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                          onClick={() => {
-                            setRescheduleBooking(b);
-                          }}
-                        >
-                          <CalendarIcon size={13} /> Reschedule
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '12.5px', padding: '5px 12px', color: 'var(--danger, #ef4444)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                          onClick={() => {
-                            setCancelBooking(b);
-                          }}
-                        >
-                          <XIcon size={13} /> Cancel
-                        </button>
+
+                        {b.status === 'paid' && (b.scheduled_at || b.scheduled_time) && (
+                          <button
+                            type="button"
+                            disabled
+                            className="btn btn-secondary"
+                            title="Live video room activates 15 minutes before the scheduled start time."
+                            style={{ fontSize: '12px', padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: '5px', opacity: 0.65, cursor: 'not-allowed' }}
+                          >
+                            <VideoIcon size={13} /> Live Room (Opens 15m before)
+                          </button>
+                        )}
+
+                        <div className="session-more-menu-container" style={{ position: 'relative' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{
+                              fontSize: '14px',
+                              padding: '5px 8px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: '6px',
+                              background: openMenuBookingId === b.id ? 'var(--bg)' : 'transparent',
+                              borderColor: openMenuBookingId === b.id ? 'var(--ink-faint)' : 'var(--grid-strong)',
+                            }}
+                            title="More options"
+                            aria-label="More options"
+                            onClick={() => setOpenMenuBookingId(openMenuBookingId === b.id ? null : b.id)}
+                          >
+                            <MoreHorizontalIcon size={16} />
+                          </button>
+
+                          {openMenuBookingId === b.id && (
+                            <div className="session-menu-dropdown">
+                              <button
+                                type="button"
+                                className="session-menu-item"
+                                onClick={() => {
+                                  setOpenMenuBookingId(null);
+                                  setRescheduleBooking(b);
+                                }}
+                              >
+                                <CalendarIcon size={14} style={{ color: 'var(--ink-muted)' }} />
+                                <span>{(b.scheduled_at || b.scheduled_time) ? 'Reschedule' : 'Schedule Session'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                className="session-menu-item danger"
+                                onClick={() => {
+                                  setOpenMenuBookingId(null);
+                                  setCancelBooking(b);
+                                }}
+                              >
+                                <XIcon size={14} />
+                                <span>Cancel Session</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
 
@@ -868,16 +1110,43 @@ export default function MentorSessionsPage() {
                         >
                           <CheckIcon size={13} /> Mark Completed
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ fontSize: '12.5px', padding: '5px 12px', color: 'var(--danger, #ef4444)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                          onClick={() => {
-                            setCancelBooking(b);
-                          }}
-                        >
-                          <XIcon size={13} /> Cancel
-                        </button>
+                        <div className="session-more-menu-container" style={{ position: 'relative' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{
+                              fontSize: '14px',
+                              padding: '5px 8px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: '6px',
+                              background: openMenuBookingId === b.id ? 'var(--bg)' : 'transparent',
+                              borderColor: openMenuBookingId === b.id ? 'var(--ink-faint)' : 'var(--grid-strong)',
+                            }}
+                            title="More options"
+                            aria-label="More options"
+                            onClick={() => setOpenMenuBookingId(openMenuBookingId === b.id ? null : b.id)}
+                          >
+                            <MoreHorizontalIcon size={16} />
+                          </button>
+
+                          {openMenuBookingId === b.id && (
+                            <div className="session-menu-dropdown">
+                              <button
+                                type="button"
+                                className="session-menu-item danger"
+                                onClick={() => {
+                                  setOpenMenuBookingId(null);
+                                  setCancelBooking(b);
+                                }}
+                              >
+                                <XIcon size={14} />
+                                <span>Cancel Session</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </>
                     )}
 
@@ -892,13 +1161,45 @@ export default function MentorSessionsPage() {
                         View Summary & Notes
                       </button>
                     )}
+
+                    {/* Expired actions */}
+                    {activeTab === 'expired' && (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '12.5px', padding: '5px 14px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                        onClick={() => setRescheduleBooking(b)}
+                      >
+                        <CalendarIcon size={13} /> Reschedule
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
         </div>
-      )}
+
+        <Pagination
+          currentPage={validCurrentPage}
+          totalPages={totalPages}
+          onPageChange={(page) => setCurrentPage(page)}
+          totalItems={currentList.length}
+          itemsPerPage={pageSize}
+          itemLabel="sessions"
+          pageSizeOptions={[6, 9, 15, 30]}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+          }}
+          style={{
+            marginTop: '24px',
+            borderRadius: '12px',
+            border: '1px solid var(--grid-strong)',
+          }}
+        />
+      </>
+    )}
 
       {/* Reschedule Modal */}
       <RescheduleModal

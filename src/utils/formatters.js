@@ -226,3 +226,68 @@ export function isSameDay(date1, date2) {
     d1.getFullYear() === d2.getFullYear()
   );
 }
+
+/**
+ * Checks whether a problem post's scheduled preferred time or urgency window has timed out.
+ * @param {object} problem
+ * @returns {boolean}
+ */
+export function checkProblemTimeOut(problem) {
+  if (!problem) return false;
+  if (problem.is_timed_out === true) return true;
+
+  let preferredTime = problem.preferred_time || null;
+  let urgency = problem.urgency || null;
+  const desc = problem.description || problem.problem_description || '';
+
+  if (!preferredTime) {
+    const prefMatch = desc.match(/Preferred Date & Time:\s*([^|*\n]+)/i);
+    if (prefMatch) preferredTime = prefMatch[1].trim();
+  }
+
+  if (!urgency) {
+    const urgMatch = desc.match(/Urgency:\s*([^|*\n]+)/i);
+    if (urgMatch) urgency = urgMatch[1].trim();
+  }
+
+  const now = Date.now();
+
+  // 1. Check preferred date & time if specified
+  if (preferredTime) {
+    const prefDate = new Date(preferredTime);
+    if (!isNaN(prefDate.getTime()) && prefDate.getTime() < now) {
+      return true;
+    }
+  }
+
+  // 2. Check urgency relative to created_at
+  const createdAtVal = problem.created_at || problem.problem_created_at;
+  if (createdAtVal) {
+    const createdDate = new Date(createdAtVal);
+    if (!isNaN(createdDate.getTime())) {
+      const elapsedMs = now - createdDate.getTime();
+      const urgLower = (urgency || '').toLowerCase();
+
+      if (urgLower.includes('asap') || urgLower.includes('2h')) {
+        if (elapsedMs > 2 * 60 * 60 * 1000) {
+          return true;
+        }
+      } else if (urgLower.includes('today')) {
+        if (elapsedMs > 24 * 60 * 60 * 1000) {
+          return true;
+        }
+      } else if (urgLower.includes('week')) {
+        if (elapsedMs > 7 * 24 * 60 * 60 * 1000) {
+          return true;
+        }
+      } else if (!urgency || urgLower.includes('flexible')) {
+        // Any open problem created more than 24 hours ago is timed out
+        if (elapsedMs > 24 * 60 * 60 * 1000) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}

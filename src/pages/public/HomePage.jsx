@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-do
 import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import BookSessionModal from '../../components/BookSessionModal';
-import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon } from '../../components/Icons';
+import { CalendarIcon, ChevronLeftIcon, ChevronRightIcon, XIcon } from '../../components/Icons';
 import { TechIcon } from '../../components/TechIcon';
 import { api, initials, stars, resolveImageUrl } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
@@ -18,6 +18,7 @@ export default function HomePage() {
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [search, setSearch] = useState('');
   const [selectedMentor, setSelectedMentor] = useState(null);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [bookModalMentor, setBookModalMentor] = useState(null);
   const [topic, setTopic] = useState('');
@@ -284,9 +285,38 @@ export default function HomePage() {
     restoreBooking();
   }, [user, allMentors]);
 
-  const handleSelectMentor = async (mentor) => {
+  // Manage mobile/tablet mentor detail modal lifecycle (Escape key, scroll lock, desktop resize)
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 960) {
+        setMobileDetailOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileDetailOpen) return;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') setMobileDetailOpen(false);
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [mobileDetailOpen]);
+
+  const handleSelectMentor = async (mentor, openMobileModal = false) => {
     if (!mentor) return;
     const mentorId = mentor.user_id || mentor.id;
+    const isTabletOrMobile = typeof window !== 'undefined' && window.innerWidth <= 960;
+    if (openMobileModal && isTabletOrMobile) {
+      setMobileDetailOpen(true);
+    }
     if (selectedMentor?.user_id === mentorId && !detailLoading) return;
 
     // Immediately show the selected mentor's card information to prevent layout shifts or wait time
@@ -302,12 +332,6 @@ export default function HomePage() {
     try {
       const fullMentor = await api.getMentor(mentorId);
       setSelectedMentor(fullMentor);
-      // On mobile devices, automatically scroll to the preview panel when a mentor is clicked
-      if (window.innerWidth <= 960) {
-        setTimeout(() => {
-          document.querySelector('.mentor-preview-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
-      }
     } catch (err) {
       console.error('Failed to load mentor details:', err);
     } finally {
@@ -529,7 +553,7 @@ export default function HomePage() {
                 <div
                   key={m.user_id}
                   className={`card ${selectedMentor?.user_id === m.user_id ? 'selected' : ''}`}
-                  onClick={() => handleSelectMentor(m)}
+                  onClick={() => handleSelectMentor(m, true)}
                   style={{ cursor: 'pointer' }}
                 >
                   <div className="card-top">
@@ -603,14 +627,18 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Right Column: Selected mentor profile panel with rock-solid fixed dimensions */}
-          <div className="mentor-preview-panel">
+          {/* Right Column: Selected mentor profile panel (inline side-by-side on desktop; opens as modal overlay on tablet/mobile) */}
+          <div
+            className={`mentor-preview-overlay ${mobileDetailOpen ? 'is-mobile-open' : ''}`}
+            onClick={() => setMobileDetailOpen(false)}
+          >
+          <div className="mentor-preview-panel" onClick={(e) => e.stopPropagation()}>
             {/* Terminal Header Bar */}
             <div className="mentor-preview-terminal-bar">
               <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#E5534B' }}></span>
               <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#E0A426' }}></span>
               <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: '#3FB56D' }}></span>
-              <span className="mono" style={{ marginLeft: '10px', fontSize: '11.5px', color: '#8892A6' }}>
+              <span className="mono" style={{ marginLeft: '10px', fontSize: '11.5px', color: '#8892A6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 ~/mentors/{selectedMentor?.name ? selectedMentor.name.toLowerCase().replace(/\s+/g, '-') : 'profile'}
               </span>
               {detailLoading && (
@@ -619,6 +647,15 @@ export default function HomePage() {
                   syncing...
                 </span>
               )}
+              <button
+                type="button"
+                className="mentor-preview-mobile-close"
+                onClick={() => setMobileDetailOpen(false)}
+                aria-label="Close mentor details"
+                title="Close"
+              >
+                <XIcon size={15} />
+              </button>
             </div>
 
             {/* Panel Body Content */}
@@ -819,6 +856,7 @@ export default function HomePage() {
                 Select a mentor to view their profile.
               </div>
             )}
+          </div>
           </div>
         </div>
       </main>

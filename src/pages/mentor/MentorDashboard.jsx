@@ -6,6 +6,7 @@ import { api, initials } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { ClockIcon, VideoIcon, MessageIcon, DocumentIcon, FileEditIcon, WalletIcon, SearchIcon, CalendarIcon } from '../../components/Icons';
 import PairUpLoader from '../../components/PairUpLoader';
+import { checkProblemTimeOut } from '../../utils';
 
 export default function MentorDashboard() {
   const { user } = useAuth();
@@ -89,10 +90,12 @@ export default function MentorDashboard() {
           ];
         }
 
+        const activeOpenProblems = problems.filter((p) => p.status === 'open' && !checkProblemTimeOut(p));
+
         setStats({
           upcomingSessions: upcoming.length,
           todaySessions: today.length,
-          openProblems: problems.filter((p) => p.status === 'open').length,
+          openProblems: activeOpenProblems.length,
           pendingProposals: proposals.filter((p) => p.status === 'pending').length,
           netEarnings: net,
           escrowEarnings: escrow,
@@ -101,7 +104,7 @@ export default function MentorDashboard() {
 
         setTodayList(today);
         setUpcomingList(upcoming.slice(0, 5));
-        setNewProblems(problems.slice(0, 4));
+        setNewProblems(activeOpenProblems.slice(0, 4));
         setMyProposals(proposals.slice(0, 4));
         setRecentMessages(msgs.slice(0, 3));
       } catch (err) {
@@ -395,7 +398,14 @@ export default function MentorDashboard() {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--ink)' }}>{prob.title}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 600, fontSize: '13.5px', color: 'var(--ink)' }}>{prob.title}</span>
+                          {checkProblemTimeOut(prob) && (
+                            <span className="stamp-timeout" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                              <ClockIcon size={10} /> TIME OUT
+                            </span>
+                          )}
+                        </div>
                         <div className="sub" style={{ fontSize: '11.5px', marginTop: '2px' }}>
                           Posted by <strong style={{ color: 'var(--ink)' }}>{prob.learner_name || 'Learner'}</strong> • {prob.created_at ? `${new Date(prob.created_at).toLocaleDateString()} at ${new Date(prob.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Recently'}
                         </div>

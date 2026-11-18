@@ -591,7 +591,7 @@ Verified by: PairUp Compliance Intermediary`,
         </div>
 
         {/* Address & Digital Signature Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginTop: '14px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '14px', marginTop: '14px' }}>
           <div style={{ padding: '12px 16px', background: 'var(--bg)', border: '1px solid var(--grid)', borderRadius: '8px' }}>
             <div style={{ fontSize: '11px', color: 'var(--ink-muted)', fontWeight: 600 }}>Official Tax Billing Address</div>
             <div style={{ fontSize: '12.5px', color: 'var(--ink)', marginTop: '3px' }}>{taxProfile.address}</div>

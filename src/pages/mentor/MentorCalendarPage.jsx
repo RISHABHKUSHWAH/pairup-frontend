@@ -6,6 +6,7 @@ import { api, mentorCalendarSettings } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { ClockIcon, CalendarIcon, MessageIcon, VideoIcon } from '../../components/Icons';
 import { useToast } from '../../context';
+import Pagination from '../../components/Pagination';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -30,6 +31,10 @@ export default function MentorCalendarPage() {
 
   // Selected session modal
   const [selectedSession, setSelectedSession] = useState(null);
+
+  // Upcoming sessions pagination
+  const [upcomingPage, setUpcomingPage] = useState(1);
+  const UPCOMING_PAGE_SIZE = 4;
 
   useEffect(() => {
     loadCalendarData();
@@ -105,6 +110,12 @@ export default function MentorCalendarPage() {
   };
 
   const upcomingSessions = bookings.filter((b) => ['accepted', 'paid', 'pending'].includes(b.status));
+  const totalUpcomingPages = Math.max(1, Math.ceil(upcomingSessions.length / UPCOMING_PAGE_SIZE));
+  const validUpcomingPage = Math.min(Math.max(1, upcomingPage), totalUpcomingPages);
+  const paginatedUpcomingSessions = upcomingSessions.slice(
+    (validUpcomingPage - 1) * UPCOMING_PAGE_SIZE,
+    validUpcomingPage * UPCOMING_PAGE_SIZE
+  );
 
   return (
     <PortalLayout
@@ -422,29 +433,43 @@ export default function MentorCalendarPage() {
             {upcomingSessions.length === 0 ? (
               <p className="sub" style={{ fontSize: '12px' }}>No upcoming sessions booked.</p>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {upcomingSessions.map((b) => (
-                  <div
-                    key={b.id}
-                    className="mini-card"
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => setSelectedSession(b)}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '13px' }}>{b.learner_name}</div>
-                    <div className="sub" style={{ margin: '2px 0', fontSize: '11.5px' }}>
-                      {b.topic || 'Pairing'}
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {paginatedUpcomingSessions.map((b) => (
+                    <div
+                      key={b.id}
+                      className="mini-card"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setSelectedSession(b)}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{b.learner_name}</div>
+                      <div className="sub" style={{ margin: '2px 0', fontSize: '11.5px' }}>
+                        {b.topic || 'Pairing'}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                        <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '9px', padding: '2px 6px' }}>
+                          {b.status}
+                        </span>
+                        <span className="mono" style={{ fontSize: '11px', fontWeight: 700 }}>
+                          ₹{b.price}
+                        </span>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                      <span className={`status-badge badge-${b.status} mono`} style={{ fontSize: '9px', padding: '2px 6px' }}>
-                        {b.status}
-                      </span>
-                      <span className="mono" style={{ fontSize: '11px', fontWeight: 700 }}>
-                        ₹{b.price}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+
+                <Pagination
+                  currentPage={validUpcomingPage}
+                  totalPages={totalUpcomingPages}
+                  onPageChange={(page) => setUpcomingPage(page)}
+                  totalItems={upcomingSessions.length}
+                  itemsPerPage={UPCOMING_PAGE_SIZE}
+                  itemLabel="sessions"
+                  compact={true}
+                  simple={true}
+                  style={{ marginTop: '12px' }}
+                />
+              </>
             )}
           </div>
 

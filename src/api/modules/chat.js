@@ -10,6 +10,16 @@ export const chatApi = {
   getConversations: () =>
     apiFetch(`/api/messages/conversations`, { auth: true }),
 
+  getUnreadCount: () =>
+    apiFetch('/api/messages/unread-count', { auth: true }),
+
+  markConversationRead: (withUserId) =>
+    apiFetch('/api/messages/read', {
+      method: 'POST',
+      auth: true,
+      body: { with: withUserId },
+    }),
+
   uploadAttachment: (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -33,4 +43,3 @@ export const chatApi = {
       body: { delete_for: deleteFor },
     }),
 };
-

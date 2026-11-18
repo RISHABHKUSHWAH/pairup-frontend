@@ -8,6 +8,7 @@ import { api, initials, stars, resolveImageUrl, learnerFavorites } from '../../a
 import { SearchIcon, PlusIcon, DocumentIcon } from '../../components/Icons';
 import { useToast } from '../../context';
 import PairUpLoader from '../../components/PairUpLoader';
+import { checkProblemTimeOut } from '../../utils';
 
 export default function LearnerDashboard() {
   const { toast } = useToast();
@@ -251,7 +252,7 @@ export default function LearnerDashboard() {
         </Link>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '20px', marginBottom: '28px' }}>
         {/* 2. Upcoming Sessions */}
         <div className="admin-panel" style={{ margin: 0 }}>
           <div className="admin-panel-head">
@@ -339,10 +340,32 @@ export default function LearnerDashboard() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {openProblems.map((p) => (
-                <div key={p.id} className="mini-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ minWidth: 0, flex: 1, paddingRight: '10px' }}>
-                    <div style={{ fontWeight: 600, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {p.title}
+                <div
+                  key={p.id}
+                  className="mini-card"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {checkProblemTimeOut(p) && (
+                    <div className="card-watermark-expired watermark-sm" aria-hidden="true">
+                      EXPIRED
+                    </div>
+                  )}
+                  <div style={{ minWidth: 0, flex: 1, paddingRight: '10px', position: 'relative', zIndex: 2 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 600, fontSize: '13px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {p.title}
+                      </span>
+                      {checkProblemTimeOut(p) && (
+                        <span className="stamp-timeout" style={{ fontSize: '9px', padding: '1px 5px', transform: 'none' }}>
+                          EXPIRED
+                        </span>
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
                       {(p.skills || []).slice(0, 2).map((s) => (
@@ -378,7 +401,7 @@ export default function LearnerDashboard() {
             <Link to="/learner/my-problems">Compare all ({pendingProposals.length})</Link>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '12px' }}>
             {pendingProposals.map((prop) => (
               <div key={prop.id} className="card" style={{ background: 'var(--bg)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -487,7 +510,7 @@ export default function LearnerDashboard() {
       </div>
 
       {/* 6. Recent Messages & 7. Recent Payments */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '20px' }}>
         {/* Messages */}
         <div className="admin-panel" style={{ margin: 0 }}>
           <div className="admin-panel-head">

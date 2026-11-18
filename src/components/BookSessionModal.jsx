@@ -26,6 +26,7 @@ export default function BookSessionModal({
   isOpen = false,
   onClose,
   mentor,
+  learner,
   onSuccess,
   initialDuration = 60,
   initialTopic = '',
@@ -34,7 +35,10 @@ export default function BookSessionModal({
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const mentorId = mentor ? (mentor.user_id || mentor.id) : null;
+  const isMentorSelf = user?.role === 'mentor';
+  const mentorId = mentor ? (mentor.user_id || mentor.id) : (isMentorSelf ? user?.id : null);
+  const learnerId = learner ? (learner.user_id || learner.id) : null;
+  const learnerName = learner?.name || 'Learner';
   const [liveMentor, setLiveMentor] = useState(mentor);
 
   useEffect(() => {
@@ -210,6 +214,7 @@ export default function BookSessionModal({
     try {
       const bookingData = {
         mentor_id: mentorId,
+        learner_id: learnerId || undefined,
         topic: fullTopic,
         duration_minutes: duration,
         price: calculatedPrice,
@@ -218,12 +223,12 @@ export default function BookSessionModal({
       };
 
       const res = await api.createBooking(bookingData);
-      toast.success(res?.message || 'Session requested successfully! Check My Sessions to track confirmation.');
+      toast.success(res?.message || (isMentorSelf ? 'Session scheduled successfully!' : 'Session requested successfully! Check My Sessions to track confirmation.'));
       onClose();
       if (onSuccess) {
         onSuccess(res);
       } else {
-        navigate('/learner/sessions');
+        navigate(isMentorSelf ? '/mentor/sessions' : '/learner/sessions');
       }
     } catch (err) {
       const errorMsg = err.message || 'Could not request session';
@@ -243,8 +248,8 @@ export default function BookSessionModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={`Book Session with ${mentorName}`}
-      subtitle={`${mentorTitle} · ₹${hourlyRate.toLocaleString('en-IN')}/hr`}
+      title={isMentorSelf && learner ? `Schedule Session with ${learnerName}` : `Book Session with ${mentorName}`}
+      subtitle={isMentorSelf && learner ? `Select an available slot from your calendar for ${learnerName}` : `${mentorTitle} · ₹${hourlyRate.toLocaleString('en-IN')}/hr`}
       maxWidth="680px"
     >
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -298,7 +303,9 @@ export default function BookSessionModal({
               </span>
             </div>
             <div>
-              <div style={{ fontWeight: 700, fontSize: '15px' }}>{mentorName}</div>
+              <div style={{ fontWeight: 700, fontSize: '15px' }}>
+                {isMentorSelf && learner ? `Learner: ${learnerName}` : mentorName}
+              </div>
               <div className="sub" style={{ margin: 0, fontSize: '12.5px' }}>
                 ₹{hourlyRate.toLocaleString('en-IN')} / hour rate · Escrow Protected
               </div>
@@ -621,7 +628,11 @@ export default function BookSessionModal({
             disabled={submitting || !selectedSlot}
             style={{ flex: 2, fontWeight: 700 }}
           >
-            {submitting ? 'Requesting Session...' : `Request Session (₹${calculatedPrice.toLocaleString('en-IN')})`}
+            {submitting
+              ? (isMentorSelf && learner ? 'Scheduling Session...' : 'Requesting Session...')
+              : isMentorSelf && learner
+              ? `Schedule Session (₹${calculatedPrice.toLocaleString('en-IN')})`
+              : `Request Session (₹${calculatedPrice.toLocaleString('en-IN')})`}
           </button>
         </div>
       </form>

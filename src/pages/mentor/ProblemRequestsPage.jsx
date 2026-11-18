@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import PortalLayout from '../../components/PortalLayout';
 import Modal from '../../components/Modal';
 import LearnerProfileModal from '../../components/LearnerProfileModal';
+import Pagination from '../../components/Pagination';
 import { api, initials, mentorSavedProblems, mentorProfileSettings } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context';
+import { useRealtimeSync, broadcastDataChange, checkProblemTimeOut } from '../../utils';
 import {
   DocumentIcon,
   SearchIcon,
@@ -30,12 +32,13 @@ function formatPostDateTime(dateVal) {
 export default function ProblemRequestsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [problems, setProblems] = useState([]);
   const [myProposals, setMyProposals] = useState([]);
   const [savedIds, setSavedIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterTab, setFilterTab] = useState('all'); // 'all' | 'new' | 'matching' | 'recommended' | 'saved'
+  const [filterTab, setFilterTab] = useState('open'); // 'open' | 'all' | 'new' | 'matching' | 'recommended' | 'saved'
 
   // Advanced Filter & Sort states
   const [budgetFilter, setBudgetFilter] = useState('all'); // 'all' | 'under_500' | '500_1500' | 'above_1500'
@@ -61,6 +64,14 @@ export default function ProblemRequestsPage() {
   // Mentor profile for matching skills
   const [mentorSkills, setMentorSkills] = useState([]);
 
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterTab, search, budgetFilter, sortBy, selectedTech, proposalStatusFilter, favoritesOnly]);
+
   useEffect(() => {
     const prof = mentorProfileSettings.getProfile(user);
     setMentorSkills(prof.skills || []);
@@ -68,8 +79,20 @@ export default function ProblemRequestsPage() {
     loadData();
   }, [user]);
 
-  const loadData = async () => {
-    setLoading(true);
+  useEffect(() => {
+    const targetProblemId = searchParams.get('problem');
+    if (!targetProblemId || problems.length === 0) return;
+    const match = problems.find((p) => String(p.id) === String(targetProblemId));
+    if (match) {
+      setDetailProblem(match);
+      const next = new URLSearchParams(searchParams);
+      next.delete('problem');
+      setSearchParams(next, { replace: true });
+    }
+  }, [problems, searchParams]);
+
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [probData, propData] = await Promise.all([
         api.getProblems().catch((err) => {
@@ -84,9 +107,15 @@ export default function ProblemRequestsPage() {
     } catch (err) {
       console.error('Failed to load problems:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  useRealtimeSync({
+    onSync: () => loadData(true),
+    entities: ['problems', 'proposals'],
+    intervalMs: 3500,
+  });
 
   const myProposalProblemIds = new Set(myProposals.map((p) => p.problem_id || p.problem));
 
@@ -139,9 +168,16 @@ export default function ProblemRequestsPage() {
     };
   }, [filterMenuOpen]);
 
+  const openCount = problems.filter((p) => (p.status === 'open' || !p.status) && !checkProblemTimeOut(p)).length;
+
   // Filter & sort logic
   const filteredProblems = problems
     .filter((p) => {
+      // For 'open' tab, only show active non-timed-out problems
+      if (filterTab === 'open') {
+        if (checkProblemTimeOut(p)) return false;
+      }
+
       // Search match
       const term = search.toLowerCase();
       const matchSearch =
@@ -160,6 +196,7 @@ export default function ProblemRequestsPage() {
       }
 
       if (filterTab === 'new') {
+        if (checkProblemTimeOut(p)) return false;
         // Created within last 3 days
         const created = new Date(p.created_at || Date.now());
         const diffDays = (Date.now() - created.getTime()) / (1000 * 3600 * 24);
@@ -167,6 +204,7 @@ export default function ProblemRequestsPage() {
       }
 
       if (filterTab === 'matching') {
+        if (checkProblemTimeOut(p)) return false;
         if (mentorSkills.length > 0) {
           const lowerMentorSkills = mentorSkills.map((s) => s.toLowerCase());
           if (!p.skills?.some((s) => lowerMentorSkills.includes(s.toLowerCase()))) return false;
@@ -174,6 +212,7 @@ export default function ProblemRequestsPage() {
       }
 
       if (filterTab === 'recommended') {
+        if (checkProblemTimeOut(p)) return false;
         const lowerMentorSkills = mentorSkills.map((s) => s.toLowerCase());
         const hasSkill = p.skills?.some((s) => lowerMentorSkills.includes(s.toLowerCase()));
         const goodBudget = (p.budget || p.budget_max || 0) >= 800;
@@ -204,6 +243,12 @@ export default function ProblemRequestsPage() {
       return true;
     })
     .sort((a, b) => {
+      // Active non-timed-out problems always come first
+      const timedOutA = checkProblemTimeOut(a) ? 1 : 0;
+      const timedOutB = checkProblemTimeOut(b) ? 1 : 0;
+      if (timedOutA !== timedOutB) {
+        return timedOutA - timedOutB;
+      }
       if (sortBy === 'newest') {
         return new Date(b.created_at || 0) - new Date(a.created_at || 0);
       }
@@ -222,6 +267,14 @@ export default function ProblemRequestsPage() {
       }
       return 0;
     });
+
+  // Pagination calculations
+  const totalPages = Math.max(1, Math.ceil(filteredProblems.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const paginatedProblems = filteredProblems.slice(
+    (validCurrentPage - 1) * pageSize,
+    validCurrentPage * pageSize
+  );
 
   const openProposalModal = (prob) => {
     setProposalProblem(prob);
@@ -245,6 +298,7 @@ export default function ProblemRequestsPage() {
         estimated_duration_minutes: Number(duration),
       });
       toast.success('Proposal sent successfully! The learner will be notified.');
+      broadcastDataChange('proposals');
       setProposalProblem(null);
       loadData();
     } catch (err) {
@@ -273,6 +327,13 @@ export default function ProblemRequestsPage() {
 
       {/* Filter Tabs */}
       <div className="filter-bar" style={{ marginBottom: '16px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        <button
+          type="button"
+          className={`filter-chip ${filterTab === 'open' ? 'active' : ''}`}
+          onClick={() => setFilterTab('open')}
+        >
+          Open ({openCount})
+        </button>
         <button
           type="button"
           className={`filter-chip ${filterTab === 'all' ? 'active' : ''}`}
@@ -619,103 +680,173 @@ export default function ProblemRequestsPage() {
               ? "You haven't added any favorite posts yet. Click the heart icon on any post to add it to your favorites."
               : 'Try selecting a different filter tab or clearing your search keywords.'}
           </p>
-          {filterTab !== 'all' && (
-            <button type="button" className="btn btn-secondary" onClick={() => setFilterTab('all')}>
-              View All Requests
+          {filterTab !== 'open' && (
+            <button type="button" className="btn btn-secondary" onClick={() => setFilterTab('open')}>
+              View Open Requests
             </button>
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {filteredProblems.map((p) => {
-            const isSaved = savedIds.some((sId) => String(sId) === String(p.id));
-            const hasProposal = myProposalProblemIds.has(p.id);
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))', gap: '20px' }}>
+            {paginatedProblems.map((p) => {
+              const isSaved = savedIds.some((sId) => String(sId) === String(p.id));
+              const hasProposal = myProposalProblemIds.has(p.id);
+              const isTimedOut = checkProblemTimeOut(p);
 
             return (
               <div
                 key={p.id}
-                className="card"
+                className={`card ${isTimedOut ? 'card-timed-out' : ''}`}
                 style={{
-                  padding: '18px 20px',
-                  borderRadius: '10px',
-                  border: isSaved ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid var(--border)',
-                  transition: 'transform 0.15s ease, border-color 0.15s ease',
+                  background: 'var(--surface)',
+                  border: isSaved
+                    ? '1px solid rgba(239, 68, 68, 0.45)'
+                    : isTimedOut
+                    ? '1px solid rgba(239, 68, 68, 0.4)'
+                    : '1px solid var(--grid-strong)',
+                  borderRadius: '12px',
+                  padding: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.02)',
+                  transition: 'transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease',
                   position: 'relative',
+                  height: '100%',
                 }}
               >
-                {/* Header Row */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
-                  <div style={{ flex: 1 }}>
+                <div>
+                  {/* Top row: Category badge & Favorite + Budget */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px', gap: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--ink)' }}>{p.title}</span>
-                      {p.category && (
+                      {p.category ? (
                         <span className="badge badge-secondary" style={{ fontSize: '11px' }}>
                           {p.category}
                         </span>
+                      ) : (
+                        <span className="badge badge-secondary" style={{ fontSize: '11px' }}>
+                          Problem Request
+                        </span>
+                      )}
+                      {isTimedOut && (
+                        <span className="stamp-timeout" title="This problem's scheduled preferred time or urgency has expired">
+                          <ClockIcon size={11} /> TIME OUT
+                        </span>
                       )}
                     </div>
-                    <p className="sub" style={{ margin: '8px 0 12px', fontSize: '13.5px', lineHeight: 1.5 }}>
-                      {p.description}
-                    </p>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {(p.budget || p.budget_max) && (
+                        <span className="rate-num" style={{ fontSize: '19px', color: 'var(--brand)' }}>
+                          ₹{p.budget || `${p.budget_min || 500} - ${p.budget_max || 1500}`}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{
+                          padding: '4px 6px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          color: isSaved ? '#EF4444' : 'var(--muted)',
+                          transition: 'transform 0.15s ease, color 0.15s ease',
+                        }}
+                        title={isSaved ? 'Remove from favorites' : 'Add to favorites'}
+                        onClick={(e) => handleToggleSave(e, p.id)}
+                      >
+                        <HeartIcon size={18} fill={isSaved ? '#EF4444' : 'none'} stroke={isSaved ? '#EF4444' : 'currentColor'} />
+                      </button>
+                    </div>
                   </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{
-                        padding: '6px 8px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        color: isSaved ? '#EF4444' : 'var(--muted)',
-                        transition: 'transform 0.15s ease, color 0.15s ease',
-                      }}
-                      title={isSaved ? 'Remove from favorites' : 'Add to favorites'}
-                      onClick={(e) => handleToggleSave(e, p.id)}
-                    >
-                      <HeartIcon size={18} fill={isSaved ? '#EF4444' : 'none'} stroke={isSaved ? '#EF4444' : 'currentColor'} />
-                    </button>
-                    {(p.budget || p.budget_max) && (
-                      <div className="mono" style={{ fontWeight: 700, whiteSpace: 'nowrap', color: 'var(--brand)', fontSize: '15px' }}>
-                        ₹{p.budget || `${p.budget_min || 500} - ${p.budget_max || 1500}`}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Skills Chips */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
-                  {p.skills?.map((s) => (
-                    <span key={s} className="tag" style={{ fontSize: '12px' }}>
-                      {s}
-                    </span>
-                  ))}
-                </div>
-
-                {/* Footer Info & Actions */}
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    borderTop: '1px dashed var(--border)',
-                    paddingTop: '12px',
-                    flexWrap: 'wrap',
-                    gap: '10px',
-                  }}
-                >
-                  <div className="sub" style={{ margin: 0, fontSize: '12px', display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {/* Title */}
+                  <h3 style={{ fontSize: '17px', margin: '0 0 8px 0', lineHeight: 1.3 }}>
                     <span
-                      className="user-profile-trigger"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px' }}
-                      onClick={() => setSelectedLearner({ id: p.learner_id, name: p.learner_name })}
-                      title="Click to view learner profile"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setDetailProblem(p)}
+                      onKeyDown={(e) => e.key === 'Enter' && setDetailProblem(p)}
+                      style={{ color: 'var(--ink)', textDecoration: 'none', cursor: 'pointer' }}
+                      title="Click to view details"
                     >
-                      <div className="avatar-sm" style={{ width: '22px', height: '22px', fontSize: '10px' }}>
-                        {initials(p.learner_name || 'Learner')}
-                      </div>
-                      <strong className="user-profile-name" style={{ color: 'var(--ink)' }}>{p.learner_name || 'Learner'}</strong>
+                      {p.title}
                     </span>
+                  </h3>
+
+                  {/* Learner Info Trigger */}
+                  <div
+                    className="user-profile-trigger"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      color: 'var(--ink-muted)',
+                      marginBottom: '12px',
+                      padding: '2px 6px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedLearner({
+                        id: p.learner_id,
+                        name: p.learner_name || 'Learner',
+                      });
+                    }}
+                    title="Click to view learner profile"
+                  >
+                    <div className="avatar" style={{ width: '24px', height: '24px', fontSize: '10px' }}>
+                      {initials(p.learner_name || 'Learner')}
+                    </div>
+                    <span>
+                      Learner: <b className="user-profile-name">{p.learner_name || 'Learner'}</b>
+                    </span>
+                  </div>
+
+                  {/* Description (clamped to 3 lines) */}
+                  <p
+                    className="sub"
+                    style={{
+                      margin: '0 0 12px 0',
+                      fontSize: '13px',
+                      lineHeight: 1.5,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {p.description}
+                  </p>
+
+                  {/* Skills Chips */}
+                  {p.skills && p.skills.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '14px' }}>
+                      {p.skills.map((s) => (
+                        <span key={s} className="tag" style={{ fontSize: '10.5px' }}>
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Bottom Meta & Actions */}
+                <div style={{ borderTop: '1px solid var(--grid)', paddingTop: '14px', marginTop: 'auto' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: '12px',
+                      color: 'var(--ink-muted)',
+                      marginBottom: '12px',
+                      flexWrap: 'wrap',
+                      gap: '6px',
+                    }}
+                  >
                     <span
                       style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                       title={p.created_at ? new Date(p.created_at).toLocaleString() : undefined}
@@ -723,25 +854,30 @@ export default function ProblemRequestsPage() {
                       <ClockIcon size={12} style={{ opacity: 0.7, flexShrink: 0 }} />
                       <span>{formatPostDateTime(p.created_at)}</span>
                     </span>
-                    {p.preferred_time && <span>Prefers: {p.preferred_time}</span>}
+                    {p.preferred_time && (
+                      <span className="mono" style={{ fontSize: '11px' }}>
+                        Prefers: {p.preferred_time}
+                      </span>
+                    )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  {/* Action buttons */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       className="btn btn-ghost"
-                      style={{ fontSize: '12.5px', padding: '5px 12px' }}
+                      style={{ flex: 1, minWidth: '85px', fontSize: '12px', padding: '6px 8px', justifyContent: 'center' }}
                       onClick={() => setDetailProblem(p)}
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                        <EyeIcon size={13} /> Full Details
+                        <EyeIcon size={13} /> Details
                       </span>
                     </button>
 
                     <Link
-                      to={`/chat?with=${p.learner_id}&name=${encodeURIComponent(p.learner_name || 'Learner')}`}
+                      to={`/chat?with=${p.learner_id}&name=${encodeURIComponent(p.learner_name || 'Learner')}${p.id ? `&problem=${p.id}&problem_title=${encodeURIComponent(p.title || '')}` : ''}`}
                       className="btn btn-ghost"
-                      style={{ fontSize: '12.5px', padding: '5px 12px' }}
+                      style={{ flex: 1, minWidth: '85px', fontSize: '12px', padding: '6px 8px', justifyContent: 'center' }}
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                         <MessageIcon size={13} /> Message
@@ -749,14 +885,32 @@ export default function ProblemRequestsPage() {
                     </Link>
 
                     {hasProposal ? (
-                      <span className="status-badge badge-accepted mono" style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <span
+                        className="status-badge badge-accepted mono"
+                        style={{
+                          flex: 1.2,
+                          minWidth: '110px',
+                          padding: '6px 8px',
+                          fontSize: '11.5px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                        }}
+                      >
                         <CheckIcon size={13} /> Proposal Sent
                       </span>
                     ) : (
                       <button
                         type="button"
                         className="btn btn-primary"
-                        style={{ fontSize: '12.5px', padding: '5px 14px' }}
+                        style={{
+                          flex: 1.2,
+                          minWidth: '110px',
+                          fontSize: '12px',
+                          padding: '6px 10px',
+                          justifyContent: 'center',
+                        }}
                         onClick={() => openProposalModal(p)}
                       >
                         Submit Proposal
@@ -768,7 +922,27 @@ export default function ProblemRequestsPage() {
             );
           })}
         </div>
-      )}
+
+        <Pagination
+          currentPage={validCurrentPage}
+          totalPages={totalPages}
+          onPageChange={(page) => setCurrentPage(page)}
+          totalItems={filteredProblems.length}
+          itemsPerPage={pageSize}
+          itemLabel="problem requests"
+          pageSizeOptions={[6, 9, 15, 30]}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+          }}
+          style={{
+            marginTop: '24px',
+            borderRadius: '12px',
+            border: '1px solid var(--grid-strong)',
+          }}
+        />
+      </>
+    )}
 
       {/* Problem Request Detail Modal */}
       <Modal
@@ -778,9 +952,16 @@ export default function ProblemRequestsPage() {
       >
         {detailProblem && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px', gap: '12px' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px' }}>{detailProblem.title}</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                  <h3 style={{ margin: 0, fontSize: '18px' }}>{detailProblem.title}</h3>
+                  {checkProblemTimeOut(detailProblem) && (
+                    <span className="stamp-timeout stamp-lg" title="This problem's scheduled preferred time or urgency has expired">
+                      <ClockIcon size={12} /> TIME OUT
+                    </span>
+                  )}
+                </div>
                 <div className="sub" style={{ fontSize: '12px', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span>Posted by {detailProblem.learner_name || 'Learner'}</span>
                   <span>•</span>
@@ -790,7 +971,7 @@ export default function ProblemRequestsPage() {
                   </span>
                 </div>
               </div>
-              <span className="badge badge-primary" style={{ fontSize: '14px', fontWeight: 600 }}>
+              <span className="badge badge-primary" style={{ fontSize: '14px', fontWeight: 600, flexShrink: 0 }}>
                 Budget: ₹{detailProblem.budget || `${detailProblem.budget_min || 500} - ${detailProblem.budget_max || 1500}`}
               </span>
             </div>
@@ -918,7 +1099,8 @@ TimeoutError: Resource pool exhausted under concurrent load.`}
                   type="number"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
-                  min="100"
+                  min="1"
+                  step="1"
                   required
                 />
                 <div className="sub" style={{ fontSize: '11px', marginTop: '2px' }}>

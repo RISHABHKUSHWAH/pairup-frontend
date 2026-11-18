@@ -15,6 +15,9 @@ export const problemApi = {
   createProblem: (data) =>
     apiFetch('/api/problems', { method: 'POST', auth: true, body: data }),
 
+  updateProblem: (id, data) =>
+    apiFetch(`/api/problems/${id}`, { method: 'PUT', auth: true, body: data }),
+
   closeProblem: (id) =>
     apiFetch(`/api/problems/${id}/close`, { method: 'POST', auth: true }),
 

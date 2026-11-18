@@ -242,6 +242,25 @@ export default function AdminContractsPage() {
             Awaiting Review
           </span>
         );
+      case 'accepted':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              background: 'rgba(34, 197, 94, 0.12)',
+              color: '#16a34a',
+              border: '1px solid rgba(34, 197, 94, 0.28)',
+            }}
+          >
+            Proposal Accepted
+          </span>
+        );
       case 'proposed':
         return (
           <span

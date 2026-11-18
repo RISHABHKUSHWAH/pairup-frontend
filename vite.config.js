@@ -13,6 +13,16 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          agora: ['agora-rtc-sdk-ng'],
+        },
+      },
+    },
+  },
   server: {
     port: 3000,
     proxy: {

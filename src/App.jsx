@@ -164,6 +164,14 @@ export default function App() {
         }
       />
       <Route
+        path="/contract/:id"
+        element={
+          <ProtectedRoute>
+            <ContractDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/contracts"
         element={
           <ProtectedRoute>

@@ -571,7 +571,7 @@ export default function LearnerExplorePage() {
           <div className="section-label" style={{ color: 'var(--accent)', marginTop: 0 }}>
             Recommended Mentors for You
           </div>
-          <div className="grid" style={{ margin: '12px 0 0', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
+          <div className="grid" style={{ margin: '12px 0 0', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))' }}>
             {recommendedMentors.map((m) => {
               const id = m.user_id || m.id;
               const favorited = isFav(id);
