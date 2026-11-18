@@ -87,9 +87,9 @@ export default function SessionRoomPage() {
   const localScreenAudioTrackRef = useRef(null);
   const remoteUserRef = useRef(null);
 
-  // Active sidebar tab: 'notes' | 'chat' | 'files'
+  // Active sidebar tab: 'notes' | 'chat' | 'files' (closed by default on mobile/tablet so video gets full screen)
   const [activeTab, setActiveTab] = useState('notes');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 960 : true));
 
   const handleToggleSidebarTab = (tab) => {
     if (isSidebarOpen && activeTab === tab) {
@@ -1115,6 +1115,7 @@ export default function SessionRoomPage() {
         >
           {/* Top Bar: PairUp Logo, Session Info, Connection Status, Timer, Actions */}
           <div
+            className="session-room-topbar"
             style={{
               background: '#1E293B',
               borderRadius: '12px',
@@ -1129,16 +1130,17 @@ export default function SessionRoomPage() {
               flexShrink: 0,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '2px' }}>
+            <div className="session-room-topbar-left" style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <div className="session-room-brand" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginRight: '2px', flexShrink: 0 }}>
                 <PairUpLogo size={20} />
-                <span style={{ fontWeight: 800, fontSize: '14.5px', color: '#F8FAFC', letterSpacing: '-0.3px' }}>PairUp</span>
+                <span className="session-room-brand-text" style={{ fontWeight: 800, fontSize: '14.5px', color: '#F8FAFC', letterSpacing: '-0.3px' }}>PairUp</span>
               </div>
 
-              <div style={{ width: '1px', height: '18px', background: '#334155' }} />
+              <div className="session-room-brand-sep" style={{ width: '1px', height: '18px', background: '#334155', flexShrink: 0 }} />
 
               <button
                 type="button"
+                className="session-room-exit-btn"
                 onClick={() => setShowLeaveModal(true)}
                 style={{
                   background: 'transparent',
@@ -1152,27 +1154,29 @@ export default function SessionRoomPage() {
                   gap: '5px',
                   fontSize: '12px',
                   fontWeight: 600,
+                  flexShrink: 0,
                 }}
               >
-                <ArrowLeftIcon size={14} /> Exit
+                <ArrowLeftIcon size={14} /> <span className="session-room-exit-label">Exit</span>
               </button>
 
-              <div>
-                <h2 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>{sessionData.topic || 'Mentorship Session'}</span>
-                  <span style={{ fontSize: '11px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(14, 165, 233, 0.15)', color: '#38BDF8', fontWeight: 700 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <h2 className="session-room-topic" style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{sessionData.topic || 'Mentorship Session'}</span>
+                  <span className="session-room-price-pill" style={{ fontSize: '11px', padding: '1px 6px', borderRadius: '4px', background: 'rgba(14, 165, 233, 0.15)', color: '#38BDF8', fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>
                     {sessionData.duration_minutes || 60}m · {formatCurrency(sessionData.price || 0)}
                   </span>
                 </h2>
-                <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '1px' }}>
-                  With <strong style={{ color: '#E2E8F0' }}>{otherName}</strong> ({isMentor ? 'Learner' : 'Mentor'}) · Room: <code style={{ color: '#38BDF8', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 5px', borderRadius: '4px' }}>{sessionData.channel_name || sessionData.room_name}</code>
+                <div className="session-room-meta" style={{ fontSize: '11px', color: '#94A3B8', marginTop: '1px' }}>
+                  With <strong style={{ color: '#E2E8F0' }}>{otherName}</strong> ({isMentor ? 'Learner' : 'Mentor'})<span className="session-room-meta-room"> · Room: <code style={{ color: '#38BDF8', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 5px', borderRadius: '4px' }}>{sessionData.channel_name || sessionData.room_name}</code></span>
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div className="session-room-topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               {/* Connection Status Pill */}
               <div
+                className="session-room-status-pill"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1184,20 +1188,29 @@ export default function SessionRoomPage() {
                   fontSize: '11.5px',
                   fontWeight: 700,
                   color: connectionStatus === 'connected' ? '#4ADE80' : '#FBBF24',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                <span>
+                <span className="session-room-status-full">
                   {connectionStatus === 'connected'
                     ? '● Agora SD-RTN Connected'
                     : connectionStatus === 'connecting'
                     ? 'Connecting to Agora…'
                     : 'Waiting for Peer…'}
                 </span>
+                <span className="session-room-status-short">
+                  {connectionStatus === 'connected'
+                    ? '● Live'
+                    : connectionStatus === 'connecting'
+                    ? 'Connecting…'
+                    : '● Waiting'}
+                </span>
               </div>
 
               {/* Loopback Test Button */}
               <button
                 type="button"
+                className="session-room-loopback-btn"
                 onClick={handleToggleLoopback}
                 title="Simulate remote participant video using your own camera to test two-way view"
                 style={{
@@ -1216,6 +1229,7 @@ export default function SessionRoomPage() {
 
               {/* Timer Badge */}
               <div
+                className="session-room-timer-pill"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1246,13 +1260,14 @@ export default function SessionRoomPage() {
                   <span style={{ fontSize: '10.5px', color: '#F87171', fontWeight: 700, marginLeft: '2px' }}>Overtime</span>
                 )}
                 {connectionStatus !== 'connected' && !testLoopbackActive && (
-                  <span style={{ fontSize: '10.5px', color: '#94A3B8', fontWeight: 500, marginLeft: '2px' }}>Ready · Paused</span>
+                  <span className="session-room-timer-sub" style={{ fontSize: '10.5px', color: '#94A3B8', fontWeight: 500, marginLeft: '2px' }}>Ready · Paused</span>
                 )}
               </div>
 
               {/* Complete Session Button */}
               <button
                 type="button"
+                className="session-room-complete-btn"
                 onClick={() => setShowCompleteModal(true)}
                 style={{
                   background: '#0D9488',
@@ -1269,16 +1284,19 @@ export default function SessionRoomPage() {
                 }}
               >
                 <CheckCircleIcon size={14} />
-                End & Complete
+                <span className="session-room-complete-full">End &amp; Complete</span>
+                <span className="session-room-complete-short">Complete</span>
               </button>
             </div>
           </div>
 
           {/* Main Layout: Video Stage (Left) & Collaboration Sidebar (Right) */}
           <div
+            className={`session-room-main-grid ${isSidebarOpen ? 'sidebar-open' : ''}`}
             style={{
               flex: 1,
               minHeight: 0,
+              position: 'relative',
               display: 'grid',
               gridTemplateColumns: isSidebarOpen ? 'minmax(0, 1fr) 340px' : 'minmax(0, 1fr)',
               gap: isSidebarOpen ? '10px' : '0',
@@ -1502,6 +1520,7 @@ export default function SessionRoomPage() {
 
                 {/* Local Camera PIP (Picture-In-Picture Container) */}
                 <div
+                  className="session-local-pip"
                   style={{
                     position: 'absolute',
                     bottom: '10px',
@@ -1560,6 +1579,7 @@ export default function SessionRoomPage() {
 
               {/* Bottom Media Controls Bar */}
               <div
+                className="session-controls-bar"
                 style={{
                   background: '#1E293B',
                   borderRadius: '12px',
@@ -1794,6 +1814,7 @@ export default function SessionRoomPage() {
             {/* Right Column: Collaboration Sidebar (Notes, Chat, Shared Files) */}
             {isSidebarOpen && (
               <div
+                className="session-room-sidebar"
                 style={{
                   background: '#1E293B',
                   borderRadius: '12px',
@@ -1817,11 +1838,12 @@ export default function SessionRoomPage() {
                     paddingRight: '6px',
                   }}
                 >
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', flex: 1 }}>
+                  <div className="session-sidebar-tabs" style={{ display: 'flex', flex: 1, minWidth: 0 }}>
                     <button
                       type="button"
                       onClick={() => setActiveTab('notes')}
                       style={{
+                        flex: 1,
                         padding: '9px 6px',
                         background: activeTab === 'notes' ? '#1E293B' : 'transparent',
                         border: 'none',
@@ -1834,6 +1856,7 @@ export default function SessionRoomPage() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: '5px',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       <DocumentIcon size={15} /> Notes
@@ -1843,6 +1866,7 @@ export default function SessionRoomPage() {
                       type="button"
                       onClick={() => setActiveTab('chat')}
                       style={{
+                        flex: 1,
                         padding: '9px 6px',
                         background: activeTab === 'chat' ? '#1E293B' : 'transparent',
                         border: 'none',
@@ -1855,6 +1879,7 @@ export default function SessionRoomPage() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: '5px',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       <MessageIcon size={15} /> Chat
@@ -1877,6 +1902,7 @@ export default function SessionRoomPage() {
                           .catch(() => {});
                       }}
                       style={{
+                        flex: 1,
                         padding: '9px 6px',
                         background: activeTab === 'files' ? '#1E293B' : 'transparent',
                         border: 'none',
@@ -1889,6 +1915,7 @@ export default function SessionRoomPage() {
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: '5px',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       <PaperclipIcon size={15} /> Files
